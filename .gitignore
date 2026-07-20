@@ -1,0 +1,12 @@
+__pycache__/
+*.py[cod]
+.env
+*.egg-info/
+dist/
+build/
+.venv/
+venv/
+*.db
+pgdata/
+.md info files/
+repomix-output.xml
