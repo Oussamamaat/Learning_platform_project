@@ -10,6 +10,7 @@ from typing import Optional
 import psycopg2
 from sentence_transformers import SentenceTransformer
 
+from app.config import get_settings
 from app.services.ingestion import (
     load_embedding_model,
     get_db_connection,
@@ -36,10 +37,7 @@ def search_similar_chunks(
     Returns:
         List of dicts with keys: content, source_name, similarity, metadata
     """
-    db_url = database_url or os.getenv(
-        "DATABASE_URL",
-        "postgresql://assistant:changeme@localhost:5432/iblog_assistant",
-    )
+    db_url = database_url or get_settings().database_url
 
     if embedding_model is None:
         embedding_model = load_embedding_model()
@@ -48,7 +46,7 @@ def search_similar_chunks(
 
     conn = get_db_connection(db_url)
     try:
-        cursor = conn.cursor()
+        cursor = conn.conn.cursor() if hasattr(conn, "conn") else conn.cursor()
 
         search_query = """
             SELECT
@@ -89,6 +87,7 @@ def build_rag_context(
     query: str,
     tenant_id: str,
     top_k: int = 5,
+    similarity_threshold: float = 0.4,
     max_context_length: int = 2000,
     database_url: Optional[str] = None,
     embedding_model: Optional[SentenceTransformer] = None,
@@ -115,6 +114,10 @@ def build_rag_context(
     current_length = 0
 
     for chunk in chunks:
+        # Discard irrelevant chunks below the similarity threshold
+        if chunk["similarity"] < similarity_threshold:
+            continue
+
         content = chunk["content"]
         if current_length + len(content) > max_context_length:
             remaining = max_context_length - current_length

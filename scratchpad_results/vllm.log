@@ -1,0 +1,56 @@
+(APIServer pid=240) INFO 07-27 11:59:12 [api_utils.py:345] 
+(APIServer pid=240) INFO 07-27 11:59:12 [api_utils.py:345]        █     █     █▄   ▄█
+(APIServer pid=240) INFO 07-27 11:59:12 [api_utils.py:345]  ▄▄ ▄█ █     █     █ ▀▄▀ █  version 0.26.0
+(APIServer pid=240) INFO 07-27 11:59:12 [api_utils.py:345]   █▄█▀ █     █     █     █  model   MBZUAI-Paris/Atlas-Chat-9B
+(APIServer pid=240) INFO 07-27 11:59:12 [api_utils.py:345]    ▀▀  ▀▀▀▀▀ ▀▀▀▀▀ ▀     ▀
+(APIServer pid=240) INFO 07-27 11:59:12 [api_utils.py:345] 
+(APIServer pid=240) INFO 07-27 11:59:12 [api_utils.py:273] non-default args: {'model': 'MBZUAI-Paris/Atlas-Chat-9B', 'dtype': 'float16', 'max_model_len': 4096, 'tensor_parallel_size': 2, 'gpu_memory_utilization': 0.9}
+(APIServer pid=240) WARNING 07-27 11:59:12 [envs.py:2096] Unknown vLLM environment variable detected: VLLM_ATTENTION_BACKEND
+(APIServer pid=240) Warning: You are sending unauthenticated requests to the HF Hub. Please set a HF_TOKEN to enable higher rate limits and faster downloads.
+(APIServer pid=240) INFO 07-27 11:59:27 [model.py:623] Resolved architecture: Gemma2ForCausalLM
+(APIServer pid=240) Traceback (most recent call last):
+(APIServer pid=240)   File "<frozen runpy>", line 198, in _run_module_as_main
+(APIServer pid=240)   File "<frozen runpy>", line 88, in _run_code
+(APIServer pid=240)   File "/usr/local/lib/python3.12/dist-packages/vllm/entrypoints/openai/api_server.py", line 799, in <module>
+(APIServer pid=240)     uvloop.run(run_server(args))
+(APIServer pid=240)   File "/usr/local/lib/python3.12/dist-packages/uvloop/__init__.py", line 96, in run
+(APIServer pid=240)     return __asyncio.run(
+(APIServer pid=240)            ^^^^^^^^^^^^^^
+(APIServer pid=240)   File "/usr/lib/python3.12/asyncio/runners.py", line 195, in run
+(APIServer pid=240)     return runner.run(main)
+(APIServer pid=240)            ^^^^^^^^^^^^^^^^
+(APIServer pid=240)   File "/usr/lib/python3.12/asyncio/runners.py", line 118, in run
+(APIServer pid=240)     return self._loop.run_until_complete(task)
+(APIServer pid=240)            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+(APIServer pid=240)   File "uvloop/loop.pyx", line 1518, in uvloop.loop.Loop.run_until_complete
+(APIServer pid=240)   File "/usr/local/lib/python3.12/dist-packages/uvloop/__init__.py", line 48, in wrapper
+(APIServer pid=240)     return await main
+(APIServer pid=240)            ^^^^^^^^^^
+(APIServer pid=240)   File "/usr/local/lib/python3.12/dist-packages/vllm/entrypoints/openai/api_server.py", line 759, in run_server
+(APIServer pid=240)     await run_server_worker(listen_address, sock, args, **uvicorn_kwargs)
+(APIServer pid=240)   File "/usr/local/lib/python3.12/dist-packages/vllm/entrypoints/openai/api_server.py", line 773, in run_server_worker
+(APIServer pid=240)     async with build_async_engine_client(
+(APIServer pid=240)                ^^^^^^^^^^^^^^^^^^^^^^^^^^
+(APIServer pid=240)   File "/usr/lib/python3.12/contextlib.py", line 210, in __aenter__
+(APIServer pid=240)     return await anext(self.gen)
+(APIServer pid=240)            ^^^^^^^^^^^^^^^^^^^^^
+(APIServer pid=240)   File "/usr/local/lib/python3.12/dist-packages/vllm/entrypoints/openai/api_server.py", line 139, in build_async_engine_client
+(APIServer pid=240)     async with build_async_engine_client_from_engine_args(
+(APIServer pid=240)                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+(APIServer pid=240)   File "/usr/lib/python3.12/contextlib.py", line 210, in __aenter__
+(APIServer pid=240)     return await anext(self.gen)
+(APIServer pid=240)            ^^^^^^^^^^^^^^^^^^^^^
+(APIServer pid=240)   File "/usr/local/lib/python3.12/dist-packages/vllm/entrypoints/openai/api_server.py", line 163, in build_async_engine_client_from_engine_args
+(APIServer pid=240)     vllm_config = engine_args.create_engine_config(usage_context=usage_context)
+(APIServer pid=240)                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+(APIServer pid=240)   File "/usr/local/lib/python3.12/dist-packages/vllm/engine/arg_utils.py", line 1880, in create_engine_config
+(APIServer pid=240)     model_config = self.create_model_config()
+(APIServer pid=240)                    ^^^^^^^^^^^^^^^^^^^^^^^^^^
+(APIServer pid=240)   File "/usr/local/lib/python3.12/dist-packages/vllm/engine/arg_utils.py", line 1639, in create_model_config
+(APIServer pid=240)     return ModelConfig(
+(APIServer pid=240)            ^^^^^^^^^^^^
+(APIServer pid=240)   File "/usr/local/lib/python3.12/dist-packages/pydantic/_internal/_dataclasses.py", line 121, in __init__
+(APIServer pid=240)     s.__pydantic_validator__.validate_python(ArgsKwargs(args, kwargs), self_instance=s)
+(APIServer pid=240) pydantic_core._pydantic_core.ValidationError: 1 validation error for ModelConfig
+(APIServer pid=240)   Value error, The model type 'gemma2' does not support float16. Reason: Numerical instability. Please use bfloat16 or float32 instead. [type=value_error, input_value=ArgsKwargs((), {'model': ...nderer_num_workers': 1}), input_type=ArgsKwargs]
+(APIServer pid=240)     For further information visit https://errors.pydantic.dev/2.12/v/value_error

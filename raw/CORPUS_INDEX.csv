@@ -1,0 +1,22 @@
+path;title;rights_status;domain;scope
+raw\shared\industrial\text\1.1_code_du_travail_health_safety.md;Code du Travail — Dispositions relatives à la santé et sécurité au travail;Public (Bulletin Officiel — à vérifier);industrial;shared
+raw\shared\industrial\text\1.2_cnss_prevention_guides.md;CNSS — Guides de prévention des accidents du travail;Public (CNSS);industrial;shared
+raw\shared\industrial\text\1.3_imanor_nm_standards_explainer.md;IMANOR (NM) — Normes marocaines — Guide explicatif;Paid (IMANOR) — explication originale uniquement;industrial;shared
+raw\shared\industrial\text\1.4_iso_45001_explainer.md;ISO 45001 — Structure et exigences — Contenu pédagogique original;Original (in-house);industrial;shared
+raw\shared\industrial\text\1.5_lockout_tagout_procedures.md;Lockout/Tagout (LOTO) — Procédures de consignation — Contenu formation;Original (in-house);industrial;shared
+raw\shared\industrial\text\1.6_ppe_requirements.md;Équipements de Protection Individuelle (EPI) — Exigences et bonnes pratiques;Original (in-house);industrial;shared
+raw\shared\industrial\text\1.7_machine_guarding_basics.md;Protection des machines — Principes fondamentaux;Original (in-house);industrial;shared
+raw\shared\industrial\text\1.8_hazardous_materials_handling.md;Manutention des matières dangereuses — Procédures et consignes;Original (in-house);industrial;shared
+raw\shared\industrial\text\1.9_emergency_evacuation_procedures.md;Procédures d'évacuation d'urgence — Plan et consignes;Original (in-house);industrial;shared
+raw\tenant_placeholder\industrial\text\1.10_client_sop_synthetic.md;[Synthétique] Procédure opératoire normalisée — Client industriel fictif;Synthétique (placeholder — ne pas utiliser en production);industrial;tenant_placeholder
+raw\shared\securite_physique\text\2.1_loi_27_06_regulation.md;Loi n° 27.06 — Réglementation des activités de gardiennage et de transport de fonds;Public (Bulletin Officiel);securite_physique;shared
+raw\shared\securite_physique\text\2.2_loi_032_26_reform.md;Projet de loi n° 032.26 — Réforme du Code du Travail (sécurité privée);Public (Projet de loi — statut à vérifier);securite_physique;shared
+raw\shared\securite_physique\text\2.3_guarding_access_control_protocols.md;Protocoles de gardiennage et de contrôle d'accès — Contenu formation;Original (in-house);securite_physique;shared
+raw\shared\securite_physique\text\2.4_incident_reporting_procedures.md;Procédures de signalement et de rapport d'incidents;Original (in-house);securite_physique;shared
+raw\tenant_placeholder\securite_physique\text\2.5_client_security_sop.md;[Synthétique] Procédure de sécurité — Site client fictif;Synthétique (placeholder — ne pas utiliser en production);securite_physique;tenant_placeholder
+raw\shared\blockchain\text\3.1_bill_42_25_draft.md;Projet de loi n° 42.25 — Actifs numériques et blockchain (Maroc);Public (projet de loi — statut à vérifier mensuellement);blockchain;shared
+raw\shared\blockchain\text\3.2_fatf_aml_cft_guidance.md;GAFI (FATF) — Recommandations AML/CFT pour les actifs virtuels;Public (FATF);blockchain;shared
+raw\shared\blockchain\text\3.3_bam_ammc_statements.md;Bank Al-Maghrib / AMMC — Communications officielles sur les crypto-actifs;Public (BAM / AMMC);blockchain;shared
+raw\shared\blockchain\text\3.4_blockchain_smart_contract_fundamentals.md;Blockchain et Smart Contracts — Notions fondamentales (contenu pédagogique original);Original (in-house);blockchain;shared
+raw\shared\blockchain\text\3.5_consensus_mechanisms_tokens.md;Mécanismes de consensus et tokens — Vue d'ensemble (contenu pédagogique original);Original (in-house);blockchain;shared
+raw\shared\blockchain\text\3.6_iso_tc_307_standards_explainer.md;ISO/TC 307 — Normes blockchain et registres distribués — Guide explicatif;Paid (ISO) — explication originale uniquement;blockchain;shared

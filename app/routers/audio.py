@@ -1,5 +1,5 @@
 from fastapi import APIRouter, HTTPException, UploadFile, File
-from app.models.schemas import AudioResponse
+from app.models.schemas import AudioResponse, Language
 
 router = APIRouter(prefix="/api/v1/audio", tags=["audio"])
 
@@ -9,7 +9,7 @@ async def process_audio(
     audio: UploadFile = File(...),
     session_id: str = None,
     tenant_id: str = None,
-    language: str = "ar-MA",
+    language: Language = Language.DARIJA,
 ):
     """
     Audio processing endpoint.

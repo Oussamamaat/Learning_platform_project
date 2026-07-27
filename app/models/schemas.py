@@ -9,10 +9,17 @@ class Language(str, Enum):
     DARIJA = "ar-MA"
 
 
+class Domain(str, Enum):
+    INDUSTRIAL = "industrial"
+    SECURITE = "securite"
+    BLOCKCHAIN = "blockchain"
+
+
 class ChatRequest(BaseModel):
     message: str = Field(..., min_length=1, max_length=4000, description="User message")
     session_id: Optional[str] = Field(None, description="Conversation session ID")
     tenant_id: Optional[str] = Field(None, description="Company/tenant identifier")
+    domain: Domain = Field(Domain.INDUSTRIAL, description="Domain for tutoring context")
     language: Language = Field(Language.FRENCH, description="Response language")
 
 
