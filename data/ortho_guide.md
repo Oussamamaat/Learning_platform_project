@@ -1,5 +1,10 @@
 # Standardized Arabizi & Industrial Orthography Guide
 
+Framing: **tenant #1's** language artifact (tenant #1 = Moroccan
+safety/security, Darija Arabic-script + French), used by the IBLOG Adaptive
+Learning Tutor's data-generation pipeline. All orthography rules below are
+preserved verbatim.
+
 This document establishes the canonical spelling, numeral mappings, capitalization, and technical terminology rules for all synthetic training row generation.
 
 ## 1. Arabizi Numeral Mapping Table

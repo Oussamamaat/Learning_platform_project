@@ -1,0 +1,711 @@
+===== 1 | domain=blockchain =====
+SOURCE CONTEXT:
+# ISO/TC 307 — Normes Blockchain et Registres Distribués
+
+**Source:** ISO (International Organization for Standardization) — Comité technique TC 307
+**Statut:** Normes payantes — contenu original explicatif (ne reproduit pas le texte normatif)
+
+---
+
+## Qu'est-ce que l'ISO/TC 307 ?
+
+Le comité technique ISO/TC 307 « Blockchain and distributed ledger technologies » est responsable de l'élaboration de normes internationales pour les technologies blockchain et les registres distribués (DLT).
+
+## Normes publiées (sélection)
+
+| Référence | Titre | Statut |
+|-----------|-------|--------|
+| ISO 22739:2024 | Blockchain and distributed ledger technologies — Vocabulary | Publiée |
+| ISO/TR 23244:2020 | Privacy and personally identifiable information protection considerations | Publiée |
+| ISO/TR 23455:2019 | Smart contracts — Overview of existing smart contract platforms | Publiée |
+| ISO 23257:2022 | Reference architecture | Publiée |
+| ISO/TS 23258:2021 | Taxonomy and ontology | Publiée |
+| ISO/TS 23635:2022 | Guidance on governance | Publiée |
+
+## Normes en développement
+
+| Référence | Titre | État d'avancement |
+|-----------|-------|-------------------|
+| ISO/DIS 22747 | Interoperability |
+
+[user] Je voudrais un quiz sur les normes ISO concernant la blockchain et les registres distribués, notamment en lien avec la réglementation des actifs numériques.
+
+[assistant] {
+  "questions": [
+    {
+      "question": "Quel est l'acronyme de l'organisme responsable de l'élaboration de normes internationales pour les technologies blockchain ?",
+      "options": [
+        "ISO/TC 307",
+        "FATF",
+        "GAFI",
+        "ERC"
+      ],
+      "answer": 0,
+      "explanation": "Le comité technique ISO/TC 307 « Blockchain and distributed ledger technologies » est responsable de l'élaboration de normes internationales pour les technologies blockchain et les registres distribués (DLT)."
+    },
+    {
+      "question": "Selon la norme ISO 23257, quelle architecture est proposée comme référence pour les technologies blockchain ?",
+      "options": [
+        "Architecture de sécurité",
+        "Architecture modulaire",
+        "Reference architecture",
+        "Architecture décentralisée"
+      ],
+      "answer": 2,
+      "explanation": "La norme ISO 23257:2022 propose une  « Reference architecture »."
+    },
+    {
+      "question": "Quelle est la principale finalité de l'élaboration des normes en matière de blockchain et de registres distribués ?",
+      "options": [
+        "Faciliter le développement de jeux vidéo décentralisés",
+        "Promouvoir l'interopérabilité entre différentes plateformes blockchain",
+        "Réglementer la création de crypto-monnaies virtuelles",
+        "Standardiser les processus de minage des blocs"
+      ],
+      "answer": 1,
+      "explanation": "La norme ISO/DIS 22747 vise à  améliorer l'interopérabilité entre différentes plateformes blockchain."
+    }
+  ]
+}
+
+
+===== 2 | domain=industrial =====
+SOURCE CONTEXT:
+# Code du Travail — Santé et Sécurité au Travail (Maroc)
+
+**Source:** Bulletin Officiel — Loi n° 65-99 relative au Code du Travail (promulguée par Dahir n° 1-03-194 du 11 septembre 2003)
+**Statut:** Public, à vérifier sur http://www.sgg.gov.ma/
+
+---
+
+## Obligations générales de l'employeur (Livre III, Titre I)
+
+L'employeur est tenu de prendre toutes les mesures nécessaires pour garantir la sécurité et protéger la santé des travailleurs. Ces mesures incluent :
+- La prévention des risques professionnels
+- L'information et la formation des travailleurs
+- La mise en place d'une organisation et de moyens adaptés
+
+## Obligations du travailleur (Art. 283)
+
+Chaque travailleur doit prendre soin de sa sécurité et de sa santé ainsi que de celles des autres personnes concernées par ses actes ou omissions au travail, conformément à sa formation et aux instructions de son employeur.
+
+## Services de médecine du travail (Art. 313-326)
+
+Tout établissement employant des salariés doit organiser un service de médecine du travail. L'effectif minimum est d'un médecin du travail à temps plein pour 2 000 salariés dans les entreprises industrielles.
+
+## Comité de sécurité et d'hygiène (Art. 327-334)
+
+Les é
+
+[user] Pourriez-vous me créer un petit quiz sur la législation marocaine en matière de sécurité au travail, en particulier les obligations de l'employeur ?
+
+[assistant] {
+  "questions": [
+    {
+      "question": "Selon la Loi N° 65-99, quelles sont les mesures que l'employeur doit prendre pour garantir la sécurité et protéger la santé des travailleurs ?",
+      "options": [
+        "Organiser des équipes de secours en cas d'accident.",
+        "Fournir un équipement de protection individuelle (EPI) à chaque travailleur.",
+        "Mettre en place une organisation et des moyens adaptés, notamment la prévention des risques professionnels.",
+        "Offrir aux travailleurs une assurance maladie complémentaire."
+      ],
+      "answer": 2,
+      "explanation": "La Loi N° 65-99 stipule que l'employeur doit prendre toutes les mesures nécessaires pour garantir la sécurité et protéger la santé des travailleurs, notamment en mettant en place une organisation et des moyens adaptés."
+    },
+    {
+      "question": "Quel est le rôle du service de médecine du travail dans un établissement employant des salariés ?",
+      "options": [
+        "Organiser des formations sur les risques professionnels.",
+        "S'assurer que les travailleurs respectent les règles d'hygiène et de sécurité.",
+        "Protéger les intérêts financiers de l'entreprise en cas d'accident du travail.",
+        "Organiser un suivi médical des travailleurs pour prévenir et gérer les risques sanitaires."
+      ],
+      "answer": 3,
+      "explanation": "Tout établissement employant des salariés doit organiser un service de médecine du travail : « Organiser un suivi médical des travailleurs pour prévenir et gérer les risques sanitaires »."
+    },
+    {
+      "question": "En plus de la prévention des risques professionnels, quelles sont les autres obligations de l'employeur selon la Loi N° 65-99 ?",
+      "options": [
+        "Veiller à la bonne condition physique du lieu de travail.",
+        "S'assurer que chaque travailleur dispose d'un ordinateur portable.",
+        "Promouvoir une culture de sécurité au sein de l'entreprise.",
+        "Informer et former les travailleurs sur les risques professionnels et les mesures de sécurité."
+      ],
+      "answer": 3,
+      "explanation": "La Loi N° 65-99 stipule que l'employeur doit prendre toutes les mesures nécessaires pour garantir la sécurité et protéger la santé des travailleurs : « L’information et la formation des travailleurs »."
+    }
+  ]
+}
+
+
+===== 3 | domain=industrial =====
+SOURCE CONTEXT:
+# Équipements de Protection Individuelle (EPI)
+
+**Source:** Rédaction originale in-house
+**Statut:** Contenu original
+
+---
+
+## Principes généraux
+
+Les EPI sont le dernier niveau de protection dans la hiérarchie des mesures de prévention. Ils n'éliminent pas le danger mais protègent le travailleur contre les risques résiduels.
+
+## Classification des EPI
+
+### Protection de la tête
+- **Casque de sécurité (NM EN 397)** — Chantiers, zones de manutention, hauteur
+- Vérifier la date de péremption (généralement 5 ans)
+- Remplacer après un choc violent même sans dommage visible
+
+### Protection des yeux et du visage
+- **Lunettes de sécurité** — Projections, poussières, UV
+- **Écran facial** — Projections chimiques, meulage, plasma
+- **Masque de soudage** — Arc électrique, rayonnement UV/IR
+
+### Protection auditive
+- **Bouchons d'oreilles** — Jusqu'à 30 dB d'atténuation
+- **Casque antibruit** — Jusqu'à 35 dB d'atténuation
+- Obligatoire au-delà de 85 dB(A) sur 8h
+
+### Protection respiratoire
+- **Demi-masque FFP1/FFP2/FFP3** — Poussières, aérosols
+- **Masque complet avec cartouche** — Gaz, vapeurs chimiques
+- Nécessite un test d'ajustement et une formation
+
+### Protection des mains
+- **NM EN 38
+
+[user] Pourriez-vous me proposer un petit quiz sur les équipements de protection individuelle (EPI) ?
+
+[assistant] {
+  "questions": [
+    {
+      "question": "Quel type d'EPI est utilisé pour protéger la tête contre les chutes d'objets ou les chocs dans des zones à risque ?",
+      "options": [
+        "Un masque de soudage",
+        "Des bouchons d'oreilles",
+        "Un casque de sécurité (NM EN 397)",
+        "Des lunettes de sécurité"
+      ],
+      "answer": 2,
+      "explanation": "Un casque de sécurité (NM EN 397) est utilisé pour protéger la tête contre les chutes d'objets ou les chocs dans des zones à risque."
+    },
+    {
+      "question": "Quelle information est essentielle à vérifier avant d'utiliser un casque de sécurité ?",
+      "options": [
+        "La date de fabrication",
+        "Le type de danger qu'il protège contre",
+        "La taille du casque",
+        "La date de péremption (généralement 5 ans)"
+      ],
+      "answer": 3,
+      "explanation": "Il est essentiel de vérifier la date de péremption (généralement 5 ans) avant d'utiliser un casque de sécurité."
+    },
+    {
+      "question": "Si vous travaillez dans une zone où le bruit dépasse 85 dB(A) sur 8h, quel type d'EPI auditif est obligatoire ?",
+      "options": [
+        "Des bouchons d'oreilles",
+        "Un casque antibruit",
+        "Un masque de soudage",
+        "Une protection auditive passive"
+      ],
+      "answer": 1,
+      "explanation": "Un casque antibruit est obligatoire au-delà de 85 dB(A) sur 8h."
+    }
+  ]
+}
+
+
+===== 4 | domain=industrial =====
+SOURCE CONTEXT:
+# Normes Marocaines (NM) — IMANOR — Guide Explicatif
+
+**Source:** IMANOR (Institut Marocain de Normalisation)
+**Statut:** Normes payantes — contenu original explicatif (ne reproduit pas le texte normatif)
+
+---
+
+## Qu'est-ce qu'une norme NM ?
+
+Les normes marocaines (NM) sont des documents de référence établis par IMANOR qui définissent des spécifications techniques, des méthodes d'essai, des terminologies ou des exigences de qualité applicables aux produits, services et processus au Maroc.
+
+## Normes NM pertinentes pour la sécurité industrielle
+
+| Référence | Titre | Domaine |
+|-----------|-------|---------|
+| NM 03.1.001 | Systèmes de management de la santé et de la sécurité au travail — Exigences | SST |
+| NM EN 166 | Protection individuelle de l'œil — Spécifications | EPI |
+| NM EN 388 | Gants de protection contre les risques mécaniques | EPI |
+| NM EN 397 | Casques de protection | EPI |
+| NM EN 20345 | Chaussures de sécurité | EPI |
+
+## Comment utiliser ces normes dans la formation
+
+Les normes sont citées à titre de référence pour indiquer aux apprenants :
+1. Les spécifications techniques que les équipements doivent respecter
+2. Les critères de conformité pour les inspections
+3.
+
+[user] Pourriez-vous me proposer un quiz sur les normes marocaines et la sécurité au travail ?
+
+[assistant] {
+  "questions": [
+    {
+      "question": "Quel type d'équipement de protection individuelle (EPI) est spécifié par la norme EN 397 ?",
+      "options": [
+        "Des gants de protection",
+        "Un casque de protection",
+        "Des chaussures de sécurité",
+        "Des lunettes de protection"
+      ],
+      "answer": 1,
+      "explanation": "La norme EN 397 définit les spécifications pour les casques de protection."
+    },
+    {
+      "question": "Laquelle des normes suivantes est pertinente pour la mise en place d'un système de management de la santé et de la sécurité au travail ?",
+      "options": [
+        "NM EN 388",
+        "NM EN 20345",
+        "NM 03.1.001",
+        "NM EN 166"
+      ],
+      "answer": 2,
+      "explanation": "La norme NM 03.1.001 établit les exigences pour un système de management de la santé et de la sécurité au travail."
+    },
+    {
+      "question": "En plus des spécifications techniques, quelles informations peuvent être tirées des normes marocaines (NM) ?",
+      "options": [
+        "Des recommandations sur l'utilisation des machines",
+        "Les procédures d'urgence en cas de sinistre",
+        "Des critères de conformité pour les inspections",
+        "Des exemples de programmes de formation"
+      ],
+      "answer": 2,
+      "explanation": "Les normes NM peuvent indiquer les critères de conformité pour les inspections."
+    }
+  ]
+}
+
+
+===== 5 | domain=industrial =====
+SOURCE CONTEXT:
+# Manutention des Matières Dangereuses
+
+**Source:** Rédaction originale in-house
+**Statut:** Contenu original
+
+---
+
+## Classification des matières dangereuses (ONU)
+
+| Classe | Type | Exemples |
+|--------|------|----------|
+| 1 | Matières explosibles | Dynamite, munitions |
+| 2 | Gaz | Propane, oxygène, acétylène |
+| 3 | Liquides inflammables | Essence, solvants, alcools |
+| 4 | Solides inflammables | Soufre, phosphore |
+| 5 | Matières comburantes | Peroxydes, nitrates |
+| 6 | Matières toxiques | Pesticides, cyanures |
+| 7 | Matières radioactives | Sources scellées |
+| 8 | Matières corrosives | Acides, bases fortes |
+| 9 | Matières dangereuses diverses | Amiante, piles au lithium |
+
+## Étagement et signalisation ADR
+
+- Pictogrammes de danger (NF EN ISO 7010)
+- Plaque de danger orange sur les véhicules
+- Fiche de sécurité (FDS) obligatoire pour chaque produit
+- Document de transport ADR
+
+## Stockage sécurisé
+
+### Règles de compatibilité
+- Ne pas stocker ensemble des matières incompatibles
+- Exemple : acides ≠ bases, oxydants ≠ inflammables
+- Distance de sécurité entre produits incompatibles : minimum 2 mètres
+
+### Rétention
+- Bac de rétention pour tout liquide dangereux
+- Capacité m
+
+[user] Pourriez-vous me proposer un petit quiz sur la classification des matières dangereuses selon le système ONU ?
+
+[assistant] {
+  "questions": [
+    {
+      "question": "Quelle classe d'ONU correspond aux dynamites et munitions ?",
+      "options": [
+        "Classe 2 : Gaz",
+        "Classe 3 : Liquides inflammables",
+        "Classe 1 : Matières explosibles",
+        "Classe 6 : Matières toxiques"
+      ],
+      "answer": 2,
+      "explanation": "Les dynamites et munitions sont classés dans la Classe 1 : Matières explosibles ."
+    },
+    {
+      "question": "Quelle information est OBLIGATOIRE sur chaque produit dangereux ?",
+      "options": [
+        "Une étiquette à base de pictogrammes ISO 7010",
+        "Un numéro d'identification unique (UN)",
+        "Une fiche de sécurité (FDS)",
+        "Un document de transport ADR"
+      ],
+      "answer": 2,
+      "explanation": "Il est obligatoire d'avoir une Fiche de sécurité (FDS) pour chaque produit ."
+    },
+    {
+      "question": "Lors du stockage de matières dangereuses, quelle règle doit être respectée concernant les produits incompatibles ?",
+      "options": [
+        "Ils doivent être stockés ensemble dans la même zone.",
+        "Une distance de sécurité minimale de 2 mètres doit les séparer.",
+        "Il est interdit de stocker des produits incompatibles en même temps.",
+        "La compatibilité des produits dépend uniquement de leur classe ONU."
+      ],
+      "answer": 1,
+      "explanation": "Une distance de sécurité minimale de 2 mètres doit les séparer entre produits incompatibles ."
+    }
+  ]
+}
+
+
+===== 6 | domain=securite_physique =====
+SOURCE CONTEXT:
+# Loi n° 27.06 — Activités de Gardiennage et de Transport de Fonds
+
+**Source:** Bulletin Officiel
+**Statut:** Public — à vérifier sur http://www.sgg.gov.ma/
+**Note:** Cette loi encadre strictement les activités de sécurité privée au Maroc.
+
+---
+
+## Champ d'application (Art. 1-3)
+
+La loi n° 27.06 régit les activités suivantes :
+- La surveillance et le gardiennage de biens meubles et immeubles
+- Le transport et la surveillance de fonds, bijoux et valeurs
+- La protection des personnes
+- L'installation et la maintenance de systèmes de sécurité
+
+## Conditions d'exercice (Art. 4-12)
+
+Toute entreprise exerçant ces activités doit :
+- Obtenir un agrément délivré par l'autorité gouvernementale chargée de la sécurité
+- Justifier d'une capacité technique et financière suffisante
+- Employer des agents de sécurité agréés individuellement
+- Souscrire une assurance responsabilité civile professionnelle
+
+## Obligations des agents de sécurité (Art. 13-20)
+
+- Être de nationalité marocaine
+- Être âgé d'au moins 21 ans
+- N'avoir aucune condamnation pénale incompatible avec la profession
+- Suivre une formation professionnelle agréée
+- Porter un uniforme réglementaire (pas de tenue similaire aux forces p
+
+[user] Peux-tu me proposer un petit quiz sur la Loi n° 27.06 concernant les activités de sécurité privée au Maroc ?
+
+[assistant] {
+  "questions": [
+    {
+      "question": "Quel type d'activité est réglementé par la Loi N° 27.06 ?",
+      "options": [
+        "La vente de produits alimentaires",
+        "Le transport et la surveillance de fonds",
+        "L'organisation d'événements sportifs",
+        "La fabrication de meubles"
+      ],
+      "answer": 1,
+      "explanation": "La Loi N° 27.06 régit le transport et la surveillance de fonds, bijoux et valeurs ."
+    },
+    {
+      "question": "Selon la Loi N° 27.06, quelles sont les conditions requises pour exercer une activité de sécurité privée ?",
+      "options": [
+        "Avoir au moins 18 ans",
+        "Être titulaire d'un diplôme en droit",
+        "Obtenir un agrément et justifier d'une capacité financière suffisante",
+        "Résider dans la région où l'activité est exercée"
+      ],
+      "answer": 2,
+      "explanation": "La Loi N° 27.06 stipule que toute entreprise exerçant ces activités doit obtenir un agrément et justifier d'une capacité technique et financière suffisante ."
+    },
+    {
+      "question": "Un agent de sécurité souhaitant exercer au Maroc doit-il suivre une formation spécifique ?",
+      "options": [
+        "Non, une formation n'est pas obligatoire.",
+        "Oui, il doit suivre une formation agréée par l'autorité gouvernementale.",
+        "Oui, mais seulement si l'agent travaille en tant que garde du corps.",
+        "Oui, et la formation doit être dispensée par une université reconnue."
+      ],
+      "answer": 1,
+      "explanation": "La Loi N° 27.06 exige que les agents de sécurité suivent une formation professionnelle agréée ."
+    }
+  ]
+}
+
+
+===== 7 | domain=industrial =====
+SOURCE CONTEXT:
+# Normes Marocaines (NM) — IMANOR — Guide Explicatif
+
+**Source:** IMANOR (Institut Marocain de Normalisation)
+**Statut:** Normes payantes — contenu original explicatif (ne reproduit pas le texte normatif)
+
+---
+
+## Qu'est-ce qu'une norme NM ?
+
+Les normes marocaines (NM) sont des documents de référence établis par IMANOR qui définissent des spécifications techniques, des méthodes d'essai, des terminologies ou des exigences de qualité applicables aux produits, services et processus au Maroc.
+
+## Normes NM pertinentes pour la sécurité industrielle
+
+| Référence | Titre | Domaine |
+|-----------|-------|---------|
+| NM 03.1.001 | Systèmes de management de la santé et de la sécurité au travail — Exigences | SST |
+| NM EN 166 | Protection individuelle de l'œil — Spécifications | EPI |
+| NM EN 388 | Gants de protection contre les risques mécaniques | EPI |
+| NM EN 397 | Casques de protection | EPI |
+| NM EN 20345 | Chaussures de sécurité | EPI |
+
+## Comment utiliser ces normes dans la formation
+
+Les normes sont citées à titre de référence pour indiquer aux apprenants :
+1. Les spécifications techniques que les équipements doivent respecter
+2. Les critères de conformité pour les inspections
+3.
+
+[user] Peux-tu me proposer un petit quiz sur les normes marocaines en matière de sécurité au travail, surtout celles qui concernent le port d'équipements de protection individuelle ?
+
+[assistant] {
+  "questions": [
+    {
+      "question": "Selon la norme NM 03.1.001, quel est l'objectif principal des systèmes de management de la santé et de la sécurité au travail ?",
+      "options": [
+        "Définir les spécifications techniques des équipements de protection individuelle (EPI).",
+        "Établir des méthodes d’essai pour les produits et processus industriels.",
+        "Fixer des exigences de qualité applicables aux produits, services et processus.",
+        "Minimiser le risque d'accidents et promouvoir la santé au travail."
+      ],
+      "answer": 3,
+      "explanation": "La norme NM 03.1.001 vise à minimiser le risque d'accidents et promouvoir la santé au travail."
+    },
+    {
+      "question": "Quelle norme définit les exigences pour les chaussures de sécurité ?",
+      "options": [
+        "NM EN 20345",
+        "NM EN 388",
+        "NM EN 166",
+        "NM EN 397"
+      ],
+      "answer": 0,
+      "explanation": "Les chaussures de sécurité doivent respecter les exigences définies par la norme : « NM EN 20345 »."
+    },
+    {
+      "question": "Lors d'une formation sur la sécurité industrielle, comment pouvez-vous expliquer aux apprenants l'importance des normes comme référence pour le port d'équipements de protection individuelle (EPI) ?",
+      "options": [
+        "Les normes définissent les couleurs et les formes des EPI pour une meilleure visibilité.",
+        "Les normes indiquent aux travailleurs la durée maximale d'utilisation des EPI avant leur remplacement.",
+        "Les normes précisent les conditions de stockage et d'entretien des EPI pour assurer leur efficacité.",
+        "Les normes spécifient les caractéristiques techniques que les équipements doivent respecter pour protéger efficacement les travailleurs."
+      ],
+      "answer": 3,
+      "explanation": "Les normes comme  « EN 166 » précisent les caractéristiques techniques que les équipements doivent respecter pour protéger efficacement les travailleurs."
+    }
+  ]
+}
+
+
+===== 8 | domain=industrial =====
+SOURCE CONTEXT:
+# ISO 45001:2018 — Systèmes de Management de la Santé et de la Sécurité au Travail
+
+**Source:** Rédaction originale in-house
+**Statut:** Contenu original — explication pédagogique de la norme (aucun texte normatif reproduit)
+
+---
+
+## Qu'est-ce que l'ISO 45001 ?
+
+L'ISO 45001 est la norme internationale pour les systèmes de management de la santé et de la sécurité au travail (SST). Elle fournit un cadre permettant aux organisations de gérer les risques SST et d'améliorer leurs performances en matière de sécurité.
+
+## Structure HLS (High-Level Structure)
+
+La norme suit la structure commune à toutes les normes de systèmes de management ISO :
+
+1. **Domaine d'application** — Périmètre du système de management
+2. **Références normatives** — Documents de référence
+3. **Termes et définitions** — Vocabulaire spécialisé
+4. **Contexte de l'organisme** — Enjeux internes et externes
+5. **Leadership et participation des travailleurs** — Engagement de la direction
+6. **Planification** — Identification des risques et opportunités
+7. **Support** — Ressources, compétences, communication
+8. **Réalisation des activités opérationnelles** — Maîtrise des processus
+9. **Évaluation des performances** — Surv
+
+[user] Je voudrais un petit quiz sur la norme ISO 45001 et son application en matière de sécurité au travail, s'il vous plaît.
+
+[assistant] {
+  "questions": [
+    {
+      "question": "Selon la structure HLS (High-Level Structure) de l'ISO 45001, quel élément vient avant le 'Planification' ?",
+      "options": [
+        "Réalisation des activités opérationnelles",
+        "Support",
+        "Leadership et participation des travailleurs",
+        "Contexte de l'organisme"
+      ],
+      "answer": 2,
+      "explanation": "La structure HLS de l'ISO 45001 stipule que 'Leadership et participation des travailleurs' vient avant le 'Planification'."
+    },
+    {
+      "question": "Qu'est-ce que la norme ISO 45001 vise à accomplir ?",
+      "options": [
+        "Améliorer les performances en matière de sécurité",
+        "Définir la structure des bâtiments industriels",
+        "Établir des procédures d'urgence pour les accidents du travail",
+        "Fournir une formation complète sur le matériel industriel"
+      ],
+      "answer": 0,
+      "explanation": "ISO 45001 vise à 'fournir un cadre permettant aux organisations de gérer les risques SST et d'améliorer leurs performances en matière de sécurité'."
+    },
+    {
+      "question": "Si une entreprise souhaite s'aligner sur l'ISO 45001, quelle étape primordiale doit-elle entreprendre ?",
+      "options": [
+        "Identifier les risques SST et opportunités",
+        "Mettre en place un système de communication interne efficace",
+        "Former les travailleurs à l'utilisation des EPI",
+        "Définir la zone d'intervention pour chaque équipe"
+      ],
+      "answer": 0,
+      "explanation": "La norme ISO 45001 exige une 'Identification des risques et opportunités', ce qui est une étape cruciale de la planification."
+    }
+  ]
+}
+
+
+===== 9 | domain=industrial =====
+SOURCE CONTEXT:
+# ISO 45001:2018 — Systèmes de Management de la Santé et de la Sécurité au Travail
+
+**Source:** Rédaction originale in-house
+**Statut:** Contenu original — explication pédagogique de la norme (aucun texte normatif reproduit)
+
+---
+
+## Qu'est-ce que l'ISO 45001 ?
+
+L'ISO 45001 est la norme internationale pour les systèmes de management de la santé et de la sécurité au travail (SST). Elle fournit un cadre permettant aux organisations de gérer les risques SST et d'améliorer leurs performances en matière de sécurité.
+
+## Structure HLS (High-Level Structure)
+
+La norme suit la structure commune à toutes les normes de systèmes de management ISO :
+
+1. **Domaine d'application** — Périmètre du système de management
+2. **Références normatives** — Documents de référence
+3. **Termes et définitions** — Vocabulaire spécialisé
+4. **Contexte de l'organisme** — Enjeux internes et externes
+5. **Leadership et participation des travailleurs** — Engagement de la direction
+6. **Planification** — Identification des risques et opportunités
+7. **Support** — Ressources, compétences, communication
+8. **Réalisation des activités opérationnelles** — Maîtrise des processus
+9. **Évaluation des performances** — Surv
+
+[user] Pourriez-vous m'élaborer un petit quiz sur la norme ISO 45001 ?
+
+[assistant] {
+  "questions": [
+    {
+      "question": "Quel est l'objectif principal de la norme ISO 45001 ?",
+      "options": [
+        "De définir des normes de sécurité spécifiques aux machines industrielles.",
+        "D'assurer le respect des lois du travail marocaines en matière de santé et sécurité.",
+        "De fournir un cadre pour gérer les risques liés à la sécurité et améliorer les performances en matière de sécurité.",
+        "De remplacer les formations obligatoires sur la sécurité au travail."
+      ],
+      "answer": 2,
+      "explanation": "L'ISO 45001 fournit un cadre permettant aux organisations de gérer les risques SST et d'améliorer leurs performances en matière de sécurité."
+    },
+    {
+      "question": "La structure de la norme ISO 45001 suit quelle approche ?",
+      "options": [
+        "Une structure unique et exclusive à la norme ISO 45001.",
+        "Un modèle modulaire permettant aux organisations de choisir les éléments pertinents.",
+        "La structure commune à toutes les normes de systèmes de management ISO.",
+        "Une approche non structurée basée sur l'expérience des entreprises."
+      ],
+      "answer": 2,
+      "explanation": "La norme suit la structure commune à toutes les normes de systèmes de management ISO : ..."
+    }
+  ]
+}
+
+
+===== 10 | domain=industrial =====
+SOURCE CONTEXT:
+# ISO 45001:2018 — Systèmes de Management de la Santé et de la Sécurité au Travail
+
+**Source:** Rédaction originale in-house
+**Statut:** Contenu original — explication pédagogique de la norme (aucun texte normatif reproduit)
+
+---
+
+## Qu'est-ce que l'ISO 45001 ?
+
+L'ISO 45001 est la norme internationale pour les systèmes de management de la santé et de la sécurité au travail (SST). Elle fournit un cadre permettant aux organisations de gérer les risques SST et d'améliorer leurs performances en matière de sécurité.
+
+## Structure HLS (High-Level Structure)
+
+La norme suit la structure commune à toutes les normes de systèmes de management ISO :
+
+1. **Domaine d'application** — Périmètre du système de management
+2. **Références normatives** — Documents de référence
+3. **Termes et définitions** — Vocabulaire spécialisé
+4. **Contexte de l'organisme** — Enjeux internes et externes
+5. **Leadership et participation des travailleurs** — Engagement de la direction
+6. **Planification** — Identification des risques et opportunités
+7. **Support** — Ressources, compétences, communication
+8. **Réalisation des activités opérationnelles** — Maîtrise des processus
+9. **Évaluation des performances** — Surv
+
+[user] Pourriez-vous me créer un petit quiz sur la norme ISO 45001 ?
+
+[assistant] {
+  "questions": [
+    {
+      "question": "Quelle est l'objectif principal de la norme ISO 45001 ?",
+      "options": [
+        "Définir les protocoles d'urgence en cas d'accident.",
+        "Fournir un cadre pour la gestion des risques liés à la santé et à la sécurité au travail.",
+        "Réglementer l'utilisation de l'équipement de protection individuelle (EPI).",
+        "Établir des normes de construction pour les nouveaux bâtiments industriels."
+      ],
+      "answer": 1,
+      "explanation": "ISO 45001 fournit un cadre permettant aux organisations de gérer les risques SST et d'améliorer leurs performances en matière de sécurité."
+    },
+    {
+      "question": "Selon la structure HLS, à quelle partie de la norme ISO 45001 correspond la section « Identification des risques et opportunités » ?",
+      "options": [
+        "Domaine d'application",
+        "Planification",
+        "Leadership et participation des travailleurs",
+        "Réalisation des activités opérationnelles"
+      ],
+      "answer": 1,
+      "explanation": "La norme suit la structure commune à toutes les normes de systèmes de management ISO : ...6. Planification — Identification des risques et opportunités..."
+    },
+    {
+      "question": "Une entreprise souhaite mettre en place un système de management de la sécurité et de la santé au travail (SST). Selon l'ISO 45001, quelle est la première étape à suivre ?",
+      "options": [
+        "Former les employés sur les procédures de sécurité.",
+        "Identifier les risques potentiels liés aux activités de l'entreprise.",
+        "Définir un budget pour le programme SST.",
+        "Mettre en place des panneaux d'affichage informatifs sur la sécurité."
+      ],
+      "answer": 1,
+      "explanation": "La norme suit la structure commune à toutes les normes de systèmes de management ISO : ...4. Contexte de l'organisme — Enjeux internes et externes..."
+    }
+  ]
+}
+
+

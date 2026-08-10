@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Setting up Demo Conversations...</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);
+            color: white;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            margin: 0;
+        }
+        .container {
+            text-align: center;
+        }
+        .spinner {
+            border: 4px solid rgba(255,255,255,0.1);
+            border-top: 4px solid #3b82f6;
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 20px;
+        }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+        h1 { font-size: 24px; margin: 0 0 10px 0; }
+        p { font-size: 14px; color: #94a3b8; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="spinner"></div>
+        <h1>Setting up CEO Demo</h1>
+        <p>Loading multi-turn conversations with both models...</p>
+    </div>
+
+    <script>
+        // The showcase data generated from the backend
+        const showcaseData = {
+            "fr": {
+                "id": "session-fr",
+                "title": "French Tutor (Fine-tuned)",
+                "language": "fr",
+                "model": "iblog-tutor-fr:latest",
+                "messages": []
+            },
+            "darija": {
+                "id": "session-darija",
+                "title": "Darija Tutor (Base)",
+                "language": "ar-MA",
+                "model": "IBLOG_TUTOR:latest",
+                "messages": []
+            }
+        };
+
+        // Load from the generated JSON file via fetch
+        fetch('/showcase_sessions.json')
+            .then(r => r.json())
+            .then(data => {
+                // Store in localStorage in the format the frontend expects
+                // The frontend's useChatSessions hook looks for these keys
+                const sessions = [data.fr, data.darija];
+
+                localStorage.setItem('chat_sessions', JSON.stringify(sessions));
+                localStorage.setItem('active_session', data.fr.id);
+
+                // Redirect to main app after a brief delay
+                setTimeout(() => {
+                    window.location.href = '/index.html';
+                }, 1000);
+            })
+            .catch(err => {
+                document.querySelector('p').textContent = 'Error: ' + err.message;
+                console.error('Failed to load showcase data:', err);
+
+                // Fallback: try to create sample data
+                setTimeout(() => {
+                    const sampleSessions = [
+                        {
+                            id: "session-fr",
+                            title: "French Tutor",
+                            language: "fr",
+                            messages: [
+                                { role: "user", content: "Explique-moi pourquoi le port des equipements de protection est obligatoire ?" },
+                                { role: "assistant", content: "Les equipements de protection individuelle (EPI) sont obligatoires car ils protegent votre sante et votre securite sur le lieu de travail. Conformement a l'article 281 du Code du travail marocain, les employeurs doivent fournir les EPI necessaires pour les postes a risque. Pouvez-vous me dire quel type de risques existe dans votre environnement de travail ?" }
+                            ]
+                        },
+                        {
+                            id: "session-darija",
+                            title: "Darija Tutor",
+                            language: "ar-MA",
+                            messages: [
+                                { role: "user", content: "شنو هي فايدة لبس المعدات الديال السلامة ؟" },
+                                { role: "assistant", content: "المعدات ديال السلامة (EPI) كتحمي الراس والايدين والرجلين من الاصابات في الشغل. المادة 281 من القانون ديال الشغل المغربي قالت انه لازم نلبس المعدات هاد في الشغل الخطير. شنو هي انواع المخاطر اللي عندك في الشغل ديالك ؟" }
+                        ]
+                    ];
+
+                    localStorage.setItem('chat_sessions', JSON.stringify(sampleSessions));
+                    localStorage.setItem('active_session', sampleSessions[0].id);
+                    window.location.href = '/index.html';
+                }, 1500);
+            });
+    </script>
+</body>
+</html>

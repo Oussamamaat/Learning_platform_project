@@ -1,4 +1,7 @@
-# Dataset Generation — Problems Faced and Fixes Applied
+# Dataset Generation — Problems Faced and Fixes Applied (Tenant #1)
+
+Concerns the tenant #1 (Moroccan safety/security, Darija + French) dataset
+generation pipeline. All entries below are preserved verbatim.
 
 **Scope:** Everything encountered while building the training-data generation pipeline, from the first working version through the Kaggle validation run.
 **Companion docs:** `DATASET_WALKTHROUGH.md` (decisions and reasoning, narrative form) · `KAGGLE_GENERATION_GUIDE.md` (how to run the full generation) · `DATA_PREP_PLAN.md` (original spec)

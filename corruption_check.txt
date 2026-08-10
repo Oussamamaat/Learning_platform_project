@@ -1,0 +1,38 @@
+F1 corruption pattern hits: 12
+
+--- socratic ---
+Certes, l'objectif principal de ces procédures est effectivement de lutter contre le blanchiment d'argent et le financement du terrorisme dans le domaine des actifs numériques.  Conformément à ce que stipule  المادة 1, ces mesures visent à mettre en place des contrôles sur l'identité des clients et la surveillance des transactions liées aux actifs numériques. Par exemple, lorsqu'une personne souhaite ouvrir un compte, elle doit fournir des documents d'identification valables ainsi qu'une preuve de domicile et une source de revenus.  Est-ce que cela vous est clair ?
+
+--- socratic ---
+Effectivement, ces deux articles définissent le champ d'application du texte : **l’article المادة 1** précise que ce sont tous les individus ou entités qui exercent des activités de sécurité (garde des personnes et biens, transport de fonds) qui sont soumis à ce règlement.  **L’article المادة 2**, quant à lui, stipule que l'exercice de ces activités est conditionné par l'obtention d'une autorisation préalable délivrée par l'administration : peux-tu reformuler la différence que tu vois entre ces deux articles ?
+
+--- socratic ---
+Effectivement, la protection de la santé et de la sécurité des travailleurs est une priorité au Maroc.  Conformément à  le  القانون رقم 65-99 , l'employeur a plusieurs responsabilités. Il doit notamment veiller à ce que les lieux de travail soient propres et sains. Selon المادة 281 , il doit aussi fournir aux employés des conditions de travail sûres pour protéger leur santé.  Est-ce clair pour toi ?
+
+--- socratic ---
+Le patron a plusieurs obligations en matière de sécurité au travail.  Conformément à  l'article المادة 281, il doit s'assurer que les lieux de travail sont propres et sains, et qu'il fournit les conditions nécessaires pour protéger la santé des employés.  Peux-tu me dire ce que signifie 'protéger la santé des employés' dans ce contexte ?
+
+--- socratic ---
+C'est une bonne intuition.  En effet, il doit non seulement fournir des **équipements de protection individuelle (EPI)** adaptés à chaque tâche, mais aussi s'assurer que les machines et le matériel sont sécurisés.  Par exemple, il doit informer ses employés sur la réglementation concernant la sécurité des machines, comme mentionné dans l'article المادة 282.  Penses-tu qu'il est important pour un employé de connaître ces règles ?
+
+--- socratic ---
+Selon le document fourni, les prestataires de services d'actifs numériques au Maroc sont soumis à des obligations strictes en matière de lutte contre le blanchiment d'argent et le financement du terrorisme (AML/CFT).  Concrètement,  conformément à l'article المادة 12 , ils doivent respecter les mesures de vigilance décrites dans le droit applicable à ces domaines.  Comprenez-vous ce que cela signifie concrètement pour leur activité ?
+
+--- socratic ---
+Conformément à l'article القانون رقم 27.06, المادة 1, toute personne physique ou morale exerçant des activités de garde des personnes et des biens ou de transport d'argent est soumise aux dispositions de ce texte.  Comprenez-vous cette définition ?
+
+--- socratic ---
+Le droit marocain, notamment  conformément à ce que l’on peut lire dans le  القانون رقم 65-99 , met l'accent sur la responsabilité du patron.  Il est tenu de garantir un environnement de travail sain et sûr pour ses employés. Pour cela, il doit respecter des règles strictes concernant les équipements de protection individuelle (EPI), les procédures d'arrêt d'urgence (LOTO) et les consignes de sécurité en cas d'accident.  Peux-tu me dire ce que tu comprends par “procédures d’arrêt d'urgence (LOTO)” ?
+
+--- socratic ---
+Conformément à l'article  المادة 1, toute personne physique ou morale exerçant des activités de sécurité des personnes et des biens ou le transport d'argent est soumise à ce règlement. As-tu compris ?
+
+--- socratic ---
+Selon le document fourni, un agent de sécurité peut uniquement effectuer une intervention physique dans les situations prévues par la loi et avec l'accord de la personne concernée.  Par exemple,  conformement à l'article المادة 15 , il ne peut pas procéder à un contrôle corporel sans autorisation. Mais concernant le transport d'argent, que se passe-t-il en ce qui concerne l'utilisation d'armes à feu par l'agent de sécurité ?
+
+--- socratic ---
+C'est une bonne question ! Conformément à  l'article المادة 1, ce document vise à définir les mesures pour vérifier l'identité des clients et surveiller les transactions liées aux actifs numériques.  Le Maroc s'efforce d'aligner sa législation sur les recommandations de la GAFI (Groupe d'action contre le blanchiment d'argent et le financement du terrorisme) pour lutter efficacement contre ces menaces. Pour bien comprendre ce lien, pourrais-tu me dire en quoi tu vois une éventuelle différence entre les recommandations de la GAFI et ce que décrit ce document marocain ?
+
+--- socratic ---
+Le projet de loi numéro 42-25,  conformement à l'article المادة 12, impose aux prestataires de services d'actifs numériques des obligations en matière de vigilance contre le blanchiment d'argent et le financement du terrorisme. En effet, ils doivent respecter les dispositions légales applicables en la matière, comme celles relatives à la vérification de l'identité des clients et au signalement des opérations suspectes.  Peux-tu me dire ce que tu comprends par « opérations suspectes » dans ce contexte ?
+

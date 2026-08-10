@@ -1,5 +1,10 @@
 # Out-of-Scope & Refusal Templates
 
+Framing: **tenant #1's** language artifact (tenant #1 = Moroccan
+safety/security, Darija Arabic-script + French), used by the IBLOG Adaptive
+Learning Tutor's data-generation pipeline. All templates below are preserved
+verbatim.
+
 This file contains 10 distinct, structured refusal templates across directness levels, partial-refusal variants, and mixed-language styles.
 
 ## 1. Direct & Professional Refusals

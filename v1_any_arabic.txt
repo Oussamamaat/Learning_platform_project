@@ -1,0 +1,404 @@
+--- socratic ---
+Conformement à  المادة 281 , le patron a plusieurs responsabilités. Il doit s'assurer que les lieux de travail sont propres et sains, ainsi que fournir les conditions nécessaires pour la santé et la sécurité des employés. Dis-moi, selon toi, est-ce qu'il est important pour le patron de veiller à la sécurité des employés ?
+
+--- socratic ---
+Exactement ! Et en plus de cette surveillance d'entrée et de sortie, il faut signaler tout incident de sécurité à l'équipe de sécurité. Par exemple, si tu observes une présence suspecte ou un comportement anormal, tu dois suivre les procédures décrites dans  المادة 4 du document.
+
+--- socratic ---
+Conformément à  المادة 3, chaque visiteur doit être accompagné par un employé qualifié pendant toute sa durée de présence sur le site. En effet, il lui est remis une badge temporaire qui sera récupéré à son départ. Cela permet de contrôler l'accès et la présence des visiteurs sur le site.  Peux-tu me dire ce que tu comprends comme système de contrôle pour les visiteurs ?
+
+--- socratic ---
+Selon le document fourni,  la loi marocaine impose aux employeurs de prendre des mesures pour protéger leurs travailleurs contre les risques liés aux machines. Conformement à  l'article المادة 282 , l'employeur doit informer les employés des exigences légales concernant leur protection contre les dangers des machines et veiller à leur application.  Pouvez-vous me dire, selon vous, quelles mesures concrètes un employeur pourrait prendre pour protéger ses travailleurs contre les dangers liés aux machines ?
+
+--- socratic ---
+La surveillance des accès est organisée selon  **المادة 1**. Avant d'accéder au site, chaque personne doit être identifiée et son heure d'entrée et de sortie doit être enregistrée. Comprends-tu ce principe ?
+
+--- structured_explanation ---
+Ce document décrit comment gérer les incidents de sécurité. Voici les étapes à suivre : 
+
+**المادة 4** : 
+
+1. **Déclaration immédiate**: En cas d'incident, il faut immédiatement le déclarer au chef de l'équipe de sécurité. <br>  - Un rapport détaillé doit être rédigé dans un délai de vingt-quatre heures. <br>  - Le rapport doit inclure la date et l'heure de l'incident, son emplacement, les personnes concernées et les mesures prises.
+
+--- socratic ---
+Vous avez raison, la réglementation des actifs numériques au Maroc est un domaine important. Conformément à  `المادة 12`,  les fournisseurs de services d'actifs numériques sont tenus de respecter les obligations en matière de lutte contre le blanchiment d'argent et le financement du terrorisme. Cela signifie qu'ils doivent mettre en place des procédures pour identifier leurs clients, vérifier l'origine des fonds et signaler toute activité suspecte aux autorités compétentes.  Pourriez-vous me dire ce que vous comprenez par « activités suspectes » dans ce contexte ?
+
+--- socratic ---
+Conformément à l'article المادة 1 du projet de loi numéro 42-25, un actif numérique est défini comme « tout représentation numérique d’une valeur ou d’un droit pouvant être transféré et stocké électroniquement à l’aide d’une technologie de registre distribué ».  Comprenons-nous bien ? 
+
+--- socratic ---
+Exactement ! En plus de cela, il faut noter que le projet de loi impose aux fournisseurs de services d’actifs numériques de se conformer aux obligations de vigilance décrites dans le cadre de la lutte contre le blanchiment d'argent et le financement du terrorisme, comme stipulé à l'article المادة 12. Par exemple, ils doivent identifier les clients avant de commencer toute relation commerciale .
+
+--- socratic ---
+Conformément à  المادة 3 , chaque visiteur doit être accompagné d'un employé qualifié pendant toute la durée de son séjour sur le site.  Comprends-tu cette instruction ?
+
+--- socratic ---
+selon  le <span style='font-weight: bold;color:blue'> القانون رقم 27.06</span>,  pour exercer une activité de sécurité comme agent de sécurité, il faut obligatoirement obtenir un permis délivré par l'administration. Comprends-tu ce point ?
+
+--- socratic ---
+C'est exact !  En plus du permis, <span style='font-weight: bold;color:blue'>المادة 8</span> précise que les agents de sécurité doivent être majeurs et avoir une bonne condition physique. Il faut également ne pas avoir été condamné pour un crime ou une infraction grave. Veux-tu en savoir plus sur les types d'activités qu'un agent de sécurité peut exercer ?
+
+--- socratic ---
+Conformément à  المادة 8 du القانون رقم 27.06, un agent de sécurité doit être majeur, en bonne santé physique et ne pas avoir été condamné pour une infraction grave ou mineure. Comprenez-vous cette condition ?
+
+--- structured_explanation ---
+Ce document décrit les conditions requises pour exercer en tant que des agents de sécurité.  
+
+ - **Être âgé d'au moins l'âge légal**  conformément à  المادة 8 
+ - **Avoir la capacité physique** conforme à المادة 8 
+ - **Ne pas être sujet à un jugement définitif pour une infraction grave ou mineure.**  conformement à المادة 8
+
+ 
+
+--- socratic ---
+Conformément à  المادة 2, avant d'ouvrir un compte, il faut collecter trois documents : une pièce d'identité valide, un justificatif de domicile et la source des fonds. Cela permet de vérifier l'identité du client et de comprendre l'origine de ses actifs numériques.  Peux-tu me reformuler ce que cela signifie en termes concrets ?
+
+--- socratic ---
+Tu as bien compris la première partie ! Un justificatif de domicile est effectivement nécessaire. Cependant, selon  المادة 2, il faut également fournir  ‘un justificatif de source des fonds’. Cela signifie que tu dois prouver d'où proviennent les fonds que tu souhaites utiliser pour ouvrir le compte. Par exemple, un relevé bancaire ou une attestation de salaire. Est-ce plus clair ?
+
+--- socratic ---
+Conformément à  المادة 281, le responsable est tenu de veiller à la propreté et à l'état sanitaire des lieux de travail. Il doit également fournir les conditions nécessaires en matière de prévention des risques pour la santé des employés. Comprenez-vous cette obligation ?
+
+--- socratic ---
+C'est une excellente question ! Conformément à  <span style="font-style: italic">القانون رقم 65-99</span>, les employeurs ont plusieurs obligations pour assurer la sécurité des travailleurs. Tout d’abord, ils doivent maintenir un environnement de travail propre et en bon état de santé, comme stipulé dans <span style="font-style: italic">المادة 281</span>.  De plus, ils doivent informer les travailleurs sur les risques liés aux machines et s'assurer que ces consignes sont suivies. Pouvez-vous me dire ce qu’il faut faire si un travailleur ne respecte pas ces consignes de sécurité ?
+
+--- structured_explanation ---
+Ce document détaille les cinq étapes à suivre lors du processus de mise hors tension et de signalisation des sources d'énergie.  Conformement à  المادة 3, elles sont : 
+
+1. **Le Séparation**: Déconnecter la machine de toutes ses sources d'alimentation.
+2. **Le Verrouillage**: Placer un cadenas personnel sur le dispositif d’arrêt, dont seul l'intervenant dispose de la clé.
+3. **La Décharge**: Vider la pression résiduelle et l'énergie stockée.
+4. **La Vérification de l'Absence de Tension**: S'assurer, à l'aide d'un appareil homologué, qu'il n'y a pas de tension électrique.
+5. **L’Étiquetage**: Placer une étiquette portant le nom de l'intervenant et la date de l'intervention.
+
+--- socratic ---
+Selon  le document fourni, le patron a plusieurs responsabilités pour protéger ses employés. Conformement à la  المادة 281, il doit veiller à ce que les lieux de travail soient propres et sains. Il doit aussi fournir tout ce qui est nécessaire en matière de prévention des risques pour la santé et la sécurité des travailleurs. Maintenant, peux-tu me dire quelles sont les mesures spécifiques qu'un patron pourrait prendre pour protéger ses travailleurs ?
+
+--- socratic ---
+C'est une excellente question !  Conformément à  المادة 3 du document, il faut suivre cinq étapes pour assurer une isolation correcte. Pour être sûr que l'isolation est effective, vérifiez si vous avez effectué les cinq étapes suivantes : **l’isolation**, **le verrouillage**, **la décharge de l’énergie résiduelle**, **la vérification de l’absence de tension** et **l’étiquetage**. Avez-vous bien suivi ces étapes ?
+
+--- socratic ---
+Conformément à  المادة 1, l'accès aux sites sensibles est soumis à une surveillance préalable qui comprend la vérification de l'identité et l'enregistrement des heures d'entrée et de sortie.  Pourrais-tu me dire en quoi consiste cette surveillance préalable ?
+
+--- socratic ---
+Exactement ! Cette surveillance est essentielle pour garantir la sécurité du site. En plus de cela, chaque utilisateur reçoit une carte d'accès personnelle, comme stipulé dans  المادة 2 et il est interdit de prêter sa carte à un autre individu. Cela permet de mieux identifier les personnes présentes sur le site à tout moment.
+
+--- socratic ---
+L'« examen préalable » des transactions, selon  المادة 4, signifie que toutes les opérations dépassant un seuil défini doivent être examinées à l'avance. Cela permet d'identifier potentiellement des activités suspectes et de prévenir le blanchiment d'argent ou le financement du terrorisme. En gros, il s'agit d'une analyse approfondie des transactions avant qu'elles ne se produisent pour minimiser les risques.  Comprenez-vous mieux cette notion ?
+
+--- socratic ---
+Le cadre légal applicable aux fournisseurs de services d'actifs numériques au Maroc est défini par le projet de loi numéro 42-25. Conformément à  **المادة 12**, les fournisseurs de services d'actifs numériques sont soumis aux obligations de vigilance prévues dans la législation relative à la lutte contre le blanchiment d'argent et le financement du terrorisme.  Par exemple, ils doivent vérifier l'identité de leurs clients avant d'engager toute relation commerciale et conserver les documents relatifs aux transactions pendant dix ans. Pouvez-vous me dire quelles sont, selon vous, les principales implications de ces obligations pour un fournisseur de services d'actifs numériques ?
+
+--- socratic ---
+Conformément à  المادة 3, chaque visiteur doit être accompagné par un employé qualifié pendant toute sa présence sur le site. À son arrivée, on lui remet une badge temporaire qu'il devra rendre à son départ.  Es-tu clair sur ce point ?
+
+--- socratic ---
+Selon le document fourni, le but principal est de mettre en place des mesures pour vérifier l'identité des clients et surveiller les transactions liées aux actifs numériques.  Peux-tu reformuler ce qui est décrit dans  المادة 1 ?
+
+--- socratic ---
+C'est exact !  Il s'agit de mettre en place des procédures pour vérifier l'identité des clients, comme décrit dans المادة 2 , avant d'ouvrir un compte. En plus de l'identification, il est important de classifier les risques liés aux relations commerciales, comme expliqué dans المادة 3 .
+
+--- socratic ---
+Effectivement, la surveillance des transactions est essentielle.  Une partie importante de ce processus consiste à soumettre toutes les transactions dépassant une certaine valeur à une surveillance préalable, comme mentionné dans المادة 4 .  Peux-tu me dire quels sont quelques signes d'une transaction suspecte selon le document ?
+
+--- structured_explanation ---
+Ce document décrit la procédure à suivre pour vérifier l'identité des clients et surveiller les transactions relatives aux actifs numériques.  
+
+1. **Vérification d’identité**: Il faut collecter une pièce d’identité valide, une preuve de domicile et la source des fonds avant d’ouvrir un compte. <br> - Pour les entités juridiques, il faut identifier le bénéficiaire effectif et vérifier son identité.  <br> 2. **Classification des risques**: Les relations commerciales sont classées en trois niveaux de risque : faible, moyen et élevé. Les relations à haut risque font l’objet d’une surveillance accrue. 
+
+Conformément à   المادة 4 du document, toutes les transactions dépassant un seuil déterminé sont soumises à une surveillance préalable. 
+
+
+--- socratic ---
+Il est crucial de suivre ces étapes spécifiques, comme cela est défini dans  _المادة 3_, afin d'empêcher toute mise en marche inattendue de la machine pendant les interventions. Cela minimise considérablement le risque d'accidents et protège la santé des opérateurs.  Peux-tu me dire quelles sont les cinq étapes principales mentionnées dans _المادة 3_ ?
+
+--- structured_explanation ---
+Ce document décrit les exigences pour exercer une activité de prestataire de services d'actifs numériques au Maroc.  
+
+1. **Obtenir un permis**. Conformément à l’article المادة 5, toute personne souhaitant exercer une activité de prestataire de services d'actifs numériques doit obtenir un permis préalable délivré par l’autorité compétente.
+2. **Mettre en place des ressources financières et humaines adéquates**. L’article المادة 6 stipule que les prestataires doivent disposer d'un capital minimum, d'un système de gouvernance approprié et des moyens techniques et humains nécessaires.
+3. **Se conformer aux obligations de vigilance anti-blanchiment**. Conformément à l’article المادة 12, les prestataires de services d'actifs numériques sont soumis aux obligations de vigilance définies par la législation en matière de lutte contre le blanchiment des capitaux et le financement du terrorisme.  
+    
+
+--- socratic ---
+Bien sûr ! D’après l’المادة 2,  le permis est nécessaire. Rappelle-toi aussi qu’un agent de sécurité ne peut pas porter d'arme à feu pendant son travail sauf dans le cas précis du transport de fonds et avec un autorisation spéciale. Connais-tu l'article qui précise cette information ?
+
+--- socratic ---
+Effectivement, le blanchiment d'argent et le financement du terrorisme sont des préoccupations majeures dans le domaine des actifs numériques. Conformément à  *المادة 1*, la réglementation marocaine vise à mettre en place des mesures pour vérifier l'identité des clients et surveiller les transactions liées aux actifs numériques afin de prévenir ces activités illicites. Pourriez-vous me dire, d'après ce que vous avez compris, quelles sont les principales étapes mises en place par cette réglementation ?
+
+--- structured_explanation ---
+Conformément au  القانون رقم 65-99, le patron a plusieurs obligations en matière de santé et sécurité au travail.  Voici les principales : 
+
+1. **Assurer la propreté et l'hygiène des lieux de travail.** Conformément à la المادة 281, le patron doit veiller à ce que les lieux de travail soient propres et sains pour protéger la santé des travailleurs.
+2. **Informer les travailleurs sur les risques liés aux machines** Le patron est tenu d’informer les travailleurs des dispositions légales relatives à leur protection contre les dangers liés aux machines, conformément à la المادة 282.
+3. **Fournir des équipements de protection individuelle (EPI) adéquats.**  Conformément à la المادة 283, le patron doit fournir aux travailleurs des EPI adaptés à leur travail et s'assurer de leur bon entretien.
+
+--- socratic ---
+Conformément à  المادة 3 de la procédure SST-04, il y a cinq étapes obligatoires.  La première étape consiste à **isoler** la machine de toutes ses sources d'énergie. Comprenez-vous cette première étape ?
+
+--- structured_explanation ---
+Ce document décrit les obligations du patron concernant la santé et sécurité au travail.  Conformément à  **القانون رقم 65-99**, voici les principales obligations : 
+
+1. **S'assurer d'un environnement de travail sain**. Le patron doit s'assurer que les lieux de travail sont propres et sains, et qu'il met en place des mesures de sécurité et de santé pour protéger la sécurité des travailleurs, conformément à  **المادة 281**. 
+2. **Informer et appliquer les règles de sécurité**. Le patron a l'obligation d'informer les travailleurs sur les règles de sécurité concernant les machines et de s'assurer qu'elles sont appliquées, comme stipulé dans   **المادة 282**. 
+3. **Fournir des EPI appropriés**.  Le patron doit fournir aux travailleurs les équipements de protection individuelle (EPI) adaptés à la nature du travail et s'assurer de leur bon état, conformément à **المادة 283**. 
+
+--- structured_explanation ---
+Il s'agit de la procédure à suivre en cas d'accident sécurité, conformement à  المادة 4. 
+
+- **Signaler l'incident** : Tout incident doit être signalé immédiatement au responsable de l'équipe de sécurité.
+- **Rédiger un rapport détaillé**: Dans un délai maximum de vingt-quatre heures, un rapport complet doit être rédigé. Ce rapport doit inclure la date et l'heure de l'incident, le lieu, les personnes impliquées et les mesures prises.
+
+--- socratic ---
+Bien sûr ! Selon le projet de القانون رقم 42-25, les prestataires de services d'actifs numériques sont soumis aux obligations de diligence raisonnable prévues par le droit marocain en matière de lutte contre le blanchiment d'argent et le financement du terrorisme.  Concrètement, conformément à l'article المادة 12  du projet de loi, ils doivent notamment vérifier l'identité de leurs clients avant toute relation commerciale et conserver les documents relatifs aux transactions pendant dix ans.  Comprends-tu ? 
+
+--- structured_explanation ---
+Conformément à  القانون رقم 65-99, le responsable d'un lieu de travail a plusieurs obligations en matière de sécurité. 
+
+1. **S'assurer de la propreté et de l'état sanitaire des lieux de travail.** Conformément à المادة 281, il doit garantir un environnement sain pour ses employés.
+2. **Informer les employés sur les règles de sécurité applicables aux machines**  et s'assurer de leur application.  Cela est stipulé dans la المادة 282. 
+3. **Fournir des EPI adaptés à la nature du travail** et veiller à leur entretien en bon état. La المادة 283 précise cette obligation.
+
+--- socratic ---
+C'est une excellente question ! Conformément à  l'article المادة 12, les fournisseurs de services d'actifs numériques au Maroc doivent se conformer aux obligations de vigilance établies dans le droit national relatif à la lutte contre le blanchiment d'argent et le financement du terrorisme. Cela signifie qu'ils doivent mettre en place des procédures pour identifier et vérifier l'identité de leurs clients, ainsi que surveiller leurs activités pour détecter les transactions suspectes.  Est-ce que cela vous aide à comprendre comment ce projet de loi intègre ces exigences internationales ?
+
+--- socratic ---
+Conformément au  القانون رقم 27.06, المادة 1, toute personne physique ou morale exerçant des activités de sécurité des personnes et biens ou de transport d'argent est soumise à ce règlement. Comprends-tu cette précision ?
+
+--- socratic ---
+Exactement !  Par ailleurs, rappelle-toi que selon l'article المادة 8, pour exercer ces métiers, il faut être majeur et avoir une bonne condition physique. Quel est le dernier critère mentionné pour devenir agent de sécurité ?
+
+--- socratic ---
+Effectivement, selon le document fourni,  les étapes de mise en sécurité doivent être appliquées à toutes les machines hydrauliques, électriques et pneumatiques.  Ces étapes visent à empêcher toute activation inattendue de la machine pendant les interventions de maintenance ou de réparation. Pour bien comprendre, peux-tu me dire quels sont les objectifs principaux de chaque étape définie dans  *المادة 3* ?
+
+--- socratic ---
+Conformément au  القانون رقم 27.06, tout individu ou entité qui exerce des activités de sécurité physique comme la surveillance des personnes ou des biens, ou le transport d'argent, doit se conformer à ses dispositions. Pourrais-tu me dire ce que signifie 'exercer des activités de sécurité physique', selon toi ?
+
+--- socratic ---
+C'est une bonne compréhension.  En effet, le  القانون رقم 27.06 vise à encadrer ces activités pour assurer la sécurité des individus et des biens. Il définit aussi les conditions requises pour exercer ces fonctions, comme l'âge légal et l'absence de condamnation pénale. Par exemple, savez-vous si  le  القانون رقم 27.06  précise quelles qualifications un agent de sécurité doit posséder ?
+
+--- structured_explanation ---
+Ce document décrit les étapes pour vérifier l'identité des clients et surveiller les transactions relatives aux actifs numériques.  
+
+1. **Vérification d'identité du client**: Conformément à la المادة 2, avant d'ouvrir un compte, il faut collecter la documentation suivante : une pièce d'identité en cours de validité, une preuve de domicile et la source des fonds. 
+2. **Identification du bénéficiaire effectif**: Pour les entités juridiques, il est nécessaire d'identifier le bénéficiaire effectif et de vérifier son identité. 
+3. **Classification des risques**:  Des relations commerciales sont classées en trois niveaux de risque : faible, moyen et élevé, comme stipulé dans la المادة 3. Les relations à haut risque font l'objet d'une vigilance accrue. 
+
+--- structured_explanation ---
+D'après le القانون رقم 65-99, le responsable a plusieurs obligations en matière de sécurité et santé au travail.  Voici les principales : 
+
+1. **Assurer la propreté et l'état sanitaire** des lieux de travail conformément à  المادة 281. 
+
+2. **Informer et veiller à l'application** des dispositions légales relatives à la protection des travailleurs contre les risques liés aux machines, comme stipulé dans المادة 282.
+
+3. **Fournir des EPI adéquats** en fonction de la nature des travaux réalisés et s'assurer de leur bon entretien, conformément à  المادة 283.
+
+--- structured_explanation ---
+Le texte présente les conditions à remplir pour être agent de sécurité.  
+
+1. **Être majeur** : Conformément à  المادة 8, l'agent doit avoir atteint l'âge légal de la majorité. 
+2. **Avoir la capacité physique requise** : Toujours selon المادة 8, il doit être apte physiquement à exercer ses fonctions.
+3. **Ne pas avoir été condamné par une juridiction pour un crime ou une infraction** : Encore une fois,  المادة 8 précise cette exigence.
+4. **Porter une carte professionnelle en permanence pendant l'exercice de ses fonctions et la présenter sur demande aux autorités compétentes.** Cette obligation est énoncée dans المادة 9. 
+
+
+--- socratic ---
+Conformément à l'article  المادة 1, toute personne physique ou morale qui exerce des activités de sécurité des personnes et des biens ou de transport d'argent est soumise aux dispositions du code. Comprends-tu ? 
+
+--- socratic ---
+Conformément à l'article المادة 15, un agent de sécurité ne peut réaliser une fouille corporelle que dans les cas prévus par la loi et avec le consentement de la personne concernée. As-tu compris cette précision ?
+
+--- socratic ---
+Conformément à  المادة 8 du  القانون رقم 27.06, les agents de sécurité doivent être majeurs, en bonne santé physique et ne pas avoir été condamnés pour une infraction grave ou une délit. Comprends-tu cette condition ?
+
+--- structured_explanation ---
+Les fournisseurs de services d'actifs numériques au Maroc sont soumis à des obligations de diligence en matière de lutte contre le blanchiment d'argent et le financement du terrorisme. Conformément à  **المادة 12**  , ces obligations incluent :   
+
+- **Vérification de l'identité des clients**: Avant toute relation commerciale, les fournisseurs doivent vérifier l'identité de leurs clients. 
+ - **Conservation des documents**: Les documents relatifs aux transactions doivent être conservés pendant une période de dix ans. 
+ - **Signalement des opérations suspectes**: Tout processus considéré comme suspect doit être signalé à l'unité de traitement des informations financières.
+
+--- socratic ---
+Exactement, il s'agit de mettre en place des procédures pour gérer les actifs numériques de manière sécurisée et conforme aux lois marocaines.  Selon le document fourni, « المادة 1 » définit l'objectif principal : vérifier l'identité des clients et surveiller les transactions liées aux actifs numériques. Pourriez-vous me dire comment vous imaginez cette vérification d'identité se dérouler en pratique ?
+
+--- socratic ---
+La première étape, selon  المادة 3, est **le découplage** de la machine de toutes ses sources d'énergie. Cela signifie couper l'alimentation électrique, hydraulique et pneumatique.  Est-ce que tu comprends ce qu'il faut faire lors du découplage ?
+
+--- structured_explanation ---
+Voici les conditions requises pour être agent de sécurité, selon  lequel dispose du droit : **conformément à l'article المادة 8**  du  القانون رقم 27.06 : 
+
+1. **Être âgé d'au moins l'âge légal**.  
+2. **Être apte physiquement**. 
+3. **Ne pas être sujet à un jugement définitif pour une infraction grave ou une contravention.**
+
+--- structured_explanation ---
+Le transport d'argent est soumis à des règles spécifiques. Conformément à l'article  المادة 16, il est interdit aux agents de la sécurité de porter des armes à feu sauf en cas de transport d'argent et avec un permis spécial. 
+
+- **Obtenir un permis spécial**: Il faut une autorisation spéciale pour transporter des armes à feu lors du transport d'argent.
+ - **Suivre les procédures légales**: Les règles spécifiques liées au transport d'argent doivent être respectées, notamment celles concernant la sécurité des personnes et des biens.
+
+
+--- socratic ---
+Conformément à  المادة 1, l'accès aux sites sensibles est soumis à une surveillance préalable qui comprend la vérification de l'identité et l'enregistrement des heures d'entrée et de sortie.  Pourrais-tu me dire ce qu'est la « surveillance préalable » selon toi ?
+
+--- structured_explanation ---
+Cette procédure décrit les étapes à suivre pour isoler les sources d'énergie avant toute intervention sur une machine. Conformément à  المادة 3, voici les cinq étapes obligatoires : 
+
+1. **Le découplage :** Déconnecter la machine de toutes ses sources d’énergie.
+2. **La mise en place du verrouillage :** Placer un cadenas personnel sur le dispositif d'isolement, détenu uniquement par l'opérateur intervenant.
+3. **La dissipation de l'énergie résiduelle :** Vider la pression et l'énergie stockées.
+4. **La vérification de l'absence de tension :** S’assurer à l'aide d'un appareil agréé qu'il n'y a pas de tension électrique.
+5. **Le signalétique :** Poser une carte portant le nom de l'opérateur et la date de l'intervention.
+
+--- structured_explanation ---
+Il s'agit de la procédure d'intervention en cas d'incident de sécurité, telle que définie dans **المادة 4**. 
+
+- **Signalement immédiat**: Tout incident doit être signalé immédiatement au chef de l'équipe de sécurité. 
+- **Rédaction du rapport**: Un rapport détaillé doit être rédigé dans un délai de vingt-quatre heures. Ce rapport doit inclure la date, l'heure, le lieu de l'incident, les personnes impliquées et les mesures prises.  
+
+--- structured_explanation ---
+Cette procédure est définie dans  المادة 3 de la directive interne, et comprend cinq étapes clés. 
+
+1. **Le débranchement**: Déconnecter la machine de toutes ses sources d'énergie. 
+2. **La mise en sécurité**: Placer un cadenas personnel sur le dispositif de coupure, accessible uniquement à l'opérateur intervenant. 
+3. **Le vidage des résidus**: Vider toute pression résiduelle et énergie stockée. 
+4. **Le contrôle de la tension**: Vérifier l'absence de tension électrique à l'aide d'un appareil homologué. 
+5. **L'étiquetage**: Fixer une étiquette indiquant le nom de l'opérateur et la date de l'intervention. 
+
+--- socratic ---
+Bien sûr.  Conformément à  **lequel  القانون رقم 27.06**,  les agents de sécurité doivent respecter certaines règles strictes dans l'exercice de leurs fonctions. Selon le document fourni, pour être agent de sécurité, il faut au moins être majeur et ne pas avoir de condamnation judiciaire pour un crime ou une infraction. Comprennez-vous cela ?
+
+--- socratic ---
+Conformément à  المادة 3 , chaque visiteur doit être accompagné par un employé qualifié tout au long de son séjour sur le site. En plus, on lui remet une badge temporaire qu'il rendra lors du départ.  Cela vous est clair ?
+
+--- structured_explanation ---
+Ce document définit les procédures de conformité en matière de lutte contre le blanchiment d’argent (AML) et le financement du terrorisme (CFT) pour les actifs numériques.  
+
+- **Vérification d'identité des clients**. Conformément à  **المادة 2**, avant d’ouvrir un compte, il faut collecter : une pièce d’identité valide, un justificatif de domicile et la source de revenus. 
+
+ - **Classification des risques**. Les relations commerciales sont classées en trois niveaux de risque : faible, moyen et élevé.  **المادة 3** précise que les relations à haut risque font l'objet d'une vigilance accrue. 
+
+--- structured_explanation ---
+Le texte décrit les responsabilités d'un employeur concernant la santé et la sécurité des travailleurs.  Voici quelques points clés : 
+
+1. **Assurer un environnement de travail sain**: Conformément à  المادة 281, l’employeur doit veiller à ce que les lieux de travail soient propres et en état sanitaire satisfaisant, et fournir les conditions nécessaires pour protéger la santé des travailleurs. 
+
+2. **Informer et former les employés**: L’employeur a l'obligation d'informer ses employés sur les dispositions légales concernant leur protection contre les risques liés aux machines, conformément à  المادة 282, et de s'assurer qu'elles sont appliquées.
+3. **Fournir des EPI appropriés**: L’employeur doit fournir aux travailleurs les équipements de protection individuelle (EPI) adaptés au type de travail effectué, garantissant leur bon état grâce à une maintenance régulière, comme stipulé par  المادة 283. 
+
+
+
+--- socratic ---
+Conformément à l'article  المادة 1 du  القانون رقم 27.06, toute personne physique ou morale exerçant des activités de surveillance des personnes et des biens ou de transport d'argent est soumise aux dispositions de cette loi.  Comprends-tu ce que cela signifie ?
+
+--- socratic ---
+Non, ce n'est pas tout à fait exact.  Il faut aussi obtenir un permis préalable délivré par l'administration, comme stipulé dans  المادة 2 du document. Cela signifie que toutes les personnes qui veulent exercer ces activités doivent demander une autorisation spéciale avant de pouvoir commencer. De plus, selon  المادة 8 du document, il y a des conditions à remplir pour devenir agent de sécurité.
+
+--- socratic ---
+Le projet de القانون رقم 42-25 impose aux fournisseurs de services d'actifs numériques plusieurs obligations en matière de conformité. Conformément à l'article المادة 12, ils doivent notamment respecter les engagements de diligence que prévoit le législation relatif à la lutte contre le blanchiment d'argent et le financement du terrorisme.  Par exemple, peux-tu me dire quelles sont les mesures de vérification d'identité requises par le projet de loi ?
+
+--- socratic ---
+C'est exact ! Les fournisseurs de services d'actifs numériques doivent vérifier l'identité de leurs clients avant tout engagement commercial, comme stipulé dans la المادة 13.  De plus, ils sont tenus de conserver les documents relatifs aux transactions pendant une période de dix ans. En plus de ces obligations, le projet de loi stipule également que les fournisseurs de services d'actifs numériques doivent déclarer toutes opérations suspectes à l'unité de traitement des informations financières.  As-tu compris cette dernière obligation ?
+
+--- socratic ---
+Conformement à  <span style="font-style:italic">القانون رقم 27.06</span>,  toutes les personnes physiques ou morales qui exercent des activités de surveillance des personnes et des biens ou de transport d'argent sont soumises à ce règlement. Est-ce que cela est clair ?
+
+--- socratic ---
+Exactement. Pour exercer ces activités, il faut obligatoirement obtenir une autorisation préalable délivrée par la direction, comme stipulé dans <span style="font-style:italic">المادة 2</span>. En plus de l'autorisation,  il existe aussi des conditions spécifiques à remplir pour devenir agent de sécurité. Penses-tu qu'il serait important de se renseigner sur ces conditions ?
+
+--- socratic ---
+En effet, selon le document fourni,  le patron a plusieurs obligations en matière de santé et sécurité au travail. Par exemple,  conformément à l'article المادة 281, il doit « se veiller à ce que les lieux de travail soient tenus propres et dans un état sanitaire convenable, et qu’il soit mis à disposition des conditions nécessaires pour la protection de la santé des travailleurs. » Mais comment peux-tu imaginer concrètement quelles actions le patron pourrait prendre pour respecter cette obligation ?
+
+--- socratic ---
+Le projet de loi numéro 42-25, selon le document fourni,  s'assure que les fournisseurs de services d'actifs numériques au Maroc respectent des normes strictes en matière de conformité AML/CFT.  Par exemple,  conformément à la المادة 12, ils sont tenus de respecter les obligations de diligence raisonnable mentionnées dans les lois relatives à la lutte contre le blanchiment d'argent et le financement du terrorisme. Pourriez-vous me dire ce que vous comprenez par « diligence raisonnable » dans ce contexte ?
+
+--- socratic ---
+La surveillance d'accès aux sites sensibles est organisée conformément à  المادة 1. Cette dernière stipule qu'il faut effectuer une vérification d'identité et enregistrer l'heure d'entrée et de sortie pour chaque personne accédant au site. Comprenez-vous ce principe ?
+
+--- structured_explanation ---
+Cette procédure décrit les cinq étapes à suivre pour mettre hors tension et étiqueter les sources d'énergie avant toute intervention sur une machine.  Conformement à  المادة 3 , voici les étapes : 
+
+1. **Le détachement**: Déconnecter la machine de toutes ses sources d'énergie.
+2. **La fermeture**: Placer un verrou personnel sur l'appareil de coupe, dont seul l'ouvrier intervenant possède la clé.
+3. **La dissipation**: Évacuer la pression résiduelle et l'énergie stockée.
+4. **La vérification de l'absence de tension**: S'assurer à l'aide d'un appareil agréé que le courant électrique est absent.
+5. **L'étiquetage**: Placer une carte portant le nom de l'ouvrier et la date de l'intervention.
+
+--- socratic ---
+Conformément à la المادة 12, les fournisseurs de services d'actifs numériques sont soumis aux obligations de diligence raisonnable prévues dans le législation relative à la lutte contre le blanchiment d'argent et le financement du terrorisme.  Pour bien comprendre, peux-tu me dire en quoi consistent ces obligations de diligence raisonnable ?
+
+--- socratic ---
+C'est exact. Ils doivent également conserver les documents relatifs aux transactions pendant dix ans, comme stipulé dans la المادة 13. De plus, ils sont tenus de déclarer toutes opérations suspectes à l'unité de traitement des informations financières.  Peux-tu me dire pourquoi est-il important de conserver ces documents sur une période aussi longue ?
+
+--- socratic ---
+Conformément à  المادة 3, il existe cinq étapes obligatoires : **le débranchement**, **la mise en sécurité**, **la décharge de l'énergie résiduelle**, **la vérification de l'absence de tension** et **l'étiquetage**. As-tu compris ces cinq étapes ?
+
+--- socratic ---
+Conformément à  المادة 1, chaque accès aux sites sensibles est soumis à une surveillance préalable. Cette surveillance comprend le contrôle de l'identité et l'enregistrement des heures d'entrée et de sortie.  Comprenez-vous ce principe de base ?
+
+--- structured_explanation ---
+Ce document décrit les étapes à suivre pour vérifier l'identité des clients et surveiller les transactions relatives aux actifs numériques.  
+
+1. **Vérification d'identité** : Avant d'ouvrir un compte, il faut collecter les documents suivants : une pièce d'identité valide, une preuve de domicile et la source des fonds. 
+ - Pour les personnes morales, il faut identifier le bénéficiaire effectif et vérifier son identité.  
+2. **Classification des risques** : Les relations commerciales sont classées en trois niveaux de risque : faible, moyen et élevé. Les relations à haut risque sont soumises à une surveillance renforcée.
+3. **Surveillance des transactions** : Conformément à  المادة 4, toutes les transactions dépassant un seuil défini font l'objet d'une surveillance préalable. 
+- Des indices de suspicion peuvent inclure la fractionnement des montants pour éviter les seuils, les transactions avec des zones à haut risque et le manque de corrélation entre le montant de la transaction et la situation déclarée du client. 
+
+--- socratic ---
+Effectivement, ce document, le  القانون رقم 27.06, définit les règles et limites pour les personnes travaillant dans le domaine de la sécurité physique au Maroc. Selon le document fourni,  **les agents de sécurité** doivent respecter certaines conditions pour exercer leur métier. Par exemple, il est stipulé que chaque agent doit être majeur et en bonne santé physique. Avez-vous compris cette partie ?
+
+--- socratic ---
+C'est exact, selon le document fourni, toute personne physique ou morale qui exerce des activités de surveillance des personnes ou des biens ou de transport d'argent doit obtenir un permis préalable délivré par l'administration.  Par exemple, <br>conformément à la المادة 8 , les agents de sécurité doivent être âgés d'au moins l'âge légal, en bonne santé physique et ne pas avoir été condamnés pour une infraction grave ou une délit.  Peux-tu me dire ce que tu comprends par rapport aux conditions physiques requises pour devenir agent de sécurité ?
+
+--- socratic ---
+Conformément à  المادة 286, c'est le responsable du lieu de travail qui doit déclarer toute accident du travail dans un délai de quarante-huit heures.  Est-ce que tu comprends cette obligation ?
+
+--- structured_explanation ---
+Le TEXTE définit les conditions requises pour être agent de sécurité.  Voici ce qui est mentionné : 
+
+1. **Avoir atteint l'âge de la majorité légale** , comme stipulé par <br> المادة 8.
+2. **Être en bonne condition physique**.  Toujours selon la même article <br> المادة 8 .
+3. **Ne pas avoir été condamné par un jugement définitif pour une infraction grave ou une délit.** 		Ce critère est également mentionné dans la <br> المادة 8.
+
+
+--- socratic ---
+Oui, c'est exact. En plus du permis,  conformement à l'article المادة 8 du document, il faut également être majeur et en bonne santé physique, sans condamnation pour une infraction grave ou moins grave.  Pourriez-vous me dire ce qu'il faut faire si vous souhaitez travailler comme agent de sécurité ?
+
+--- structured_explanation ---
+Ce document décrit la procédure à suivre en cas d'incident. 
+
+- **Déclaration de l'incident:** Toute personne doit déclarer tout incident sécurité immédiatement au chef de l'équipe de sécurité.
+- **Élaboration du rapport:** Un rapport détaillé doit être rédigé dans un délai de vingt-quatre heures après le sinistre. Ce rapport comprendra la date, l'heure, le lieu de l'événement, les personnes impliquées et les mesures prises. Conformément à  المادة 4, le rapport doit être soumis au chef de l'équipe de sécurité. 
+
+--- socratic ---
+Conformément à  “القانون رقم 27.06”, toute personne physique ou morale souhaitant exercer des activités de sécurité physique, comme la surveillance d'individus ou de biens, doit obtenir un permis préalable délivré par l'administration. Comprends-tu cela ?
+
+--- socratic ---
+Exactement !  Et selon “المادة 8”, les agents de sécurité doivent également être majeurs et en bonne santé physique. De plus, ils ne doivent pas avoir été condamnés pour un crime ou une infraction grave. Pense à ces trois éléments : le permis, l'âge et la situation judiciaire.
+
+--- socratic ---
+Bien sûr ! Ce document fournit des directives importantes pour la conformité Blockchain au Maroc, notamment en ce qui concerne AML/CFT.  Selon le document fourni,  la ** المادة 2** stipule que  il faut collecter des documents d'identification clients et vérifier leurs sources de revenus avant d'ouvrir un compte. Cela permet de lutter contre le blanchiment d'argent en identifiant les clients et en comprenant l'origine de leurs fonds.  Pourriez-vous me dire, selon vous, quel est l'objectif principal de la collecte de ces informations ?
+
+--- structured_explanation ---
+Le présent texte décrit les conditions requises pour exercer la profession d'agent de sécurité.  
+ 1. **Être majeur** : Conformément à  المادة 8, l'agent de sécurité doit être âgé au moins de la majorité légale. 
+ - **Posséder une aptitude physique**. 
+ - **Ne pas avoir été condamné par un jugement définitif pour une infraction ou un crime.**
+
+
+--- structured_explanation ---
+Le document décrit la procédure à suivre en cas d'incident sécurité.  
+
+ - **Déclaration immédiate** : Tout incident doit être déclaré dès sa survenue au chef de l'équipe de sécurité, conformement à <span style='font-style:italic;'>المادة 4</span> . 
+ - **Rédaction du rapport** : Un rapport détaillé doit être rédigé dans un délai de vingt-quatre heures, incluant la date et l'heure de l'incident, le lieu, les personnes impliquées et les mesures prises, conformément à <span style='font-style:italic;'>المادة 4</span>. 
+
+--- socratic ---
+Il est essentiel de bien comprendre ces étapes, car elles protègent votre sécurité et celle des autres selon  *المادة 1*.  'Tapper à l'énergie', c'est le processus complet de séparation d'une machine de toutes ses sources d'alimentation. Cela implique plusieurs étapes cruciales : *المادة 3* décrit ces cinq étapes clés. Pourrais-tu me dire quelles sont, selon toi, les deux premières étapes nécessaires pour 'taper à l'énergie' ?
+
+--- socratic ---
+Selon le document fourni,  le patron a plusieurs responsabilités importantes pour assurer la santé et la sécurité de ses employés. <br>Conformement à l'article  المادة 281 , il doit notamment s'assurer que les lieux de travail sont propres et sains, et qu'il existe des mesures de prévention pour protéger la santé des travailleurs. Peux-tu me dire quels seraient quelques exemples concrets de ces mesures ? 
+
+--- socratic ---
+C'est exact. Conformément à  المادة 3 , chaque visiteur doit être accompagné d'un employé qualifié pendant toute la durée de son séjour sur le site. Il reçoit également une badge temporaire qu'il devra rendre lors du départ.  Cela dit, comment se déroule ce processus si un visiteur arrive sans être accompagné ?
+

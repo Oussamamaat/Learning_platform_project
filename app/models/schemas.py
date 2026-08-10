@@ -20,7 +20,13 @@ class ChatRequest(BaseModel):
     session_id: Optional[str] = Field(None, description="Conversation session ID")
     tenant_id: Optional[str] = Field(None, description="Company/tenant identifier")
     domain: Domain = Field(Domain.INDUSTRIAL, description="Domain for tutoring context")
-    language: Language = Field(Language.FRENCH, description="Response language")
+    language: Optional[Language] = Field(
+        None,
+        description=(
+            "Response language. Explicit value is authoritative; omitted "
+            "falls back to detecting the language from the message text."
+        ),
+    )
 
 
 class ChatResponse(BaseModel):
@@ -41,7 +47,13 @@ class QuizRequest(BaseModel):
     topic: str = Field(..., min_length=1, max_length=500, description="Topic to generate quiz about")
     num_questions: int = Field(5, ge=1, le=20, description="Number of questions to generate")
     tenant_id: Optional[str] = Field(None, description="Company/tenant identifier")
-    language: Language = Field(Language.FRENCH, description="Quiz language")
+    language: Optional[Language] = Field(
+        None,
+        description=(
+            "Quiz language. Explicit value is authoritative; omitted falls "
+            "back to detecting the language from the topic text."
+        ),
+    )
 
 
 class QuizQuestion(BaseModel):
@@ -55,3 +67,12 @@ class QuizResponse(BaseModel):
     questions: list[QuizQuestion] = Field(..., description="Generated quiz questions")
     topic: str = Field(..., description="Quiz topic")
     total_questions: int = Field(..., description="Total number of questions")
+    message: Optional[str] = Field(
+        None,
+        description="Set when no grounded questions could be returned (e.g. "
+        "no matching source material, or every generated question failed "
+        "the grounding check).",
+    )
+    sources: list[str] = Field(
+        default_factory=list, description="Retrieved document sources the quiz was grounded in"
+    )

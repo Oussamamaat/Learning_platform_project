@@ -1,0 +1,79 @@
+--- socratic ---
+Conformément à  المادة 8 du القانون رقم 27.06, un agent de sécurité doit être majeur, en bonne santé physique et ne pas avoir été condamné pour une infraction grave ou mineure. Comprenez-vous cette condition ?
+
+--- socratic ---
+Selon  le document fourni, le patron a plusieurs responsabilités pour protéger ses employés. Conformement à la  المادة 281, il doit veiller à ce que les lieux de travail soient propres et sains. Il doit aussi fournir tout ce qui est nécessaire en matière de prévention des risques pour la santé et la sécurité des travailleurs. Maintenant, peux-tu me dire quelles sont les mesures spécifiques qu'un patron pourrait prendre pour protéger ses travailleurs ?
+
+--- socratic ---
+Bien sûr ! D’après l’المادة 2,  le permis est nécessaire. Rappelle-toi aussi qu’un agent de sécurité ne peut pas porter d'arme à feu pendant son travail sauf dans le cas précis du transport de fonds et avec un autorisation spéciale. Connais-tu l'article qui précise cette information ?
+
+--- structured_explanation ---
+Conformément au  القانون رقم 65-99, le patron a plusieurs obligations en matière de santé et sécurité au travail.  Voici les principales : 
+
+1. **Assurer la propreté et l'hygiène des lieux de travail.** Conformément à la المادة 281, le patron doit veiller à ce que les lieux de travail soient propres et sains pour protéger la santé des travailleurs.
+2. **Informer les travailleurs sur les risques liés aux machines** Le patron est tenu d’informer les travailleurs des dispositions légales relatives à leur protection contre les dangers liés aux machines, conformément à la المادة 282.
+3. **Fournir des équipements de protection individuelle (EPI) adéquats.**  Conformément à la المادة 283, le patron doit fournir aux travailleurs des EPI adaptés à leur travail et s'assurer de leur bon entretien.
+
+--- socratic ---
+Bien sûr ! Selon le projet de القانون رقم 42-25, les prestataires de services d'actifs numériques sont soumis aux obligations de diligence raisonnable prévues par le droit marocain en matière de lutte contre le blanchiment d'argent et le financement du terrorisme.  Concrètement, conformément à l'article المادة 12  du projet de loi, ils doivent notamment vérifier l'identité de leurs clients avant toute relation commerciale et conserver les documents relatifs aux transactions pendant dix ans.  Comprends-tu ? 
+
+--- structured_explanation ---
+Conformément à  القانون رقم 65-99, le responsable d'un lieu de travail a plusieurs obligations en matière de sécurité. 
+
+1. **S'assurer de la propreté et de l'état sanitaire des lieux de travail.** Conformément à المادة 281, il doit garantir un environnement sain pour ses employés.
+2. **Informer les employés sur les règles de sécurité applicables aux machines**  et s'assurer de leur application.  Cela est stipulé dans la المادة 282. 
+3. **Fournir des EPI adaptés à la nature du travail** et veiller à leur entretien en bon état. La المادة 283 précise cette obligation.
+
+--- socratic ---
+C'est une bonne compréhension.  En effet, le  القانون رقم 27.06 vise à encadrer ces activités pour assurer la sécurité des individus et des biens. Il définit aussi les conditions requises pour exercer ces fonctions, comme l'âge légal et l'absence de condamnation pénale. Par exemple, savez-vous si  le  القانون رقم 27.06  précise quelles qualifications un agent de sécurité doit posséder ?
+
+--- structured_explanation ---
+Ce document décrit les étapes pour vérifier l'identité des clients et surveiller les transactions relatives aux actifs numériques.  
+
+1. **Vérification d'identité du client**: Conformément à la المادة 2, avant d'ouvrir un compte, il faut collecter la documentation suivante : une pièce d'identité en cours de validité, une preuve de domicile et la source des fonds. 
+2. **Identification du bénéficiaire effectif**: Pour les entités juridiques, il est nécessaire d'identifier le bénéficiaire effectif et de vérifier son identité. 
+3. **Classification des risques**:  Des relations commerciales sont classées en trois niveaux de risque : faible, moyen et élevé, comme stipulé dans la المادة 3. Les relations à haut risque font l'objet d'une vigilance accrue. 
+
+--- structured_explanation ---
+D'après le القانون رقم 65-99, le responsable a plusieurs obligations en matière de sécurité et santé au travail.  Voici les principales : 
+
+1. **Assurer la propreté et l'état sanitaire** des lieux de travail conformément à  المادة 281. 
+
+2. **Informer et veiller à l'application** des dispositions légales relatives à la protection des travailleurs contre les risques liés aux machines, comme stipulé dans المادة 282.
+
+3. **Fournir des EPI adéquats** en fonction de la nature des travaux réalisés et s'assurer de leur bon entretien, conformément à  المادة 283.
+
+--- socratic ---
+Conformément à  المادة 8 du  القانون رقم 27.06, les agents de sécurité doivent être majeurs, en bonne santé physique et ne pas avoir été condamnés pour une infraction grave ou une délit. Comprends-tu cette condition ?
+
+--- structured_explanation ---
+Voici les conditions requises pour être agent de sécurité, selon  lequel dispose du droit : **conformément à l'article المادة 8**  du  القانون رقم 27.06 : 
+
+1. **Être âgé d'au moins l'âge légal**.  
+2. **Être apte physiquement**. 
+3. **Ne pas être sujet à un jugement définitif pour une infraction grave ou une contravention.**
+
+--- socratic ---
+Conformément à l'article  المادة 1 du  القانون رقم 27.06, toute personne physique ou morale exerçant des activités de surveillance des personnes et des biens ou de transport d'argent est soumise aux dispositions de cette loi.  Comprends-tu ce que cela signifie ?
+
+--- socratic ---
+Le projet de القانون رقم 42-25 impose aux fournisseurs de services d'actifs numériques plusieurs obligations en matière de conformité. Conformément à l'article المادة 12, ils doivent notamment respecter les engagements de diligence que prévoit le législation relatif à la lutte contre le blanchiment d'argent et le financement du terrorisme.  Par exemple, peux-tu me dire quelles sont les mesures de vérification d'identité requises par le projet de loi ?
+
+--- socratic ---
+C'est exact ! Les fournisseurs de services d'actifs numériques doivent vérifier l'identité de leurs clients avant tout engagement commercial, comme stipulé dans la المادة 13.  De plus, ils sont tenus de conserver les documents relatifs aux transactions pendant une période de dix ans. En plus de ces obligations, le projet de loi stipule également que les fournisseurs de services d'actifs numériques doivent déclarer toutes opérations suspectes à l'unité de traitement des informations financières.  As-tu compris cette dernière obligation ?
+
+--- socratic ---
+Le projet de loi numéro 42-25, selon le document fourni,  s'assure que les fournisseurs de services d'actifs numériques au Maroc respectent des normes strictes en matière de conformité AML/CFT.  Par exemple,  conformément à la المادة 12, ils sont tenus de respecter les obligations de diligence raisonnable mentionnées dans les lois relatives à la lutte contre le blanchiment d'argent et le financement du terrorisme. Pourriez-vous me dire ce que vous comprenez par « diligence raisonnable » dans ce contexte ?
+
+--- socratic ---
+Conformément à la المادة 12, les fournisseurs de services d'actifs numériques sont soumis aux obligations de diligence raisonnable prévues dans le législation relative à la lutte contre le blanchiment d'argent et le financement du terrorisme.  Pour bien comprendre, peux-tu me dire en quoi consistent ces obligations de diligence raisonnable ?
+
+--- socratic ---
+C'est exact. Ils doivent également conserver les documents relatifs aux transactions pendant dix ans, comme stipulé dans la المادة 13. De plus, ils sont tenus de déclarer toutes opérations suspectes à l'unité de traitement des informations financières.  Peux-tu me dire pourquoi est-il important de conserver ces documents sur une période aussi longue ?
+
+--- socratic ---
+Effectivement, ce document, le  القانون رقم 27.06, définit les règles et limites pour les personnes travaillant dans le domaine de la sécurité physique au Maroc. Selon le document fourni,  **les agents de sécurité** doivent respecter certaines conditions pour exercer leur métier. Par exemple, il est stipulé que chaque agent doit être majeur et en bonne santé physique. Avez-vous compris cette partie ?
+
+--- socratic ---
+C'est exact, selon le document fourni, toute personne physique ou morale qui exerce des activités de surveillance des personnes ou des biens ou de transport d'argent doit obtenir un permis préalable délivré par l'administration.  Par exemple, <br>conformément à la المادة 8 , les agents de sécurité doivent être âgés d'au moins l'âge légal, en bonne santé physique et ne pas avoir été condamnés pour une infraction grave ou une délit.  Peux-tu me dire ce que tu comprends par rapport aux conditions physiques requises pour devenir agent de sécurité ?
+

@@ -14,6 +14,7 @@ import os
 import re
 import uuid
 import json
+from functools import lru_cache
 from pathlib import Path
 from typing import Optional
 
@@ -64,11 +65,18 @@ def get_db_connection(database_url: str):
     return psycopg2.connect(database_url)
 
 
+@lru_cache(maxsize=4)
 def load_embedding_model(model_name: str = DEFAULT_EMBEDDING_MODEL) -> SentenceTransformer:
-    """Load and cache the embedding model."""
+    """Load and cache the embedding model.
+
+    Was previously re-loading from disk on every call (docstring claimed
+    caching that never existed) -- harmless for one-off ingestion scripts,
+    but every chat/quiz request calls this via build_rag_context, so serving
+    was paying a multi-second reload per message.
+    """
     print(f"Loading embedding model: {model_name}")
     model = SentenceTransformer(model_name)
-    print(f"Model loaded. Embedding dimension: {model.get_embedding_dimension()}")
+    print(f"Model loaded. Embedding dimension: {model.get_sentence_embedding_dimension()}")
     return model
 
 

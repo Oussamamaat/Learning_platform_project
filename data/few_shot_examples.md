@@ -1,4 +1,21 @@
-# Gold-Standard Few-Shot Training Examples (100% Arabizi & ChatML Schema)
+# Gold-Standard Few-Shot Training Examples
+
+Framing: **tenant #1's** language artifact (tenant #1 = Moroccan
+safety/security, Darija Arabic-script + French), used by the IBLOG Adaptive
+Learning Tutor's data-generation pipeline. All example content below is
+preserved verbatim.
+
+Target register: **Moroccan Darija in Arabic script**, carrying **French
+technical vocabulary in Latin letters**.
+
+Two rules these examples exist to demonstrate, because instructions alone did
+not move the model:
+
+1. Darija, not Modern Standard Arabic — خاصك، واش، ديال، كاين، شنو، هادشي.
+2. The French term stands alone inside the Arabic sentence. Never
+   `المعدات الشخصية الوقائية (les EPI)` — just `les EPI`. Translating the term
+   and bracketing the French after it is the failure mode observed in
+   generation, and it defeats the point of code-switching.
 
 ```json
 [
@@ -6,19 +23,19 @@
     "messages": [
       {
         "role": "user",
-        "content": "Chno khassni n-dir ila chtee l-huile kbeeb f l-sol hda la machine?"
+        "content": "شنو خاصني ندير إلا تسال l'huile فالأرض حدا la machine؟"
       },
       {
         "role": "assistant",
-        "content": "Hadi kat-e3tabar une situation de danger li t-gder t-sebbeb f le glissement d les opérateurs. La toute première chose hya t-baliser la zone pour éviter tout accident. Wach 3reftee chno hya la deuxième étape li khassak t-dir avant ma t-bda t-nettoyer?"
+        "content": "هادي كتعتبر une situation de danger لي تقدر تسبب f le glissement ديال les opérateurs. أول حاجة خاصك دير هي تباليزي la zone باش تتفادى أي accident. واش عرفتي شنو هي la deuxième étape لي خاصك دير قبل ما تبدا تنظف؟"
       },
       {
         "role": "user",
-        "content": "Khassni n-2alghy le responsable HSE?"
+        "content": "خاصني نعيط لـ le responsable HSE؟"
       },
       {
         "role": "assistant",
-        "content": "Exactement! Khassak t-signaler l-incident au responsable HSE ou le chef d'équipe, w t-utiliser les absorbants adéquats pour l-huile. N-ssa3dek t-3ref chno huma les EPI li khassak t-lbess f had la manipulation?"
+        "content": "بالضبط! خاصك تسيغنالي l'incident لـ le responsable HSE ولا le chef d'équipe، وتستعمل les absorbants المناسبين لـ l'huile. واش بغيتي نعاونك تعرف شنو هوما les EPI لي خاصك تلبس فهاد la manipulation؟"
       }
     ]
   },
@@ -26,19 +43,19 @@
     "messages": [
       {
         "role": "user",
-        "content": "Shhal mn mara khassni n-vérifier l-état dyal l-harnais de sécurité dyali?"
+        "content": "شحال من مرة خاصني نشيك على l'état ديال le harnais de sécurité ديالي؟"
       },
       {
         "role": "assistant",
-        "content": "L-harnais de sécurité khassou une vérification visuelle avant chaque utilisation! 9bel ma t-lebso, chno huma les points essentiels li khassak t-ra9eb f les sangles w les mousquetons?"
+        "content": "le harnais de sécurité خاصو une vérification visuelle قبل كل استعمال! قبل ما تلبسو، شنو هوما les points لي خاصك تراقب f les sangles و les mousquetons؟"
       },
       {
         "role": "user",
-        "content": "N-chouf ghir wach m9te3 w safi?"
+        "content": "نشوف غير واش مقطوع وصافي؟"
       },
       {
         "role": "assistant",
-        "content": "Ma-kafyach ghir t-chouf wach m9te3! Khassak t-vérifier 3 de choses principales : 1. Les coutures (wach fihom déchirement), 2. Les parties métalliques (absence de corrosion ou déformation), w 3. La date de validité dyal l-harnais. Wach l-harnais dyalk fih un absorbeur d'énergie?"
+        "content": "ماكافياش غير تشوف واش مقطوع! خاصك تشيك على 3 حوايج: les coutures (واش فيهم شي déchirement)، les parties métalliques (بلا corrosion ولا déformation)، و la date de validité ديال le harnais. واش le harnais ديالك فيه un absorbeur d'énergie؟"
       }
     ]
   },
@@ -58,11 +75,11 @@
     "messages": [
       {
         "role": "user",
-        "content": "Wach m3louch n-dekhlo b un téléphone normal f la zone ATEX dyal l-gaz?"
+        "content": "واش ماشي مشكل ندخل b un téléphone عادي لـ la zone ATEX ديال le gaz؟"
       },
       {
         "role": "assistant",
-        "content": "Non, c'est strictement interdit! F la zone ATEX, un téléphone normal y-gder y-diiir une étincelle w y-sebbeb explosion. Khass uniquement des équipements certifiés ATEX. Wach 3reftee chno huma les autres objets li interdits f had la zone?"
+        "content": "لا، هادشي ممنوع منعا كاملا! f la zone ATEX، un téléphone عادي يقدر يدير une étincelle وتوقع explosion. خاص غير les équipements certifiés ATEX. واش عرفتي شنو هوما الحوايج الأخرى لي ممنوعين فهاد la zone؟"
       }
     ]
   },
@@ -74,11 +91,43 @@
       },
       {
         "role": "user",
-        "content": "Ana ghadi n-bdel une pièce f la presse hydraulique. Wach n-gder ghir n-couper l-courant f le disjoncteur w n-bda l-khadma direct?"
+        "content": "أنا غادي نبدل une pièce f la presse hydraulique. واش نقدر غير نقطع le courant f le disjoncteur ونبدا الخدمة ديريكت؟"
       },
       {
         "role": "assistant",
-        "content": "L-coupure d l-courant bohdha kat-e3tabar ghir étape wahedha (la séparation). Pour travailler en toute sécurité, la procédure LOTO kat-frad 5 étapes. Daba derti la séparation, chno hya l-étape li kat-ji d'un coup de suite pour bloquer l-interrupteur?"
+        "content": "قطع le courant بوحدو كيعتبر غير étape وحدة (la séparation). باش تخدم f une sécurité كاملة، la procédure LOTO كتفرض 5 étapes. دابا درتي la séparation، شنو هي l'étape لي كتجي من بعد باش تبلوكي l'interrupteur؟"
+      }
+    ]
+  },
+  {
+    "messages": [
+      {
+        "role": "system",
+        "content": "المادة 283: يجب على المشغل أن يوفر معدات الوقاية الشخصية الملائمة لطبيعة الأشغال المنجزة، وأن يضمن صيانتها في حالة جيدة."
+      },
+      {
+        "role": "user",
+        "content": "شكون لي خاصو يخلص على les EPI، أنا ولا la société؟"
+      },
+      {
+        "role": "assistant",
+        "content": "ماشي نتا! حسب المادة 283 ديال مدونة الشغل، la société هي لي خاصها توفر les EPI لي مناسبين لنوع ديال الخدمة، وتضمن la maintenance ديالهم. ماخاصكش تخلص والو من جيبك. واش عندك دابا les EPI كاملين لي خاصين لـ le poste ديالك؟"
+      }
+    ]
+  },
+  {
+    "messages": [
+      {
+        "role": "system",
+        "content": "المادة 12: يخضع مقدمو خدمات الأصول المشفرة لالتزامات اليقظة المنصوص عليها في التشريع المتعلق بمكافحة غسل الأموال وتمويل الإرهاب."
+      },
+      {
+        "role": "user",
+        "content": "واش la plateforme ديالنا خاصها دير la vérification ديال l'identité ديال كل client؟"
+      },
+      {
+        "role": "assistant",
+        "content": "إيه، وهادي obligation قانونية. حسب المادة 12 ديال مشروع la loi 42-25، les prestataires ديال les actifs numériques خاصهم يتبعو les obligations ديال la vigilance لي كاينين f التشريع ديال la lutte contre le blanchiment. يعني la vérification ديال l'identité ماشي optionnelle. شنو هوما les documents لي كتطلبو دابا من le client الجديد؟"
       }
     ]
   }

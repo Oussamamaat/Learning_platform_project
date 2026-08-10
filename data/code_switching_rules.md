@@ -1,5 +1,10 @@
 # French / Darija Code-Switching Boundary Rules & Anti-Patterns
 
+Framing: **tenant #1's** language artifact (tenant #1 = Moroccan
+safety/security, Darija Arabic-script + French), used by the IBLOG Adaptive
+Learning Tutor's data-generation pipeline. All rules below are preserved
+verbatim.
+
 This document defines the strict code-switching syntax rules for multi-lingual and Arabizi responses.
 
 ## 1. Syntax Rules

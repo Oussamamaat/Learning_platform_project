@@ -1,0 +1,93 @@
+{
+  "storageKey": "atlas_tutor.sessions.v1",
+  "sessions": [
+    {
+      "id": "session-fr",
+      "title": "French Tutor (Fine-tuned Model)",
+      "messages": [
+        {
+          "id": "msg-fr-1",
+          "role": "user",
+          "content": "Pourquoi est-ce que le port des equipements de protection individuelle est obligatoire sur les postes a risque ?",
+          "createdAt": 1722878400000
+        },
+        {
+          "id": "msg-fr-2",
+          "role": "assistant",
+          "content": "Le port des equipements de protection individuelle (EPI) est obligatoire sur les postes a risque pour proteger votre sante et votre securite au travail. Conformement a l'article 281 du Code du travail marocain, les employeurs ont la responsabilite de fournir les EPI appropries.\n\nMais avant de continuer, j'aimerais comprendre votre situation. Quels types de risques rencontrez-vous dans votre environnement de travail ? Sont-ce des risques mecaniques, chimiques, ou autres ?",
+          "createdAt": 1722878410000
+        },
+        {
+          "id": "msg-fr-3",
+          "role": "user",
+          "content": "D'accord, mais comment je peux savoir quels equipements porter pour mon poste specifique ?",
+          "createdAt": 1722878420000
+        },
+        {
+          "id": "msg-fr-4",
+          "role": "assistant",
+          "content": "Excellente question ! Le choix des equipements depend directement du type de risques presents a votre poste.\n\nPour repondre efficacement, pouvez-vous me decrire :\n1. Quel est votre domaine d'activite (usine, construction, chimie, etc.) ?\n2. Quels types de dangers sont presents ? (bruit, chaleur, produits chimiques, machines en mouvement)\n3. Avez-vous deja recu une analyse des risques de votre poste ?\n\nLes EPI typiques incluent les casques, les gants, les chaussures de securite, les lunettes, et les masques respiratoires selon les besoins.",
+          "createdAt": 1722878430000
+        },
+        {
+          "id": "msg-fr-5",
+          "role": "user",
+          "content": "Et si je travaille dans un endroit avec beaucoup de risques chimiques ? Quels equipements supplementaires dois-je utiliser ?",
+          "createdAt": 1722878440000
+        },
+        {
+          "id": "msg-fr-6",
+          "role": "assistant",
+          "content": "Tres bonne question ! Les risques chimiques necessitent une protection renforcee et specifique.\n\nPour une exposition chimique, vous devez utiliser :\n- **Masque respiratoire approprie** (cartouche adaptee au type de produit chimique)\n- **Gants de protection chimique** (nitrile, neoprene selon le produit)\n- **Vetements de protection** (combinaison chimique si exposition directe)\n- **Lunettes de protection** etanche\n- **Chaussures de securite** resistantes aux produits chimiques\n\nMaintenant, une question importante pour evaluer votre comprehension : savez-vous comment vérifier que votre masque est bien adapte et correctement porte ? C'est une etape cruciale pour votre protection.",
+          "createdAt": 1722878450000
+        }
+      ],
+      "createdAt": 1722878400000,
+      "updatedAt": 1722878450000
+    },
+    {
+      "id": "session-darija",
+      "title": "Darija Tutor (Base Model)",
+      "messages": [
+        {
+          "id": "msg-dar-1",
+          "role": "user",
+          "content": "شنو هي فايدة لبس المعدات الديال السلامة فالشغل ?",
+          "createdAt": 1722878400000
+        },
+        {
+          "id": "msg-dar-2",
+          "role": "assistant",
+          "content": "المعدات ديال السلامة (EPI) كتحمي جسدك من الاصابات والامراض فالشغل. المادة 281 من قانون الشغل المغربي قالت انه واجب نلبس المعدات هاد فالشغل الخطير.\n\nالمعدات تشمل : الخوذة، القفازات، الحذاء الامن، والنظارات. شنو هي انواع المخاطر اللي عندك فالشغل ديالك ?",
+          "createdAt": 1722878410000
+        },
+        {
+          "id": "msg-dar-3",
+          "role": "user",
+          "content": "واخا فهمت. كيفاش نختار المعدات الصحيحة حسب الشغل ديالي وحسب نوع المخاطر ?",
+          "createdAt": 1722878420000
+        },
+        {
+          "id": "msg-dar-4",
+          "role": "assistant",
+          "content": "المعدات تختار حسب المخاطر اللي عندك. إذا كنت تشتغل قرب الآلات، لازم تلبس خوذة وقفازات ومجامة. إذا كنت تشتغل مع المواد الكيمياية، لازم تلبس قناع حماية وملابس حماية خاصة.\n\nكل صنف من الشغل عندو مخاطر مختلفة. قول لي شنو هو نوع الشغل ديالك باش نقدر ننصحك بالمعدات الصحيحة.",
+          "createdAt": 1722878430000
+        },
+        {
+          "id": "msg-dar-5",
+          "role": "user",
+          "content": "واش كاين معدات خاصة اذا كنت نشتغل قرب ديال المواد الخطيرة او الكيميائية ?",
+          "createdAt": 1722878440000
+        },
+        {
+          "id": "msg-dar-6",
+          "role": "assistant",
+          "content": "آه كاين معدات خاصة جداً للمواد الخطيرة. لازم تلبس :\n- القناع الخاص بالمواد الكيمياية (ماسك مع الفلاتر)\n- القفازات الخاصة (نيتريل او مطاط)\n- الملابس الحماية (جلاسة)\n- النظارات الحماية\n- الحذاء الامن\n\nهاد المعدات كتحميك من التسمم والحروق والاستنشاق للغازات الخطيرة. المهم تتأكد من قبل ما تشتغل.",
+          "createdAt": 1722878450000
+        }
+      ],
+      "createdAt": 1722878400000,
+      "updatedAt": 1722878450000
+    }
+  ]
+}

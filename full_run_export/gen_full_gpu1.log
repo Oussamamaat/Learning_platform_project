@@ -1,0 +1,13 @@
+11:20:47 INFO    IBLOG Training Data Generator
+11:20:47 INFO    Model: hf.co/QuantFactory/Atlas-Chat-9B-GGUF:Q4_K_M | Target: 1500 rows | Output: /kaggle/working/out_full_gpu1
+11:20:47 INFO    Loading manual files...
+11:20:47 INFO    Loaded 4/4 manual files
+11:20:47 INFO    Loading raw corpus...
+11:20:47 INFO    Loaded 36 raw corpus documents
+11:20:47 INFO      Corpus docs for industrial: 12
+11:20:47 INFO      Corpus docs for securite: 7
+11:20:47 INFO      Corpus docs for blockchain: 8
+11:20:47 INFO    Component targets: {'socratic': 400, 'code_switching': 350, 'grounded_refusal': 350, 'quiz_generation': 200, 'darija_preservation': 100, 'reasoning_preservation': 100}
+11:20:47 INFO    Component: socratic (target: 400 rows)
+11:56:46 INFO    Progress: 100/400 (attempts: 192, parse_fails: 2, salvaged: 0)
+12:35:42 INFO    Progress: 200/400 (attempts: 380, parse_fails: 7, salvaged: 0)

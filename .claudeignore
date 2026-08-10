@@ -1,0 +1,19 @@
+# Model weights & exports
+atlas_gguf_export_v11/
+atlas_gguf_export_v11_gguf/
+unsloth_compiled_cache/
+_archive/
+.gguf_venv/
+
+# Raw run logs / large intermediate exports
+full_run_export/
+incident_export/
+incident_export.zip
+
+# Dataset row files (read individually via Read when needed; excluded from broad scans)
+data/**/*.jsonl
+
+# Standard
+.git/
+__pycache__/
+.pytest_cache/

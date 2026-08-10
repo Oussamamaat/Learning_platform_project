@@ -1,12 +1,32 @@
+# Python
 __pycache__/
-*.py[cod]
-.env
+*.pyc
+*.pyo
+.pytest_cache/
 *.egg-info/
-dist/
-build/
-.venv/
-venv/
-*.db
-pgdata/
-.md info files/
-repomix-output.xml
+.gguf_venv/
+
+# Environment / secrets
+.env
+.env.*
+
+# Node / frontend
+frontend/node_modules/
+frontend/dist/
+
+# Generated model weights & compile caches (multi-GB, reproducible from adapter + base model)
+atlas_gguf_export*/
+unsloth_compiled_cache/
+
+# Superseded exports/datasets kept locally for comparison only (see CLAUDE.md)
+_archive/
+
+# Downloaded font assets (not project source)
+Inter,JetBrains_Mono,Outfit,Plus_Jakarta_Sans/
+
+# Editor/agent local-only state
+.claude/settings.local.json
+
+# OS
+Thumbs.db
+.DS_Store

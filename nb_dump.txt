@@ -1,0 +1,1307 @@
+===== CELL 0 [markdown] =====
+# Darija Enterprise Tutor — LoRA Fine-Tune of Atlas-Chat-9B (Unsloth)
+
+Trains one LoRA adapter on the **3,064-row** `v11_merged` dataset
+and exports it for vLLM multi-LoRA (primary) plus a Q4_K_M GGUF for Ollama
+(secondary). Read this cell before running anything.
+
+## Run this with "Save & Run All (Commit)", NOT interactively
+
+Same rule as the generation runs: an interactive session has a 60-minute idle
+timeout that kills every process in the container. A committed run is
+headless, has no idle timeout, and persists `/kaggle/working` as version
+output.
+
+**Settings:** Accelerator: **GPU T4 x2** (or P100) · Internet: **On** ·
+Persistence: Variables and Files.
+
+**Dataset upload must contain:** `v11_merged/` (with `train.jsonl`
++ `eval.jsonl`) and `app/` (used only for a train/serve prompt parity
+assertion — the run still works without it, with that check skipped).
+
+---
+
+## The four decisions that determine whether this fine-tune is any good
+
+Each was derived from the actual model config and the actual dataset, not
+from a template. If you change one, read the reason first.
+
+### 1. Atlas-Chat's chat template rejects the `system` role — we ship our own
+
+`MBZUAI-Paris/Atlas-Chat-9B`'s `tokenizer_config.json` contains:
+
+```jinja
+{% if messages[0]['role'] == 'system' %}{{ raise_exception('System role not supported') }}{% endif %}
+```
+
+Every one of our 3,064 rows starts with a `system` message, so
+`tokenizer.apply_chat_template(row["messages"])` raises on **100% of the
+dataset**. Gemma-2 has no system turn at all.
+
+`LOCKEDIN_PLAN.md` §6 called this out and marked it "Not yet implemented":
+the system content must be **merged into the first user turn**, and the
+*same* merge must happen at serving time or the model is fine-tuned on a
+format production never sends.
+
+This notebook resolves it by parity-by-construction rather than by
+convention:
+
+1. §4 installs a **custom `chat_template`** on the tokenizer that merges
+   `system` into the first user turn with a blank-line separator.
+2. It then **asserts** that the hand-written encoder used for training
+   produces byte-identical output to that template. If they ever disagree,
+   the run stops.
+3. The patched tokenizer is saved **with the adapter**, so vLLM / HF / TGI
+   reproduce the training format automatically with no extra code.
+4. A matching Ollama `Modelfile` `TEMPLATE` is written next to the GGUF, so
+   the Ollama path cannot drift either.
+
+The rendered training format is exactly:
+
+```
+<bos><start_of_turn>user
+{SYSTEM}
+
+{USER_1}<end_of_turn>
+<start_of_turn>model
+{ASSISTANT_1}<end_of_turn>
+<start_of_turn>user
+{USER_2}<end_of_turn>
+<start_of_turn>model
+{ASSISTANT_2}<end_of_turn>
+```
+
+### 2. Assistant-only masking is mandatory here, not a nice-to-have
+
+Measured on this dataset: the system prompt is **2,086 of the 2,456 median
+characters** per row (85%), and there are only **99 distinct system prompts** across
+3,064 rows -- more corpus-document contexts and component/domain
+combinations than the prior export (which added five new components:
+`structured_explanation`, `learner_adaptation`, `no_context_refusal`,
+`general_knowledge_disclosed`, `injection_resistance`), but still ~31x
+repetition per prompt.
+
+Train on full sequences and roughly 85% of the gradient signal is 99 fixed
+strings repeated ~31 times each — the model learns to recite its own system
+prompt instead of to tutor. §6 masks every `user` span and every
+`<start_of_turn>...` header to `-100`, keeps each assistant body **including
+its `<end_of_turn>`**, then prints and asserts the result.
+
+### 3. Single GPU, pinned before `import torch`
+
+Unsloth OSS is single-GPU. Left unpinned on a 2×T4 box, HF `Trainer` sees two
+devices and silently wraps the model in `nn.DataParallel`, which breaks
+Unsloth's patched kernels and gradient checkpointing. Unsloth's own docs note
+that on Kaggle's 2×T4, **1 T4 is faster than 2 anyway** because of that
+overhead. §1 sets `CUDA_VISIBLE_DEVICES=0` before any CUDA import and asserts
+exactly one visible device.
+
+Nothing in §1's first cell may import torch — the torch reinstall in the next
+cell only takes effect on first import.
+
+### 4. The tuned model would not know how to stop
+
+`generation_config.json` ships `eos_token_id: 1` (`<eos>`), but Gemma-2
+conversations terminate with `<end_of_turn>` (id 107), which is what this
+dataset trains the model to emit. Serve it unpatched and the model emits
+`<end_of_turn>`, nothing stops it, and it continues by role-playing the
+user's next turn.
+
+§11 patches the exported `generation_config` to `eos_token_id: [1, 107]` and
+writes `PARAMETER stop "<end_of_turn>"` into the Modelfile. It also drops
+Atlas-Chat's `"repetition_penalty": "1.2"`, which is a **string** upstream and
+makes some loaders throw.
+
+---
+
+## Hyperparameters, and why these
+
+| Setting | Value | Reason |
+|---|---|---|
+| `r` | **16** | `LOCKEDIN_PLAN.md` §6 flags r=32 (≈108M trainable params) as oversized for this row count and recommends evaluating r=16. r=16 ≈ 54M params against ~2.4M trainable tokens — still heavily over-parameterised, so the real constraint is steps×lr, not capacity. |
+| `lora_alpha` | **16** | Scaling 1.0, Unsloth's validated default for r=16, paired with lr 2e-4. |
+| `lora_dropout` | **0** | Required by Unsloth's fast LoRA path. |
+| target modules | all 7 linear | `q,k,v,o,gate,up,down`. No `embed_tokens`/`lm_head` — we are not teaching new tokens, and Gemma-2's 256k-row embedding would dominate the adapter. |
+| `max_seq_length` | **4096** | Measured: p99 = 4,209 chars, max = 8,084 (both lower than the prior export's 4,547 / 10,833 -- the new components skew shorter). 4096 tokens clears p99 comfortably and stays inside Gemma-2's 8192 native window and 4096 sliding window, so no RoPE scaling. §5 reports real token lengths and **drops** (never truncates) anything longer — a truncated row teaches mid-sentence stops and loses its `<end_of_turn>`. |
+| batch / accum | **1 × 16** | Effective batch 16. bs=1 means zero padding waste and no OOM from two long rows colliding in one batch; on a T4 the 4-bit model is dequant-bound, so bs=1 costs less throughput than an hour-3 OOM costs you. |
+| epochs | **2** | ~346 optimizer steps on 2,757 rows. The adapter is saved **every epoch**, so if epoch 2 overfits, epoch 1 is still on disk. |
+| lr / schedule | **2e-4**, cosine, 3% warmup | Standard for LoRA at this scale. |
+| `optim` | `adamw_8bit` | Halves optimizer-state VRAM at no measurable quality cost. |
+| precision | **fp16** on T4 | T4 (SM 7.5) has no bf16. Auto-detected; bf16 is used where supported. |
+| `packing` | **off** (n/a) | Packing concatenates examples, corrupting per-example masking and letting one row's answer condition another's. We pre-tokenize, so it is structurally absent. |
+
+**Trainer choice:** plain `transformers.Trainer` over a pre-tokenized dataset,
+not `SFTTrainer`. Unsloth's speedups live in the patched *model*, not the
+trainer, and once we pre-tokenize with explicit `labels` there is nothing left
+for TRL to do except be a moving API surface (`tokenizer` →
+`processing_class`, `max_seq_length` → `max_length`, `dataset_text_field`
+relocating into `SFTConfig`). Argument names that *did* move are resolved by
+signature introspection in §7, so this notebook survives version drift.
+
+---
+
+## Fail-fast order
+
+Cheap checks run before expensive ones. The ~18.5 GB base-model download does
+not start until the dataset has been located, counted and validated.
+
+| § | Step | Cost |
+|---|---|---|
+| 1 | env + single-GPU pin + install | ~5 min |
+| 2 | dataset located, counted, structurally validated, parrot rows dropped | ~10 s |
+| 3 | model download + 4-bit quantise | ~20-25 min |
+| 4 | chat template installed + **parity assertion** | ~10 s |
+| 5 | tokenise, length report, overlong rows dropped | ~1 min |
+| 6 | LoRA attached, masking **verified and asserted** | ~1 min |
+| 7 | trainer built + one-batch finite-loss smoke test | ~2 min |
+| 8 | train | **~2-3 h** |
+| 9 | per-component eval loss | ~5 min |
+| 10 | generation smoke test | ~3 min |
+| 11 | save, patch, package, GGUF | ~45 min |
+
+**Expected wall clock ≈ 6-6.5 h** (346 steps vs. the prior run's 298; that run's own training phase measured 4.1h against this same table's "2-3h" estimate, so budget from the high end). `TRAIN_TIME_BUDGET_H` in §7 hard-stops
+training so §11 is always reached — an interrupted-but-saved adapter is
+recoverable; a perfect one the container deleted is not.
+
+===== CELL 1 [markdown] =====
+## Section 1 — Environment
+
+`CUDA_VISIBLE_DEVICES` is set **before** anything imports torch. Nothing in
+this cell may import torch, directly or transitively — which is also why the
+torch reinstall below can take effect at all.
+
+===== CELL 2 [code] =====
+import os
+
+# Unsloth OSS is single-GPU. Unpinned on 2xT4, HF Trainer wraps the model in
+# nn.DataParallel, which breaks Unsloth's patched kernels and gradient
+# checkpointing. Must happen before torch is imported by anything.
+os.environ["CUDA_VISIBLE_DEVICES"] = "0"
+os.environ["TOKENIZERS_PARALLELISM"] = "false"
+os.environ["WANDB_DISABLED"] = "true"
+# Keep the ~18.5GB base-model download OFF /kaggle/working: that directory is
+# capped at 20GB and is saved as version output, so caching the model there
+# would blow the quota AND upload 18.5GB of unmodified base weights.
+os.environ["HF_HOME"] = "/root/hf_cache"
+
+import shutil
+import subprocess
+
+print(subprocess.run(
+    ["nvidia-smi", "--query-gpu=index,name,memory.total,driver_version",
+     "--format=csv"],
+    capture_output=True, text=True).stdout)
+
+for path in ("/", "/kaggle/working"):
+    total, used, free = shutil.disk_usage(path)
+    print(f"disk {path:16s} free {free / 1e9:6.1f} GB / total {total / 1e9:6.1f} GB")
+
+# Base model is ~18.5GB of bf16 safetensors, quantised to 4-bit on the fly.
+assert shutil.disk_usage("/")[2] > 25e9, (
+    "Less than 25GB free on the container disk; the base-model download will "
+    "die partway through. Restart the session."
+)
+print("\nCUDA_VISIBLE_DEVICES =", os.environ["CUDA_VISIBLE_DEVICES"])
+
+===== CELL 3 [markdown] =====
+Versions are pinned to the combination Unsloth's own maintained Kaggle
+Gemma-2-9B notebook uses. That is the path validated against Kaggle's current
+image, so it is deliberately *not* "modernised" here. Output is captured
+because pip emits several thousand lines; the tail and the resolved versions
+are printed next.
+
+A failed `!pip` does not raise, so the real safety net is the import
+assertions in the following cell — not this one.
+
+===== CELL 4 [code] =====
+%%capture install_log
+!pip install -q torch torchvision torchaudio xformers --index-url https://download.pytorch.org/whl/cu128
+!pip install -q unsloth
+!pip install -q --no-deps --upgrade "torchao>=0.16.0"
+!pip install -q transformers==4.56.2
+!pip install -q --no-deps trl==0.22.2
+
+===== CELL 5 [code] =====
+# Surface only the tail of the install log: enough to see a failure, not
+# enough to bury the rest of the run.
+log_text = getattr(install_log, "stdout", "") or str(install_log)
+tail = log_text.strip().splitlines()
+print("\n".join(tail[-15:]) if tail else "(pip was quiet)")
+
+# unsloth must be imported before transformers so its patches land.
+import unsloth
+from unsloth import FastLanguageModel
+import torch
+import transformers
+
+print("\ntorch       ", torch.__version__)
+print("transformers", transformers.__version__)
+print("unsloth     ", getattr(unsloth, "__version__", "unknown"))
+print("cuda        ", torch.version.cuda)
+
+assert torch.cuda.is_available(), "No CUDA device — the torch install broke the image."
+assert torch.cuda.device_count() == 1, (
+    f"Expected exactly 1 visible GPU, got {torch.cuda.device_count()}. "
+    "CUDA_VISIBLE_DEVICES was not applied before torch was imported."
+)
+
+GPU_NAME = torch.cuda.get_device_name(0)
+GPU_VRAM_GB = torch.cuda.get_device_properties(0).total_memory / 1e9
+SUPPORTS_BF16 = torch.cuda.is_bf16_supported()
+print(f"\nGPU: {GPU_NAME}  |  VRAM: {GPU_VRAM_GB:.1f} GB  |  bf16: {SUPPORTS_BF16}")
+print("precision ->", "bf16" if SUPPORTS_BF16 else "fp16 (T4/P100 have no bf16)")
+
+===== CELL 6 [markdown] =====
+## Section 2 — Locate and validate the dataset
+
+Runs before the model download so a missing or malformed dataset costs 10
+seconds instead of 25 minutes. The structural assertions encode exactly what
+the masking in §6 relies on: system message first, strict alternation after
+it, no Gemma control tokens smuggled inside content.
+
+The third cell then drops **9 rows (0.34%)** whose assistant turn repeats a
+chunk of the user's turn verbatim — `QUALITY_FLAGS.md` §7's "few-shot
+parroting" defect, found while verifying the masking against this exact
+dataset. Nine rows is too few to matter statistically and too damaging to
+keep: echo-then-answer is the most visible way a tutor reads as broken, and
+LoRA at r=16 will happily learn a distinctive surface pattern from 9
+examples.
+
+===== CELL 7 [code] =====
+from pathlib import Path
+
+def discover_src(marker="v11_merged/train.jsonl"):
+    """Find the uploaded dataset root under /kaggle/input by locating a known
+    file inside it, instead of assuming a fixed mount path."""
+    for root, dirs, files in os.walk("/kaggle/input"):
+        if (Path(root) / marker).is_file():
+            return Path(root)
+    return None
+
+SRC = discover_src()
+if SRC is None:
+    print("Could not auto-locate the dataset under /kaggle/input. Contents:")
+    for root, dirs, files in os.walk("/kaggle/input"):
+        depth = root.count(os.sep) - "/kaggle/input".count(os.sep)
+        print("  " * depth + root)
+        for f in files[:5]:
+            print("  " * (depth + 1) + f)
+        if depth > 4:
+            break
+    raise SystemExit("Set SRC manually from the listing above, then re-run this cell.")
+
+DATA_DIR = SRC / "v11_merged"
+TRAIN_JSONL = DATA_DIR / "train.jsonl"
+EVAL_JSONL = DATA_DIR / "eval.jsonl"
+for p in (TRAIN_JSONL, EVAL_JSONL):
+    assert p.is_file(), f"{p} missing from the uploaded Kaggle Dataset."
+
+print("SRC      =", SRC)
+print("DATA_DIR =", DATA_DIR)
+
+# app/ is optional — used only for the train/serve prompt parity check below.
+APP_DIR = SRC / "app"
+HAVE_APP = APP_DIR.is_dir()
+if HAVE_APP:
+    shutil.copytree(str(APP_DIR), "/kaggle/working/app", dirs_exist_ok=True)
+    print("copied app/ for the parity check")
+else:
+    print("app/ not uploaded — prompt parity check will be SKIPPED")
+os.chdir("/kaggle/working")
+
+===== CELL 8 [code] =====
+import json
+from collections import Counter
+
+def load_jsonl(path):
+    rows = []
+    with open(path, "r", encoding="utf-8") as fh:
+        for lineno, line in enumerate(fh, 1):
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                rows.append(json.loads(line))
+            except json.JSONDecodeError as e:
+                raise SystemExit(f"{path}:{lineno} is not valid JSON: {e}")
+    return rows
+
+train_rows = load_jsonl(TRAIN_JSONL)
+eval_rows = load_jsonl(EVAL_JSONL)
+print(f"train.jsonl {len(train_rows):5d} rows")
+print(f"eval.jsonl  {len(eval_rows):5d} rows")
+print(f"total       {len(train_rows) + len(eval_rows):5d} rows")
+
+CONTROL_TOKENS = ("<start_of_turn>", "<end_of_turn>", "<bos>", "<eos>", "<pad>")
+
+def validate(rows, label):
+    """Check every invariant the masking in Section 6 depends on."""
+    problems = Counter()
+    for r in rows:
+        ms = r.get("messages") or []
+        if not ms or ms[0]["role"] != "system":
+            problems["no leading system message"] += 1
+            continue
+        if any(m["role"] == "system" for m in ms[1:]):
+            problems["system message after position 0"] += 1
+        body = ms[1:]
+        expected = ["user" if i % 2 == 0 else "assistant" for i in range(len(body))]
+        if [m["role"] for m in body] != expected:
+            problems["roles do not alternate user/assistant"] += 1
+        if not body or body[-1]["role"] != "assistant":
+            problems["does not end on an assistant turn"] += 1
+        for m in ms:
+            if not m.get("content", "").strip():
+                problems["empty message content"] += 1
+            if any(t in m["content"] for t in CONTROL_TOKENS):
+                problems["Gemma control token inside content"] += 1
+    print(f"\n{label}: {len(rows)} rows, {sum(problems.values())} problems")
+    for k, v in problems.items():
+        print(f"  {k}: {v}")
+    return problems
+
+p1 = validate(train_rows, "train")
+p2 = validate(eval_rows, "eval")
+assert not (p1 + p2), (
+    "Dataset violates a structural invariant the masking depends on (see "
+    "above). Do not train on this; fix the export first."
+)
+
+print("\nby component:")
+all_rows = train_rows + eval_rows
+for comp, n in Counter(r["component"] for r in all_rows).most_common():
+    tr = sum(1 for r in train_rows if r["component"] == comp)
+    ev = sum(1 for r in eval_rows if r["component"] == comp)
+    print(f"  {comp:24s} {n:5d}  (train {tr:5d} / eval {ev:4d})")
+
+# Eval must cover every component, or the per-component loss table in Section 9
+# is blind exactly where it matters most (the thin components).
+missing = set(r["component"] for r in train_rows) - set(r["component"] for r in eval_rows)
+assert not missing, f"components absent from eval.jsonl: {missing}"
+
+n_sys = len({r["messages"][0]["content"] for r in all_rows})
+print(f"\ndistinct system prompts: {n_sys} across {len(all_rows)} rows "
+      f"(~{len(all_rows) / n_sys:.0f}x repetition -> masking is mandatory)")
+
+===== CELL 9 [code] =====
+# Parrot filter -- standing safety net, not a fix for a currently-known
+# defect. QUALITY_FLAGS.md section 7's "few-shot parroting" failure mode
+# (assistant echoes a chunk of the user's turn verbatim before answering)
+# hit 9 rows (0.34%) in the dataset this notebook was originally written
+# against; v11_merged already measures at 2/3,064 (0.07%), well under the
+# 5% kill line below. Kept as a regression guard, not an active cleanup.
+# The threshold is deliberately conservative: 50 consecutive characters is
+# far beyond coincidental overlap in Darija.
+PARROT_CHARS = 50
+
+def is_parrot(row):
+    users = [m["content"].strip() for m in row["messages"] if m["role"] == "user"]
+    answers = " ".join(m["content"] for m in row["messages"]
+                       if m["role"] == "assistant")
+    return any(u[:PARROT_CHARS] in answers for u in users if len(u) >= PARROT_CHARS)
+
+_before = (len(train_rows), len(eval_rows))
+parrot_rows = [r for r in train_rows + eval_rows if is_parrot(r)]
+train_rows = [r for r in train_rows if not is_parrot(r)]
+eval_rows = [r for r in eval_rows if not is_parrot(r)]
+all_rows = train_rows + eval_rows
+
+print(f"parroting rows dropped: {len(parrot_rows)} "
+      f"({len(parrot_rows) / sum(_before):.2%})")
+for comp, k in Counter(r["component"] for r in parrot_rows).most_common():
+    print(f"  {comp:24s} {k}")
+print(f"train {_before[0]} -> {len(train_rows)}   eval {_before[1]} -> {len(eval_rows)}")
+assert len(parrot_rows) / sum(_before) < 0.05, (
+    "More than 5% of rows are parroting the user. That is a generation-prompt "
+    "defect, not something to filter away — fix it upstream and regenerate."
+)
+
+===== CELL 10 [code] =====
+# Train/serve prompt parity. The system prompts baked into this dataset must be
+# renderings of the same template llm.py sends in production; the project has
+# held PRODUCTION_SYSTEM_PROMPT_TEMPLATE == SYSTEM_PROMPT_TEMPLATE as an
+# invariant throughout. This is where a silent drift would surface.
+import sys
+sys.path.insert(0, "/kaggle/working")
+PARITY_CHECKED = False
+if HAVE_APP:
+    try:
+        from app.services.generate_training_data import PRODUCTION_SYSTEM_PROMPT_TEMPLATE
+        from app.services.llm import SYSTEM_PROMPT_TEMPLATE
+    except Exception as e:
+        print(f"parity check SKIPPED ({type(e).__name__}: {e})")
+    else:
+        assert PRODUCTION_SYSTEM_PROMPT_TEMPLATE == SYSTEM_PROMPT_TEMPLATE, (
+            "generate_training_data.PRODUCTION_SYSTEM_PROMPT_TEMPLATE has "
+            "drifted from llm.SYSTEM_PROMPT_TEMPLATE — the dataset was built "
+            "with one template and production serves the other."
+        )
+        head = PRODUCTION_SYSTEM_PROMPT_TEMPLATE.split("{domain}")[0]
+        bad = [r for r in all_rows if not r["messages"][0]["content"].startswith(head)]
+        assert not bad, f"{len(bad)} rows carry a system prompt from a different template"
+        PARITY_CHECKED = True
+        print("prompt parity OK: dataset system prompts match the production")
+        print("template, and generate_training_data == llm.py")
+else:
+    print("parity check SKIPPED (app/ not uploaded)")
+
+===== CELL 11 [markdown] =====
+## Section 3 — Load Atlas-Chat-9B in 4-bit
+
+`MBZUAI-Paris/Atlas-Chat-9B` is not gated (Gemma licence, no access request),
+so no `HF_TOKEN` is needed. No pre-quantised Unsloth build of it exists, so
+Unsloth downloads the ~18.5 GB bf16 safetensors and quantises to NF4 on the
+fly. **This cell takes ~20-25 minutes.**
+
+`dtype=None` lets Unsloth pick fp16 on T4/P100 and bf16 on Ampere+. Gemma-2's
+`attn_logit_softcapping=50` / `final_logit_softcapping=30` are why this needs
+Unsloth on a T4 at all: softcapping is incompatible with FlashAttention-2, and
+naive fp16 softcapping overflows.
+
+===== CELL 12 [code] =====
+import time
+
+BASE_MODEL = "MBZUAI-Paris/Atlas-Chat-9B"
+MAX_SEQ_LENGTH = 4096   # see Section 5 for the measurement behind this
+
+t0 = time.time()
+model, tokenizer = FastLanguageModel.from_pretrained(
+    model_name=BASE_MODEL,
+    max_seq_length=MAX_SEQ_LENGTH,
+    dtype=None,          # auto: fp16 on T4/P100, bf16 on Ampere+
+    load_in_4bit=True,
+)
+print(f"\nloaded in {(time.time() - t0) / 60:.1f} min")
+print("arch         ", model.config.architectures)
+print("layers       ", model.config.num_hidden_layers)
+print("hidden       ", model.config.hidden_size)
+print("vocab        ", model.config.vocab_size)
+print("softcapping  ", model.config.attn_logit_softcapping,
+      "/", model.config.final_logit_softcapping)
+print("compute dtype", model.dtype)
+print(f"VRAM after load: {torch.cuda.memory_allocated() / 1e9:.2f} GB allocated, "
+      f"{torch.cuda.memory_reserved() / 1e9:.2f} GB reserved")
+
+===== CELL 13 [markdown] =====
+## Section 4 — Install a system-aware chat template, and prove it matches
+
+Atlas-Chat's stock template raises on `system`. This installs a replacement
+that merges the system message into the first user turn, keeping everything
+else byte-identical to Gemma-2's format (`| trim` on content, `<bos>` prefix,
+`<end_of_turn>\n` terminators, `assistant` renamed to `model`).
+
+The assertion at the bottom is the load-bearing line of the whole notebook: it
+proves the encoder used for **training** and the template shipped to
+**production** emit the same bytes. Edit one without the other and the run
+stops here instead of six hours later.
+
+===== CELL 14 [code] =====
+# Merges `system` into the first user turn. Otherwise identical to Atlas-Chat's
+# stock Gemma-2 template, alternation guard included. Raw strings keep the
+# backslash-n as Jinja source (Jinja unescapes it), matching upstream's form.
+# Content and terminator are emitted as separate {{ }} statements rather than
+# `content | trim + '<end_of_turn>'` so filter-vs-plus precedence cannot bite.
+SYSTEM_JOIN = "\n\n"
+
+CHAT_TEMPLATE = (
+    "{{ bos_token }}"
+    "{%- if messages[0]['role'] == 'system' -%}"
+    "{%- set system_message = messages[0]['content'] | trim -%}"
+    "{%- set loop_messages = messages[1:] -%}"
+    "{%- else -%}"
+    "{%- set system_message = '' -%}"
+    "{%- set loop_messages = messages -%}"
+    "{%- endif -%}"
+    "{%- for message in loop_messages -%}"
+    "{%- if (message['role'] == 'user') != (loop.index0 % 2 == 0) -%}"
+    "{{ raise_exception('Conversation roles must alternate user/assistant/user/assistant/...') }}"
+    "{%- endif -%}"
+    "{%- if message['role'] == 'assistant' -%}"
+    "{%- set role = 'model' -%}"
+    "{%- else -%}"
+    "{%- set role = message['role'] -%}"
+    "{%- endif -%}"
+    r"{{ '<start_of_turn>' + role + '\n' }}"
+    "{%- if loop.first and system_message -%}"
+    r"{{ system_message + '\n\n' }}"
+    "{%- endif -%}"
+    "{{ message['content'] | trim }}"
+    r"{{ '<end_of_turn>\n' }}"
+    "{%- endfor -%}"
+    "{%- if add_generation_prompt -%}"
+    r"{{ '<start_of_turn>model\n' }}"
+    "{%- endif -%}"
+)
+
+tokenizer.chat_template = CHAT_TEMPLATE
+
+EOT_ID = tokenizer.convert_tokens_to_ids("<end_of_turn>")
+BOS_ID = tokenizer.bos_token_id
+assert EOT_ID is not None and EOT_ID != tokenizer.unk_token_id, \
+    "<end_of_turn> is not a real token in this tokenizer"
+print("bos          ", tokenizer.bos_token, BOS_ID)
+print("eos          ", tokenizer.eos_token, tokenizer.eos_token_id)
+print("pad          ", tokenizer.pad_token, tokenizer.pad_token_id)
+print("<end_of_turn>", EOT_ID)
+
+===== CELL 15 [code] =====
+def split_system(messages):
+    """Return (system_text_or_None, remaining_messages)."""
+    ms = list(messages)
+    if ms and ms[0]["role"] == "system":
+        return ms[0]["content"].strip(), ms[1:]
+    return None, ms
+
+
+def render(messages):
+    """Render to training text. Deliberately WITHOUT <bos>: the tokenizer adds
+    exactly one, and a literal <bos> here would produce the classic double-BOS
+    that quietly degrades Gemma fine-tunes."""
+    sys_txt, body = split_system(messages)
+    out = []
+    for i, m in enumerate(body):
+        role = "model" if m["role"] == "assistant" else "user"
+        content = m["content"].strip()
+        if i == 0 and sys_txt:
+            content = sys_txt + SYSTEM_JOIN + content
+        out.append(f"<start_of_turn>{role}\n{content}<end_of_turn>\n")
+    return "".join(out)
+
+
+# PARITY PROOF: our renderer vs the template we ship to production.
+probe_rows = train_rows[:400] + eval_rows[:200]
+mismatch = 0
+for r in probe_rows:
+    ours = tokenizer.bos_token + render(r["messages"])
+    theirs = tokenizer.apply_chat_template(r["messages"], tokenize=False)
+    if ours != theirs:
+        mismatch += 1
+        if mismatch == 1:
+            print("FIRST MISMATCH\n--- render() ---")
+            print(repr(ours[:400]))
+            print("--- chat_template ---")
+            print(repr(theirs[:400]))
+assert mismatch == 0, (
+    f"{mismatch}/{len(probe_rows)} rows render differently through render() "
+    "than through the chat_template being shipped. Training format and serving "
+    "format have diverged — fix before training."
+)
+print(f"parity OK: render() == chat_template on {len(probe_rows)} rows")
+
+print("\n--- rendered example (newlines shown as \\n) ---")
+ex = render(train_rows[0]["messages"])
+print(ex[:500].replace("\n", "\\n\n"))
+print("   ...")
+print(ex[-240:].replace("\n", "\\n\n"))
+
+===== CELL 16 [markdown] =====
+## Section 5 — Tokenise, measure real lengths, drop (never truncate) overlong rows
+
+`MAX_SEQ_LENGTH` was chosen from character counts before a tokenizer was
+available; this is where it gets checked against real token counts. Rows
+longer than the limit are **dropped rather than truncated** — truncation cuts
+an assistant answer mid-sentence and removes its `<end_of_turn>`, teaching the
+model both to ramble and not to stop. Losing a handful of rows is far cheaper
+than that.
+
+===== CELL 17 [code] =====
+def encode(messages):
+    """Tokenise one row, masking everything except the assistant bodies.
+
+    Each assistant's <end_of_turn> is deliberately INSIDE the unmasked span:
+    that token is how the model learns to stop, and Atlas-Chat's
+    generation_config does not list it as EOS (patched in Section 11)."""
+    sys_txt, body = split_system(messages)
+    ids = [BOS_ID]
+    labels = [-100]
+    for i, m in enumerate(body):
+        role = "model" if m["role"] == "assistant" else "user"
+        content = m["content"].strip()
+        if i == 0 and sys_txt:
+            content = sys_txt + SYSTEM_JOIN + content
+        head = tokenizer(f"<start_of_turn>{role}\n",
+                         add_special_tokens=False)["input_ids"]
+        tail = tokenizer(f"{content}<end_of_turn>\n",
+                         add_special_tokens=False)["input_ids"]
+        ids += head + tail
+        # The turn header is always context; the body is a target only on
+        # model turns.
+        labels += [-100] * len(head)
+        labels += tail if role == "model" else [-100] * len(tail)
+    assert len(ids) == len(labels)
+    return ids, labels
+
+
+# Piecewise tokenisation must still decode to the same text the shipped
+# template produces — this catches any seam artefact between head and body.
+for r in (train_rows[:50] + eval_rows[:20]):
+    ids, _ = encode(r["messages"])
+    assert tokenizer.decode(ids) == tokenizer.apply_chat_template(
+        r["messages"], tokenize=False
+    ), "encode() does not round-trip to the shipped chat_template"
+print("encode() round-trips to the shipped chat_template")
+
+===== CELL 18 [code] =====
+import numpy as np
+
+def build(rows, label):
+    kept, dropped = [], []
+    for i, r in enumerate(rows):
+        ids, labels = encode(r["messages"])
+        rec = {
+            "input_ids": ids,
+            "labels": labels,
+            "attention_mask": [1] * len(ids),
+            "component": r["component"],
+            "src_idx": i,
+            "n_tokens": len(ids),
+            "n_target": sum(1 for x in labels if x != -100),
+        }
+        (dropped if len(ids) > MAX_SEQ_LENGTH else kept).append(rec)
+
+    lens = np.array([r["n_tokens"] for r in kept + dropped])
+    print(f"\n{label}: {len(rows)} rows")
+    print(f"  tokens  min {lens.min():5d}  p50 {int(np.percentile(lens, 50)):5d}"
+          f"  p90 {int(np.percentile(lens, 90)):5d}"
+          f"  p99 {int(np.percentile(lens, 99)):5d}  max {lens.max():5d}")
+    tgt = np.array([r["n_target"] / r["n_tokens"] for r in kept])
+    print(f"  trainable token share: p50 {np.percentile(tgt, 50):.0%}"
+          f"  min {tgt.min():.0%}  max {tgt.max():.0%}")
+    print(f"  dropped for exceeding MAX_SEQ_LENGTH={MAX_SEQ_LENGTH}: {len(dropped)}")
+    for d in dropped:
+        print(f"    - {d['component']} at {d['n_tokens']} tokens")
+    return kept
+
+
+train_enc = build(train_rows, "train")
+eval_enc = build(eval_rows, "eval")
+
+# Losing a lot here means MAX_SEQ_LENGTH is wrong, not that the data is bad —
+# stop rather than silently training on a length-biased subset.
+n_in = len(train_rows) + len(eval_rows)
+drop_rate = 1 - (len(train_enc) + len(eval_enc)) / n_in
+assert drop_rate < 0.02, (
+    f"{drop_rate:.1%} of rows exceed MAX_SEQ_LENGTH={MAX_SEQ_LENGTH}. Raise it "
+    "(Gemma-2 supports 8192) rather than dropping this much data."
+)
+print(f"\nkept: train {len(train_enc)} / eval {len(eval_enc)}  "
+      f"(dropped {drop_rate:.2%} overall)")
+
+total_target_tokens = sum(r["n_target"] for r in train_enc)
+print(f"trainable tokens per epoch: {total_target_tokens:,}")
+
+===== CELL 19 [code] =====
+from datasets import Dataset
+
+COLS = ["input_ids", "labels", "attention_mask"]
+train_ds = Dataset.from_list([{k: r[k] for k in COLS} for r in train_enc])
+eval_ds = Dataset.from_list([{k: r[k] for k in COLS} for r in eval_enc])
+print(train_ds)
+print(eval_ds)
+
+===== CELL 20 [markdown] =====
+## Section 6 — Attach LoRA, then verify the masking is actually right
+
+The printout below is worth reading in the committed log: for one real row it
+shows exactly which tokens carry gradient. The system prompt and the user's
+question must be **absent**; the assistant's answer and its `<end_of_turn>`
+must be **present**. The assertions enforce both, so a masking regression
+fails here in seconds rather than surfacing as a model that recites its own
+system prompt three hours later.
+
+===== CELL 21 [code] =====
+model = FastLanguageModel.get_peft_model(
+    model,
+    r=16,
+    target_modules=["q_proj", "k_proj", "v_proj", "o_proj",
+                    "gate_proj", "up_proj", "down_proj"],
+    lora_alpha=16,
+    lora_dropout=0,        # Unsloth's fast LoRA path requires 0
+    bias="none",
+    use_gradient_checkpointing="unsloth",
+    random_state=3407,
+    use_rslora=False,
+    loftq_config=None,
+)
+
+trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
+total = sum(p.numel() for p in model.parameters())
+print(f"trainable params: {trainable:,} / {total:,} = {100 * trainable / total:.3f}%")
+print(f"trainable tokens per epoch / trainable params = "
+      f"{total_target_tokens / trainable:.3f}")
+
+===== CELL 22 [code] =====
+# Read this in the log. It is the difference between a tutor and a parrot.
+probe = train_enc[0]
+probe_msgs = train_rows[probe["src_idx"]]["messages"]
+ids, labels = probe["input_ids"], probe["labels"]
+supervised = [i for i, l in zip(ids, labels) if l != -100]
+masked = [i for i, l in zip(ids, labels) if l == -100]
+
+print(f"component: {probe['component']}  (source row {probe['src_idx']})")
+print(f"tokens {len(ids)}  supervised {len(supervised)} "
+      f"({len(supervised) / len(ids):.0%})")
+print("\n=== MASKED (context, no gradient) — first 300 chars ===")
+print(tokenizer.decode(masked)[:300])
+print("\n=== SUPERVISED (targets) ===")
+print(tokenizer.decode(supervised)[:700])
+
+sup_text = tokenizer.decode(supervised)
+assert "You are an expert bilingual enterprise tutor" not in sup_text, \
+    "The system prompt is inside the supervised span — masking is broken."
+assert "<end_of_turn>" in sup_text, \
+    "No <end_of_turn> in the supervised span — the model will never learn to stop."
+
+last_answer = probe_msgs[-1]
+assert last_answer["role"] == "assistant"
+assert last_answer["content"].strip()[:40] in sup_text, \
+    "The final assistant answer is not in the supervised span."
+
+first_user = probe_msgs[1]["content"].strip()[:40]
+if first_user in sup_text:
+    print("\nWARNING: the user turn appears inside the supervised span.")
+if "CONTEXTE" in sup_text:
+    print("WARNING: 'CONTEXTE' appears in the supervised span — check the "
+          "assistant is not quoting the context header verbatim.")
+
+shares = [r["n_target"] / r["n_tokens"] for r in train_enc]
+assert 0.02 < float(np.mean(shares)) < 0.80, (
+    f"Mean supervised share {np.mean(shares):.1%} is implausible — expect "
+    "roughly 15-40% given the system prompt dominates each row."
+)
+print(f"\nmasking verified. mean supervised share {np.mean(shares):.1%}")
+
+===== CELL 23 [markdown] =====
+## Section 7 — Trainer
+
+Argument names are resolved by signature introspection
+(`eval_strategy`/`evaluation_strategy`, `processing_class`/`tokenizer`),
+because those renames are the most common reason a pinned notebook stops
+running six months later.
+
+`TRAIN_TIME_BUDGET_H` installs a callback that stops training cleanly if the
+budget is exceeded, so §11's save and export always run.
+
+===== CELL 24 [code] =====
+import inspect
+import math
+from transformers import (
+    Trainer, TrainingArguments, DataCollatorForSeq2Seq, TrainerCallback,
+)
+
+EPOCHS = 2
+BATCH = 1              # zero padding waste; no OOM from two long rows colliding
+ACCUM = 16             # effective batch 16
+LR = 2e-4
+TRAIN_TIME_BUDGET_H = 7.0
+
+steps_per_epoch = math.ceil(len(train_ds) / (BATCH * ACCUM))
+total_steps = steps_per_epoch * EPOCHS
+eval_steps = max(10, steps_per_epoch // 2)
+print(f"steps/epoch {steps_per_epoch}  total {total_steps}  eval every {eval_steps}")
+
+# Right padding for training; left padding would misalign the causal shift.
+tokenizer.padding_side = "right"
+
+ta_params = set(inspect.signature(TrainingArguments.__init__).parameters)
+eval_key = "eval_strategy" if "eval_strategy" in ta_params else "evaluation_strategy"
+
+args_kw = dict(
+    output_dir="/kaggle/working/checkpoints",
+    per_device_train_batch_size=BATCH,
+    per_device_eval_batch_size=BATCH,
+    gradient_accumulation_steps=ACCUM,
+    num_train_epochs=EPOCHS,
+    learning_rate=LR,
+    lr_scheduler_type="cosine",
+    warmup_ratio=0.03,
+    weight_decay=0.01,
+    optim="adamw_8bit",
+    max_grad_norm=1.0,
+    fp16=not SUPPORTS_BF16,
+    bf16=SUPPORTS_BF16,
+    logging_steps=5,
+    save_strategy="epoch",       # epoch 1 survives if epoch 2 overfits
+    save_total_limit=2,
+    report_to="none",            # never block a headless run on a wandb prompt
+    disable_tqdm=True,           # clean periodic lines beat CR spam in Kaggle logs
+    seed=3407,
+    data_seed=3407,
+    remove_unused_columns=False,
+    group_by_length=False,
+    label_names=["labels"],
+)
+args_kw[eval_key] = "steps"
+args_kw["eval_steps"] = eval_steps
+args = TrainingArguments(**{k: v for k, v in args_kw.items() if k in ta_params})
+print("precision:", "bf16" if args.bf16 else "fp16")
+
+
+class TimeBudget(TrainerCallback):
+    def __init__(self, hours):
+        self.limit = hours * 3600
+        self.t0 = time.time()
+
+    def on_step_end(self, args, state, control, **kw):
+        if time.time() - self.t0 > self.limit:
+            print(f"\n[budget] {self.limit / 3600:.1f}h exhausted at step "
+                  f"{state.global_step}/{total_steps} — stopping cleanly so the "
+                  f"adapter still gets saved.")
+            control.should_training_stop = True
+        return control
+
+
+class Heartbeat(TrainerCallback):
+    """A committed run is watched through its log, so make the log useful."""
+
+    def __init__(self):
+        self.t0 = time.time()
+
+    def on_log(self, args, state, control, logs=None, **kw):
+        if not logs or "loss" not in logs:
+            return
+        el = time.time() - self.t0
+        frac = max(state.global_step / total_steps, 1e-9)
+        print(f"[step {state.global_step:4d}/{total_steps}] "
+              f"loss {logs['loss']:.4f} lr {logs.get('learning_rate', 0):.2e} "
+              f"| {el / 60:5.1f}m elapsed, ETA {(el / frac - el) / 60:5.1f}m "
+              f"| VRAM {torch.cuda.max_memory_allocated() / 1e9:.1f}GB")
+
+
+tr_params = set(inspect.signature(Trainer.__init__).parameters)
+tok_kw = "processing_class" if "processing_class" in tr_params else "tokenizer"
+
+trainer = Trainer(
+    model=model,
+    args=args,
+    train_dataset=train_ds,
+    eval_dataset=eval_ds,
+    data_collator=DataCollatorForSeq2Seq(
+        tokenizer=tokenizer, padding=True, label_pad_token_id=-100,
+        return_tensors="pt",
+    ),
+    callbacks=[TimeBudget(TRAIN_TIME_BUDGET_H), Heartbeat()],
+    **{tok_kw: tokenizer},
+)
+print("trainer ready via", tok_kw, "and", eval_key)
+
+===== CELL 25 [code] =====
+# One collated batch, end to end, before committing hours to it. Confirms the
+# collator preserved -100 and that a forward pass yields a finite loss — fp16
+# plus Gemma-2 softcapping is exactly where a non-finite loss would appear.
+batch = next(iter(trainer.get_train_dataloader()))
+print({k: tuple(v.shape) for k, v in batch.items()})
+assert (batch["labels"] == -100).any(), "collator lost the -100 mask"
+with torch.no_grad():
+    out = model(**{k: v.to("cuda") for k, v in batch.items()})
+smoke_loss = float(out.loss)
+print("smoke loss:", smoke_loss)
+assert math.isfinite(smoke_loss), (
+    "Non-finite loss on the first batch — fp16 overflow in Gemma-2 "
+    "softcapping. Do not train; investigate the Unsloth version."
+)
+del out, batch
+torch.cuda.empty_cache()
+
+===== CELL 26 [markdown] =====
+## Section 8 — Train
+
+Watch two things in the log: `loss` should fall then flatten, and the periodic
+`eval_loss` should fall then flatten *with it*. Eval loss turning back up
+while train loss keeps falling is overfitting — in that case the epoch-1
+checkpoint under `/kaggle/working/checkpoints` is the one you want, not the
+final adapter. §8's tail prints which step had the best eval loss.
+
+===== CELL 27 [code] =====
+baseline = trainer.evaluate()
+print("eval_loss BEFORE training:", round(baseline["eval_loss"], 4))
+
+t_train = time.time()
+result = trainer.train()
+train_minutes = (time.time() - t_train) / 60
+print(f"\ntrained in {train_minutes:.1f} min")
+print("final train loss:", round(result.training_loss, 4))
+print("peak VRAM:", round(torch.cuda.max_memory_allocated() / 1e9, 2), "GB")
+
+final_eval = trainer.evaluate()
+print("\neval_loss AFTER training:", round(final_eval["eval_loss"], 4),
+      f"(from {round(baseline['eval_loss'], 4)})")
+assert final_eval["eval_loss"] < baseline["eval_loss"], (
+    "Eval loss did not improve on the untrained baseline. Something is wrong "
+    "with the LoRA config or the masking — do not ship this adapter."
+)
+
+hist = [h for h in trainer.state.log_history if "eval_loss" in h]
+print("\neval curve:")
+for h in hist:
+    print(f"  step {h.get('step', 0):4d}  eval_loss {h['eval_loss']:.4f}")
+best = min(hist, key=lambda h: h["eval_loss"]) if hist else None
+if best is not None and best is not hist[-1]:
+    print(f"\n  NOTE: best eval_loss was {best['eval_loss']:.4f} at step "
+          f"{best.get('step')}, not at the end ({hist[-1]['eval_loss']:.4f}) — "
+          f"overfitting. Prefer the epoch checkpoint nearest that step.")
+
+===== CELL 28 [markdown] =====
+## Section 9 — Per-component eval loss
+
+Aggregate eval loss hides the thing that matters most here: this is **one**
+adapter carrying eleven different behaviours -- five of them
+(`structured_explanation`, `learner_adaptation`, `no_context_refusal`,
+`general_knowledge_disclosed`, `injection_resistance`) added since the run
+`TRAINING_REPORT.txt` documents, so this is the first per-component signal
+any of the five has. `darija_preservation`'s old shortfall (129/200 rows,
+capped by a static-string prompt) is fixed --
+`build_darija_preservation_prompt(topic)` now varies by topic, and this
+pool carries 214 rows there, above its 200-row target.
+
+A component whose loss sits far above the others is underfit. This table is
+the evidence for whether any of the five untested components needs a
+targeted top-up before this adapter ships.
+
+Loss is taken from the model's own fused cross-entropy (`labels=` on the
+forward pass) rather than by materialising logits: at 4096 positions × 256k
+vocab an fp32 logits tensor is ~4 GB and would OOM a T4.
+
+===== CELL 29 [code] =====
+from collections import defaultdict
+
+model.eval()
+per_comp = defaultdict(lambda: [0.0, 0])   # component -> [loss_sum, n_target_tokens]
+
+with torch.no_grad():
+    for k, rec in enumerate(eval_enc):
+        ids = torch.tensor([rec["input_ids"]], device="cuda")
+        lab = torch.tensor([rec["labels"]], device="cuda")
+        out = model(input_ids=ids, attention_mask=torch.ones_like(ids), labels=lab)
+        # HF returns mean CE over non-ignored SHIFTED labels, so multiply back
+        # up by that count to get a sum we can pool across rows.
+        n = int((lab[:, 1:] != -100).sum())
+        per_comp[rec["component"]][0] += float(out.loss) * n
+        per_comp[rec["component"]][1] += n
+        if (k + 1) % 50 == 0:
+            print(f"  scored {k + 1}/{len(eval_enc)}")
+        del out
+
+rows_out = []
+for comp, (s, n) in per_comp.items():
+    n_eval = sum(1 for r in eval_enc if r["component"] == comp)
+    n_train = sum(1 for r in train_enc if r["component"] == comp)
+    rows_out.append((comp, n_train, n_eval, s / max(n, 1)))
+rows_out.sort(key=lambda t: t[3], reverse=True)
+
+print()
+print(f"{'component':24s} {'train':>6s} {'eval':>5s} {'loss/token':>11s} {'ppl':>8s}")
+print("-" * 60)
+for comp, n_train, n_eval, loss in rows_out:
+    print(f"{comp:24s} {n_train:6d} {n_eval:5d} {loss:11.4f} "
+          f"{math.exp(min(loss, 20)):8.2f}")
+print("-" * 60)
+overall = (sum(s for s, _ in per_comp.values())
+           / sum(n for _, n in per_comp.values()))
+print(f"{'OVERALL':24s} {len(train_enc):6d} {len(eval_enc):5d} {overall:11.4f} "
+      f"{math.exp(min(overall, 20)):8.2f}")
+
+flagged = [r for r in rows_out if r[3] > 1.6 * overall]
+if flagged:
+    for comp, n_train, n_eval, loss in flagged:
+        print(f"\nUNDERFIT: '{comp}' at {loss:.3f} loss/token is "
+              f"{loss / overall:.2f}x the overall mean on only {n_train} train "
+              f"rows. Top that component up before shipping this adapter.")
+else:
+    print(f"\nNo component exceeds 1.6x the mean loss — the adapter learned all "
+          f"{len(rows_out)} behaviours at comparable quality.")
+
+===== CELL 30 [markdown] =====
+## Section 10 — Generation smoke test
+
+Loss cannot tell you whether the model still writes Arabic-script Darija,
+still code-switches French, still emits parseable quiz JSON, or stops cleanly.
+This generates from real eval prompts and checks all four.
+
+===== CELL 31 [code] =====
+FastLanguageModel.for_inference(model)
+tokenizer.padding_side = "left"    # correct side for generation
+
+STOP_IDS = sorted({tokenizer.eos_token_id, EOT_ID})
+print("stop ids:", STOP_IDS)
+
+
+def ask(row, max_new_tokens=320):
+    """Prompt the model with a real eval row's system + first user turn."""
+    msgs = row["messages"][:2]
+    text = tokenizer.apply_chat_template(
+        msgs, tokenize=False, add_generation_prompt=True
+    )
+    inputs = tokenizer([text], return_tensors="pt",
+                       add_special_tokens=False).to("cuda")
+    gen = model.generate(
+        **inputs, max_new_tokens=max_new_tokens, do_sample=False,
+        eos_token_id=STOP_IDS, pad_token_id=tokenizer.pad_token_id,
+    )
+    return tokenizer.decode(gen[0][inputs["input_ids"].shape[1]:],
+                            skip_special_tokens=True).strip()
+
+
+ARABIC = range(0x0600, 0x0700)
+samples = {}
+for comp in ("socratic", "grounded_refusal", "quiz_generation",
+             "code_switching", "darija_preservation"):
+    row = next((r for r in eval_rows if r["component"] == comp), None)
+    if row is None:
+        continue
+    ans = ask(row)
+    samples[comp] = ans
+    n_ar = sum(1 for ch in ans if ord(ch) in ARABIC)
+    print("=" * 70)
+    print(f"[{comp}]  {len(ans)} chars, {n_ar} Arabic-script chars")
+    print("USER :", row["messages"][1]["content"][:160])
+    print("MODEL:", ans[:700])
+    print()
+
+===== CELL 32 [code] =====
+# Four things the loss curve cannot see.
+issues = []
+
+for comp, ans in samples.items():
+    if comp == "quiz_generation":
+        continue
+    n_ar = sum(1 for ch in ans if ord(ch) in ARABIC)
+    if not ans:
+        issues.append(f"{comp}: empty generation")
+    elif n_ar < 0.3 * len(ans.replace(" ", "")):
+        issues.append(f"{comp}: mostly non-Arabic script ({n_ar} Arabic chars)")
+
+if "quiz_generation" in samples:
+    raw = samples["quiz_generation"].strip()
+    for fence in ("```json", "```"):
+        raw = raw.removeprefix(fence)
+    raw = raw.removesuffix("```").strip()
+    try:
+        parsed = json.loads(raw)
+        n_q = len(parsed.get("questions", []))
+        print(f"quiz JSON parses: {n_q} questions")
+        if n_q == 0:
+            issues.append("quiz_generation: parsed but zero questions")
+    except json.JSONDecodeError as e:
+        issues.append(f"quiz_generation: JSON does not parse ({e})")
+
+# Did it stop, or start role-playing the user's next turn?
+for comp, ans in samples.items():
+    if "<start_of_turn>" in ans or "CONTEXTE :" in ans:
+        issues.append(f"{comp}: leaked a turn marker / context — stop-token problem")
+
+CJK = list(range(0x3000, 0xA000)) + list(range(0xAC00, 0xD800))
+CJK_SET = set(CJK)
+for comp, ans in samples.items():
+    if any(ord(ch) in CJK_SET for ch in ans):
+        issues.append(f"{comp}: CJK contamination")
+
+print("\n" + ("SMOKE TEST CLEAN" if not issues else "SMOKE TEST ISSUES:"))
+for i in issues:
+    print("  -", i)
+
+===== CELL 33 [markdown] =====
+## Section 11 — Save, patch, package, export
+
+Priority order matters. `LOCKEDIN_PLAN.md` §2.3 puts production on **vLLM
+multi-LoRA**, so the **adapter is the primary artifact** and the GGUF is a
+convenience for local Ollama dev. The adapter is therefore saved, patched and
+zipped *first*; the GGUF is attempted afterwards behind a disk-space guard.
+`save_pretrained_gguf` merges to 16-bit (~18.5 GB) before quantising (~5.8
+GB), which does not fit inside `/kaggle/working`'s 20 GB cap, and it compiles
+llama.cpp — the least reliable step in this notebook. It must never be the
+reason a trained adapter is lost.
+
+===== CELL 34 [code] =====
+LORA_DIR = "/kaggle/working/lora_model"
+model.save_pretrained(LORA_DIR)
+tokenizer.save_pretrained(LORA_DIR)   # carries our system-aware chat_template
+print("saved adapter + patched tokenizer ->", LORA_DIR)
+
+# Atlas-Chat's generation_config lists only <eos> (1). Our rows terminate with
+# <end_of_turn> (107), so unpatched the served model never stops — it just
+# starts role-playing the user. Its repetition_penalty is also the STRING
+# "1.2" upstream, which some loaders reject.
+gc_path = Path(LORA_DIR) / "generation_config.json"
+gen_cfg = json.loads(gc_path.read_text()) if gc_path.exists() else {}
+gen_cfg.update({
+    "bos_token_id": BOS_ID,
+    "eos_token_id": STOP_IDS,
+    "pad_token_id": tokenizer.pad_token_id,
+})
+gen_cfg.pop("repetition_penalty", None)
+gen_cfg.pop("cache_implementation", None)
+gc_path.write_text(json.dumps(gen_cfg, indent=2))
+print("patched generation_config:", gen_cfg)
+
+# Verify the saved tokenizer really carries the template, not the stock one
+# that raises on system messages.
+from transformers import AutoTokenizer
+_rt = AutoTokenizer.from_pretrained(LORA_DIR)
+_probe = train_rows[0]["messages"]
+assert _rt.apply_chat_template(_probe, tokenize=False) == \
+    tokenizer.bos_token + render(_probe), \
+    "Saved tokenizer does not reproduce the training format — vLLM would " \
+    "serve a different prompt shape than we trained on."
+print("round-trip OK: saved tokenizer reproduces the training format")
+
+for p in sorted(Path(LORA_DIR).iterdir()):
+    print(f"  {p.name:34s} {p.stat().st_size / 1e6:8.2f} MB")
+
+===== CELL 35 [code] =====
+# Ollama Modelfile. The TEMPLATE reproduces the training format exactly:
+# system merged into the first user turn, separated by a blank line. llm.py
+# calls /api/generate with `system` + `prompt`, which is what .System and
+# .Prompt bind to, so this is the path production actually takes today.
+# Built by joining lines rather than with an f-string so the Go-template
+# braces need no escaping.
+GGUF_NAME = "atlas-darija-tutor-q4_k_m.gguf"
+Q3 = '"' * 3
+
+TEMPLATE_BODY = "\n".join([
+    "{{ if .System }}<start_of_turn>user",
+    "{{ .System }}",
+    "",
+    "{{ .Prompt }}<end_of_turn>",
+    "{{ else }}<start_of_turn>user",
+    "{{ .Prompt }}<end_of_turn>",
+    "{{ end }}<start_of_turn>model",
+    "{{ .Response }}<end_of_turn>",
+])
+
+MODELFILE = "\n".join([
+    f"FROM ./{GGUF_NAME}",
+    "",
+    f"TEMPLATE {Q3}{TEMPLATE_BODY}",
+    Q3,
+    "",
+    'PARAMETER stop "<end_of_turn>"',
+    'PARAMETER stop "<start_of_turn>"',
+    "PARAMETER temperature 0.2",
+    "PARAMETER num_ctx 4096",
+    "",
+])
+Path("/kaggle/working/Modelfile").write_text(MODELFILE, encoding="utf-8")
+print(MODELFILE)
+
+===== CELL 36 [code] =====
+report = {
+    "base_model": BASE_MODEL,
+    "gpu": GPU_NAME,
+    "precision": "bf16" if SUPPORTS_BF16 else "fp16",
+    "max_seq_length": MAX_SEQ_LENGTH,
+    "lora": {
+        "r": 16, "alpha": 16, "dropout": 0,
+        "target_modules": ["q_proj", "k_proj", "v_proj", "o_proj",
+                           "gate_proj", "up_proj", "down_proj"],
+    },
+    "trainable_params": trainable,
+    "epochs": EPOCHS,
+    "effective_batch": BATCH * ACCUM,
+    "learning_rate": LR,
+    "scheduler": "cosine",
+    "rows": {"train": len(train_ds), "eval": len(eval_ds),
+             "dropped_overlong_frac": round(drop_rate, 5)},
+    "trainable_tokens_per_epoch": total_target_tokens,
+    "train_minutes": round(train_minutes, 1),
+    "steps_completed": trainer.state.global_step,
+    "steps_planned": total_steps,
+    "eval_loss_before": round(baseline["eval_loss"], 5),
+    "eval_loss_after": round(final_eval["eval_loss"], 5),
+    "train_loss_final": round(result.training_loss, 5),
+    "eval_curve": [{"step": h.get("step"), "eval_loss": round(h["eval_loss"], 5)}
+                   for h in hist],
+    "best_eval_step": (best.get("step") if best is not None else None),
+    "per_component_eval_loss": {
+        c: {"train_rows": tr, "eval_rows": ev, "loss_per_token": round(l, 5)}
+        for c, tr, ev, l in rows_out
+    },
+    "overall_eval_loss_per_token": round(overall, 5),
+    "system_merge": {"strategy": "system merged into first user turn",
+                     "separator": SYSTEM_JOIN},
+    "stop_token_ids": STOP_IDS,
+    "prompt_parity_checked": PARITY_CHECKED,
+    "smoke_test_issues": issues,
+}
+Path("/kaggle/working/TRAINING_REPORT.json").write_text(json.dumps(report, indent=2))
+print(json.dumps(report, indent=2))
+
+===== CELL 37 [code] =====
+# Zip the adapter FIRST — before the GGUF step, which is the flaky one.
+export_dir = Path("/kaggle/working/finetuned_model_export")
+if export_dir.exists():
+    shutil.rmtree(export_dir)
+export_dir.mkdir()
+shutil.copytree(LORA_DIR, export_dir / "lora_model")
+shutil.copy("/kaggle/working/Modelfile", export_dir / "Modelfile")
+shutil.copy("/kaggle/working/TRAINING_REPORT.json",
+            export_dir / "TRAINING_REPORT.json")
+(export_dir / "chat_template.jinja").write_text(CHAT_TEMPLATE, encoding="utf-8")
+
+shutil.make_archive("/kaggle/working/finetuned_model_export", "zip",
+                    str(export_dir))
+z = Path("/kaggle/working/finetuned_model_export.zip")
+print(f"PACKAGED {z} — {z.stat().st_size / 1e6:.1f} MB")
+print("This zip is the deliverable. Everything below is optional.")
+
+===== CELL 38 [code] =====
+# GGUF is best-effort by design: merging to 16-bit needs ~18.5GB and llama.cpp
+# has to be compiled. The adapter above is already safe on disk.
+GGUF_BUILD = "/root/gguf_build"     # container disk, NOT the 20GB working quota
+free_root = shutil.disk_usage("/")[2] / 1e9
+free_work = shutil.disk_usage("/kaggle/working")[2] / 1e9
+print(f"free: container {free_root:.1f} GB, working {free_work:.1f} GB "
+      f"(need ~26 / ~7)")
+
+if free_root < 26 or free_work < 7:
+    print("SKIPPING GGUF export — not enough disk. Rebuild locally from the "
+          "adapter zip; see FINETUNE_AND_DEPLOY.md.")
+else:
+    try:
+        t_g = time.time()
+        model.save_pretrained_gguf(GGUF_BUILD, tokenizer,
+                                   quantization_method="q4_k_m")
+        produced = sorted(Path(GGUF_BUILD).rglob("*.gguf"),
+                          key=lambda p: p.stat().st_size, reverse=True)
+        print(f"gguf build took {(time.time() - t_g) / 60:.1f} min; found "
+              f"{[p.name for p in produced]}")
+        if produced:
+            dst = Path("/kaggle/working") / GGUF_NAME
+            shutil.move(str(produced[0]), dst)
+            print(f"GGUF -> {dst} ({dst.stat().st_size / 1e9:.2f} GB)")
+            print("Left unzipped on purpose: a q4 GGUF does not compress, and "
+                  "zipping it would need another ~6GB of the working quota.")
+        shutil.rmtree(GGUF_BUILD, ignore_errors=True)
+    except Exception as e:
+        print(f"GGUF export FAILED ({type(e).__name__}: {e})")
+        print("Newer Unsloth builds renamed the kwarg to quantization_type — "
+              "if that is the error, retry with that name.")
+        print("The adapter zip is unaffected; rebuild the GGUF locally.")
+        shutil.rmtree(GGUF_BUILD, ignore_errors=True)
+
+===== CELL 39 [code] =====
+print("=" * 66)
+print("ARTIFACTS IN /kaggle/working")
+print("=" * 66)
+for p in sorted(Path("/kaggle/working").iterdir()):
+    if p.is_file():
+        print(f"  {p.name:44s} {p.stat().st_size / 1e6:9.1f} MB")
+    else:
+        print(f"  {p.name + '/':44s} (dir)")
+
+print()
+print("Primary  : finetuned_model_export.zip")
+print("           (LoRA adapter + patched tokenizer/chat_template +")
+print("            Modelfile + TRAINING_REPORT.json)")
+print(f"Secondary: {GGUF_NAME}, if the GGUF step ran")
+print(f"Checkpoints: /kaggle/working/checkpoints (per-epoch, for rollback)")
+print()
+print("SUMMARY")
+print(f"  eval_loss {report['eval_loss_before']} -> {report['eval_loss_after']}")
+print(f"  steps {report['steps_completed']}/{report['steps_planned']}"
+      f"  in {report['train_minutes']} min")
+print(f"  smoke-test issues: {len(issues)}")
+print()
+print("Next: read TRAINING_REPORT.json, then FINETUNE_AND_DEPLOY.md ->")
+print("  'Go/no-go before deploying' and 'Train/serve parity'.")
+

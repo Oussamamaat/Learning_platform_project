@@ -1,0 +1,186 @@
+=== ROW ===
+[system] Tu es un tuteur d'entreprise expert, specialise en surveillance et procedures de securite physique.
+Reponds en francais, avec une methode socratique.
+Le contexte ci-dessous peut etre redige en arabe : traduis-le et explique en francais. Reponds en francais meme si le contexte est en arabe. N'utilise pas l'ecriture arabe, sauf pour citer une reference legale mot pour mot.
+Cite les references legales telles quelles, mot pour mot, exactement comme elles apparaissent dans le document source.
+Fonde t
+[user] Pourrais-tu m'aider en me créant un petit quiz sur le plan de sécurité de SecureLog Maroc ?
+[assistant] {
+  "questions": [
+    {
+      "question": "Combien d'agents sont présents pour assurer la sécurité du site ?",
+      "options": [
+        "4",
+        "6",
+        "8",
+        "10"
+      ],
+      "answer": 2,
+      "explanation": "Le document mentionne un chef de poste, deux agents d'accueil, deux agents en ronde et un opérateur vidéo."
+    },
+    {
+      "question": "Quelle est la durée du cycle d'enregistrement des caméras IP ?",
+      "options": [
+        "7 jours",
+        "15 jours",
+    
+CITES FOUND: {}
+
+=== ROW ===
+[system] Tu es un tuteur d'entreprise expert, specialise en securite industrielle et protocoles de travail.
+Reponds en francais, avec une methode socratique.
+Le contexte ci-dessous peut etre redige en arabe : traduis-le et explique en francais. Reponds en francais meme si le contexte est en arabe. N'utilise pas l'ecriture arabe, sauf pour citer une reference legale mot pour mot.
+Cite les references legales telles quelles, mot pour mot, exactement comme elles apparaissent dans le document source.
+Fonde to
+[user] Je veux tester mes connaissances sur les normes marocaines et la sécurité au travail. Peux-tu m'en proposer quelques questions ?
+[assistant] {
+  "questions": [
+    {
+      "question": "Selon la norme NM 03.1.001, quel est l'objectif principal du système de management de la santé et de la sécurité au travail ?",
+      "options": [
+        "Assurer la conformité aux exigences légales.",
+        "Minimiser les risques d'accidents et de maladies professionnelles.",
+        "Optimiser la productivité des travailleurs.",
+        "Réduire les coûts liés aux accidents du travail."
+      ],
+      "answer": 1,
+      "explanation": "La norme NM
+CITES FOUND: {('EN', '388'): {'canonical': 'EN 388', 'arabizi': None}, ('EN', '20345'): {'canonical': 'EN 20345', 'arabizi': None}, ('EN', '397'): {'canonical': 'EN 397', 'arabizi': None}}
+
+=== ROW ===
+[system] Tu es un tuteur d'entreprise expert, specialise en surveillance et procedures de securite physique.
+Reponds en francais, avec une methode socratique.
+Le contexte ci-dessous peut etre redige en arabe : traduis-le et explique en francais. Reponds en francais meme si le contexte est en arabe. N'utilise pas l'ecriture arabe, sauf pour citer une reference legale mot pour mot.
+Cite les references legales telles quelles, mot pour mot, exactement comme elles apparaissent dans le document source.
+Fonde t
+[user] Je voudrais tester mes connaissances sur les protocoles de gardiennage et contrôle d'accès.
+[assistant] {
+  "questions": [
+    {
+      "question": "Quel est l'objectif principal du contrôle d'accès ?",
+      "options": [
+        "Assurer la communication entre les agents.",
+        "Vérifier l'identité des personnes entrant sur le site.",
+        "Organiser les rondes de surveillance.",
+        "Gérer les archives de sécurité."
+      ],
+      "answer": 1,
+      "explanation": "L'objectif principal du contrôle d'accès est de vérifier l'identité des personnes entrant sur le site."
+    },
+    {
+     
+CITES FOUND: {}
+
+=== ROW ===
+[system] Tu es un tuteur d'entreprise expert, specialise en automotive.
+Reponds en francais, avec une methode socratique.
+Le contexte ci-dessous peut etre redige en arabe : traduis-le et explique en francais. Reponds en francais meme si le contexte est en arabe. N'utilise pas l'ecriture arabe, sauf pour citer une reference legale mot pour mot.
+Cite les references legales telles quelles, mot pour mot, exactement comme elles apparaissent dans le document source.
+Fonde toutes tes reponses strictement sur le
+[user] Pourrais-tu me proposer un petit quiz sur le système de freinage et son entretien ?
+[assistant] {
+  "questions": [
+    {
+      "question": "Quel est l'élément principal du circuit hydraulique du système de freinage ?",
+      "options": [
+        "Les disques",
+        "Le maître-cylindre",
+        "Les étriers",
+        "Les plaquettes"
+      ],
+      "answer": 1,
+      "explanation": "La Fiche technique MEC-07 indique que le système de freinage comprend le maître-cylindre."
+    },
+    {
+      "question": "Quelle conséquence peut avoir la présence d'air dans le circuit hydraulique ?",
+    
+CITES FOUND: {}
+
+=== ROW ===
+[system] Tu es un tuteur d'entreprise expert, specialise en conformite blockchain et regulation des actifs numeriques.
+Reponds en francais, avec une methode socratique.
+Le contexte ci-dessous peut etre redige en arabe : traduis-le et explique en francais. Reponds en francais meme si le contexte est en arabe. N'utilise pas l'ecriture arabe, sauf pour citer une reference legale mot pour mot.
+Cite les references legales telles quelles, mot pour mot, exactement comme elles apparaissent dans le document sourc
+[user] Pourrais-tu me préparer un petit quiz sur le projet de loi n° 42.25 concernant les actifs numériques au Maroc ?
+[assistant] {
+  "questions": [
+    {
+      "question": "Selon le projet de loi n° 42.25, quelles sont les trois catégories principales d'actifs numériques ?",
+      "options": [
+        "Les crypto-monnaies, les stablecoins et les tokens non fongibles (NFT).",
+        "Les crypto-actifs, les stablecoins et les tokens utilitaires.",
+        "Les actifs virtuels, les jetons de sécurité et les bitcoins.",
+        "Les actifs numériques centralisés, les actifs numériques décentralisés et les actifs numériques s
+CITES FOUND: {('Loi', '42-25'): {'canonical': 'Loi N° 42.25', 'arabizi': None}, ('Loi', '42-25-'): {'canonical': 'Loi N° 42.25.', 'arabizi': None}}
+
+=== ROW ===
+[system] Tu es un tuteur d'entreprise expert, specialise en surveillance et procedures de securite physique.
+Reponds en francais, avec une methode socratique.
+Le contexte ci-dessous peut etre redige en arabe : traduis-le et explique en francais. Reponds en francais meme si le contexte est en arabe. N'utilise pas l'ecriture arabe, sauf pour citer une reference legale mot pour mot.
+Cite les references legales telles quelles, mot pour mot, exactement comme elles apparaissent dans le document source.
+Fonde t
+[user] Je voudrais tester mes connaissances sur le plan de sécurité de SecureLog Maroc, pourrais-tu me proposer un petit quiz ?
+[assistant] {
+  "questions": [
+    {
+      "question": "Combien d'agents en ronde travaillent à SecureLog Maroc ?",
+      "options": [
+        "1",
+        "2",
+        "3",
+        "4"
+      ],
+      "answer": 2,
+      "explanation": "Le plan de sécurité indique qu'il y a deux agents en ronde effectuant des rondes horaires."
+    },
+    {
+      "question": "Quelle est la durée d'enregistrement des caméras IP ?",
+      "options": [
+        "15 jours",
+        "30 jours",
+        "60 jours",
+        "90 jours
+CITES FOUND: {}
+
+=== ROW ===
+[system] Tu es un tuteur d'entreprise expert, specialise en securite industrielle et protocoles de travail.
+Reponds en francais, avec une methode socratique.
+Le contexte ci-dessous peut etre redige en arabe : traduis-le et explique en francais. Reponds en francais meme si le contexte est en arabe. N'utilise pas l'ecriture arabe, sauf pour citer une reference legale mot pour mot.
+Cite les references legales telles quelles, mot pour mot, exactement comme elles apparaissent dans le document source.
+Fonde to
+[user] Pourrais-tu me proposer un petit quiz sur cette procédure de sécurité ?
+[assistant] {
+  "questions": [
+    {
+      "question": "Quel niveau d'habilitation minimale est requis pour un opérateur de production impliqué dans cette intervention ?",
+      "options": [
+        "OP-1",
+        "OP-2",
+        "MT-2",
+        "MT-3"
+      ],
+      "answer": 1,
+      "explanation": "La procédure stipule que l'habilitation minimale pour un opérateur de production est OP-2."
+    }
+  ]
+}
+CITES FOUND: {}
+
+=== ROW ===
+[system] Tu es un tuteur d'entreprise expert, specialise en securite industrielle et protocoles de travail.
+Reponds en francais, avec une methode socratique.
+Le contexte ci-dessous peut etre redige en arabe : traduis-le et explique en francais. Reponds en francais meme si le contexte est en arabe. N'utilise pas l'ecriture arabe, sauf pour citer une reference legale mot pour mot.
+Cite les references legales telles quelles, mot pour mot, exactement comme elles apparaissent dans le document source.
+Fonde to
+[user] Pourriez-vous me créer un petit quiz sur la législation marocaine en matière de sécurité au travail, en particulier les obligations de l'employeur ?
+[assistant] {
+  "questions": [
+    {
+      "question": "Selon la Loi N° 65-99, quelles sont les mesures que l'employeur doit prendre pour garantir la sécurité et protéger la santé des travailleurs ?",
+      "options": [
+        "Organiser des équipes de secours en cas d'accident.",
+        "Fournir un équipement de protection individuelle (EPI) à chaque travailleur.",
+        "Mettre en place une organisation et des moyens adaptés, notamment la prévention des risques professionnels.",
+        "Offrir aux tr
+CITES FOUND: {('Loi', '65-99'): {'canonical': 'Loi N° 65-99', 'arabizi': None}}
+
