@@ -52,5 +52,17 @@ The merged GGUF is registered in Ollama via a `Modelfile` (`FROM <gguf path>`, n
 `ADAPTER` line — the adapter is already baked in) and pointed to by
 `app/config.py`'s `ollama_model` setting.
 
+## French path (separate model, added 2026-08-05)
+
+A second, independently fine-tuned model — `iblog-tutor-fr:latest`, Gemma-2-9B on
+1,542 French regulatory rows, `app/config.py`'s `ollama_model_fr` — rather than one
+model covering both languages. Chosen because a single mixed-language model makes
+"French mode" and "Darija mode" compete for the same weights; base Atlas-Chat
+concretely misclassified Arabic-script regulations as French law when asked in French,
+inventing wrong answers with high confidence. `app/services/llm.py` and
+`app/services/quiz.py` select the model by resolved response language (see
+[serving.md](serving.md)). Notebooks: `kaggle_finetune_fr_v1.ipynb` (+ `_resume`/
+`_resume2`). Full rationale and demo readiness: `../../CEO_PRESENTATION_BRIEF.md`.
+
 **Detail & rationale:** `../../FINETUNING_RATIONALE.md`, `../../LOCKEDIN_PLAN.md`,
-`../../resurrection.md` §1, §5, §6.
+`../../resurrection.md` §1, §5, §6, `../../CEO_PRESENTATION_BRIEF.md`.

@@ -58,11 +58,12 @@ const QUICK_PROMPTS: Record<Domain, Record<Language, string[]>> = {
 };
 
 export default function InputArea() {
-  const { sendMessage, isSending, activeDomain, activeLanguage, toastInfo } = useApp();
+  const { sendMessage, isSending, isModelSwapping, activeDomain, activeLanguage, toastInfo } =
+    useApp();
   const [text, setText] = useState("");
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
-  const canSend = text.trim().length > 0 && !isSending;
+  const canSend = text.trim().length > 0 && !isSending && !isModelSwapping;
 
   const handleSend = () => {
     if (!canSend) return;
@@ -95,7 +96,7 @@ export default function InputArea() {
             <button
               key={prompt}
               type="button"
-              disabled={isSending}
+              disabled={isSending || isModelSwapping}
               onClick={() => void sendMessage(prompt)}
               className="shrink-0 rounded-full border border-edge bg-surface px-3 py-1.5 text-[11.5px] text-ink-dim transition-colors hover:border-brand hover:bg-brand-soft hover:text-brand-deep disabled:opacity-50"
             >
@@ -123,8 +124,13 @@ export default function InputArea() {
             onChange={handleInput}
             onKeyDown={handleKeyDown}
             rows={1}
-            placeholder="Ask the tutor about the tenant's course material…"
-            className="max-h-[200px] min-h-[36px] flex-1 resize-none bg-transparent px-1.5 py-1.5 text-[13.5px] leading-relaxed text-ink placeholder:text-ink-faint outline-none"
+            disabled={isModelSwapping}
+            placeholder={
+              isModelSwapping
+                ? "Switching tutor language — the model is loading…"
+                : "Ask the tutor about the tenant's course material…"
+            }
+            className="max-h-[200px] min-h-[36px] flex-1 resize-none bg-transparent px-1.5 py-1.5 text-[13.5px] leading-relaxed text-ink placeholder:text-ink-faint outline-none disabled:cursor-not-allowed"
           />
           <button
             type="button"
@@ -133,7 +139,7 @@ export default function InputArea() {
             className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-brand text-white transition-colors hover:bg-brand-dark active:scale-95 disabled:cursor-not-allowed disabled:bg-brand/40"
             aria-label="Send message"
           >
-            {isSending ? (
+            {isSending || isModelSwapping ? (
               <Loader2 className="h-4 w-4 animate-spin" />
             ) : (
               <Send className="h-4 w-4" />
@@ -142,7 +148,9 @@ export default function InputArea() {
         </div>
 
         <p className="mt-1.5 text-center text-[10.5px] text-ink-faint">
-          Atlas Tutor may make mistakes — verify grounded citations against the sources.
+          {isModelSwapping
+            ? "Loading the tutor for the newly selected language — this can take up to 30 seconds."
+            : "Atlas Tutor may make mistakes — verify grounded citations against the sources."}
         </p>
       </div>
     </div>

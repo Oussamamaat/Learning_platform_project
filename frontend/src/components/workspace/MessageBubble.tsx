@@ -1,6 +1,6 @@
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { CircleAlert, FileText, User } from "lucide-react";
+import { CircleAlert, FileText, Languages, User } from "lucide-react";
 import type { ChatMessage } from "../../hooks/useChatSessions";
 import { useApp } from "../../context/AppContext";
 import QuizCard from "./QuizCard";
@@ -26,6 +26,18 @@ function TypingDots() {
           style={{ animationDelay: `${i * 0.18}s` }}
         />
       ))}
+    </div>
+  );
+}
+
+function CrossLanguageNote() {
+  return (
+    <div
+      className="mt-2.5 flex items-center gap-1.5 rounded-lg border border-edge bg-surface-2 px-2.5 py-1.5 text-[11px] text-ink-dim"
+      title="Not enough source material in the requested language was found, so this answer draws on sources written in a different script."
+    >
+      <Languages className="h-3 w-3 shrink-0 text-ink-faint" />
+      <span>Grounded in a source written in a different language</span>
     </div>
   );
 }
@@ -102,6 +114,7 @@ export default function MessageBubble({ message }: { message: ChatMessage }) {
           {message.sources && message.sources.length > 0 && (
             <SourcesRow sources={message.sources} />
           )}
+          {message.crossLanguage && <CrossLanguageNote />}
         </div>
       </div>
     </div>

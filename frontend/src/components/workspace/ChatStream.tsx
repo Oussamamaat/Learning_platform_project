@@ -3,18 +3,24 @@ import { useApp } from "../../context/AppContext";
 import MessageBubble, { SparkleMark } from "./MessageBubble";
 
 function EmptyState() {
-  const { activeDomain, activeLanguage } = useApp();
+  const { activeDomain, activeLanguage, lastDomainSource } = useApp();
   return (
     <div className="flex h-full flex-col items-center justify-center px-6 text-center">
       <SparkleMark className="mb-5 h-8 w-8 text-brand" />
       <h2 className="text-xl font-semibold tracking-tight text-ink">Ask the Atlas Tutor</h2>
       <p className="mt-2 max-w-md text-[13.5px] leading-relaxed text-ink-dim">
         Watch the pipeline live: RAG retrieval against tenant docs, the fine-tuned
-        model, citation injection, and quiz grounding — click by click.
+        model, citation injection, and quiz grounding — click by click. Domain and
+        language are detected automatically from your question.
       </p>
       <div className="mt-5 flex flex-wrap items-center justify-center gap-2 text-[11.5px]">
         <span className="rounded-full border border-edge bg-surface px-3 py-1 text-ink-faint">
           Domain: <span className="font-semibold text-ink">{activeDomain}</span>
+          {lastDomainSource === "retrieval" && (
+            <span className="ml-1.5 rounded-full bg-brand-soft px-1.5 py-0.5 text-[9.5px] font-semibold uppercase tracking-wide text-brand-deep">
+              auto-routed
+            </span>
+          )}
         </span>
         <span className="rounded-full border border-edge bg-surface px-3 py-1 text-ink-faint">
           Language: <span className="font-semibold text-ink">{activeLanguage}</span>

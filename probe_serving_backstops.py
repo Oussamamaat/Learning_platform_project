@@ -20,6 +20,8 @@ import sys
 from unittest.mock import patch
 
 sys.path.insert(0, ".")
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8")
 
 from app.services.generate_training_data import context_from_system_prompt
 from app.services.llm import generate_llm_response, deterministic_refusal
@@ -96,7 +98,7 @@ def main():
 
     for domain in (Domain.INDUSTRIAL, Domain.SECURITE, Domain.BLOCKCHAIN):
         before = ollama_call_count["n"]
-        with patch("app.routers.chat.build_rag_context", side_effect=empty_context), \
+        with patch("app.routers.chat._retrieve_context", side_effect=empty_context), \
              patch("app.services.llm.urllib.request.urlopen", side_effect=counting_urlopen):
             response = chat(ChatRequest(message="test off-topic", domain=domain))
         called_model = ollama_call_count["n"] > before
@@ -112,7 +114,7 @@ def main():
             "context, real model, through the real chat() router")
     # -------------------------------------------------------------------
     happy_chunk = contexts[0] if contexts else ""
-    with patch("app.routers.chat.build_rag_context",
+    with patch("app.routers.chat._retrieve_context",
                side_effect=lambda *a, **k: (happy_chunk, ["labour_code.pdf"])):
         response = chat(ChatRequest(
             message="Chno kayngoulou l qanoun 3la had l mawdo3?",

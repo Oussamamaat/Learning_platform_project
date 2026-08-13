@@ -132,8 +132,8 @@ pass-through obligations. Never given a real legal read.
 | Corpus | 37 files, ~1,625 chars/doc | `raw/`, `CORPUS_INDEX.csv` |
 | Chunking | `RecursiveCharacterTextSplitter`, size 400, overlap 50 | `ingestion.py:29-30` |
 | Embeddings | `paraphrase-multilingual-MiniLM-L12-v2` (384-dim) | `ingestion.py:28` |
-| Retrieval | top-k = 5, pgvector cosine | `search.py:23` |
-| Domains | industrial, securite, blockchain (+6 synthetic) | `generate_training_data.py:150` |
+| Retrieval | pgvector cosine (default backend since 2026-08-10), top-k 4-5, similarity threshold 0.15 (was 0.4, re-benchmarked), language-affinity two-pass selection, heading-aware chunking | `search.py`, `retrieval.py` |
+| Domains | industrial, securite, blockchain (+6 synthetic); auto-routed per turn since 2026-08-11 | `generate_training_data.py:150`, `routing.py` |
 
 > **Read this before answering anything in this section.** The gate evaluation
 > run on 2026-08-02 measured the *generation* half only. It fed the model gold
@@ -402,7 +402,7 @@ components inside the 1.6× underfit threshold.
 
 | | Current | Where |
 |---|---|---|
-| **Deployed now** | `IBLOG_TUTOR:latest` — **merged** standalone Q4_K_M GGUF, Ollama | `config.py:10` |
+| **Deployed now** | Two **merged** standalone Q4_K_M GGUFs, Ollama: `IBLOG_TUTOR:latest` (Darija) + `iblog-tutor-fr:latest` (French), selected per-turn by resolved response language | `config.py` |
 | Planned | vLLM multi-LoRA, frozen base + hot-swapped adapters | `LOCKEDIN_PLAN.md` §2.2 |
 | Params | temp 0.2, num_ctx 4096, timeout 180s | Modelfile, `llm.py:210` |
 
@@ -453,15 +453,17 @@ Socratic teaching may want more variety than citation accuracy does.
 - **A.** Keep. **B.** Raise for conversational components. **C.** Per-endpoint
   (low for quiz/citation, higher for socratic).
 
-**Q7.5** 🔴 Conversation history — does the product need it?
-`generate_llm_response()` **has no conversation-history parameter at all**
-(`llm.py:163`). Every turn is independent. Found during the §4.2 demo (Q8):
-true multi-turn coherence cannot be tested because it cannot be *expressed*.
-Meanwhile ~50% of socratic/code_switching training rows are multi-turn — **you
-trained a multi-turn behaviour into a stateless serving path.** This is a
-product gap, not a model defect, and nothing has been scoped to fix it.
-- **A.** Add session history. *(Required for MVP feature #2 to work as
-  designed.)*
+**Q7.5** 🟢 Conversation history — does the product need it?
+**Closed, option A.** `app/services/history.py` (added 2026-08-11) gives
+`generate_llm_response()` a `history` parameter backed by server-side Postgres
+storage, with pinned-context/segment-reset so same-topic follow-ups reuse a
+byte-identical system block (KV-prefix reuse) and a real topic shift starts a
+fresh segment. Fail-open: a Postgres hiccup degrades a turn to the old
+stateless behaviour rather than crashing. Live-verified via
+`probe_multiturn_coherence.py` and `probe_language_routing.py` against real
+Ollama + Postgres. Detail: `docs/architecture/serving.md` §Conversation
+history, `docs/architecture/data-and-retrieval.md`.
+- **A.** Add session history. *(Done — this is now what's deployed.)*
 - **B.** Stateless MVP; document the limitation loudly.
 - **C.** Client-side history replayed into the prompt.
 
@@ -525,8 +527,11 @@ Not questions — commitments already made that nothing has closed. Listed so
 they are not rediscovered later as surprises.
 
 1. **TTS vendor** — MVP-critical, zero evaluation run. (Q0.2)
-2. **Retrieval quality** — never measured, at all. (Q2.4)
-3. **Conversation history** — trained for, not servable. (Q7.5)
+2. **Retrieval quality** — measured 2026-08-10/11 (baseline, heading-aware
+   chunking, language affinity, pgvector cutover, auto-domain routing); see
+   `docs/architecture/data-and-retrieval.md`. Domain-routing tier-2 vote
+   accuracy (0.778) is the open sub-item now. (Q2.4)
+3. **Conversation history** — closed 2026-08-11, now servable. (Q7.5)
 4. **Arabic vs Arabizi** — needs users, not measurement. (Q3.1)
 5. **French refusals** — needs data, not prompts. (Q3.3)
 6. **Refusal scope mismatch** — v11 declined a blockchain question claiming it

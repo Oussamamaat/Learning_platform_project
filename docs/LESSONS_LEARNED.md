@@ -81,3 +81,32 @@ only surfaced later, at GGUF conversion.
 control) for the first; the second was a one-off network blip, confirmed by testing
 Hub connectivity directly, and resolved on retry with no code change.
 → this session, 2026-08-03
+
+### 8. Fail-open can silently swallow a real bug, not just a real outage
+**Problem:** `chat.py` wrote `pinned_fingerprint` as a raw `f"{domain}|{ui_lang}|
+{message}"` string instead of the intended 64-char sha256 hash; it overflowed the
+column's `VARCHAR(64)` on any real message. `history.pin_context`'s fail-open design
+caught the resulting `StringDataRightTruncation`, logged it, and returned normally —
+so chat kept working and the pin silently never persisted, defeating the KV-prefix
+reuse it exists for, on every single turn, undetected until a live (non-SQLite)
+Postgres run surfaced it.
+**Root cause:** fail-open is the correct contract for a genuine external-dependency
+outage, but it also hides a code defect that always throws — the two look identical
+from inside the `try`. SQLite-backed unit tests couldn't have caught this either;
+SQLite doesn't enforce `VARCHAR` length the way Postgres does.
+**Proven fix:** call the actual hash helper (`retrieval.py`'s `_fingerprint()`)
+instead of hand-building the string; add a Postgres-backed (not SQLite-only)
+regression test at the hash-length level.
+→ `docs/architecture/data-and-retrieval.md` §pgvector backend, `tests/test_retrieval.py`
+
+### 9. An error handler that itself throws turns a clean failure into a crash
+**Problem:** `AppError.__init__` never set `self.message` (Python's base `Exception`
+has no such attribute), and all three catch sites (`app/main.py`'s global handler,
+`chat.py`, `quiz.py`) read `.message` directly. A transient Ollama disconnect during
+live verification became `AttributeError: 'OllamaConnectionError' object has no
+attribute 'message'` instead of the intended structured `503` response.
+**Root cause:** the error class was exercised in unit tests via mocks that never
+triggered the real attribute-access path; only a live, unmocked failure hit it.
+**Proven fix:** `AppError.__init__` now sets `self.message`; regression-tested in
+`tests/test_errors.py`.
+→ `docs/architecture/data-and-retrieval.md` §pgvector backend, `app/errors.py`

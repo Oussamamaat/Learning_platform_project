@@ -73,11 +73,17 @@ def generate_quiz_questions(
     domain: str = "industrial",
     language: str = "darija",
     n: int = 5,
+    avoid_questions: list | None = None,
 ) -> list:
     """Query the fine-tuned model for quiz questions grounded in `context`.
 
     Returns raw (unvalidated, unfiltered) question dicts -- callers must run
     them through app.services.grounding before returning to an API client.
+
+    `avoid_questions`, when given, is a list of question strings already
+    obtained (e.g. from an earlier call whose output the grounding filter
+    partly rejected) -- passed back to the model so a top-up call fills the
+    gap with new material instead of paraphrasing what was already kept.
     """
     settings = get_settings()
 
@@ -85,10 +91,37 @@ def generate_quiz_questions(
     user_turn = random.choice(
         QUIZ_USER_FALLBACKS_FR if language == "fr" else QUIZ_USER_FALLBACKS
     )
+    # The fallback turns above never state a count, and the adapter was
+    # fine-tuned exclusively on 3-question quiz exemplars (see
+    # build_quiz_prompt in generate_training_data.py) -- without this, the
+    # model just emits ~3 questions regardless of `n`, no matter how high
+    # `format`'s maxItems is set. This is a mitigation, not a fix: the count
+    # is out-of-distribution for the adapter, so reliability past ~4-5 still
+    # needs a retrain on variable-count quiz rows.
+    count_hint = (
+        f" Fais-moi exactement {n} questions."
+        if language == "fr"
+        else f" عطيني {n} ديال الأسئلة، ماشي غير شي وحدة أو جوج."
+    )
+    user_turn = user_turn + count_hint
+
+    if avoid_questions:
+        avoid_list = "\n".join(f"- {q}" for q in avoid_questions)
+        avoid_hint = (
+            f"\nNe repete pas ces questions deja posees:\n{avoid_list}"
+            if language == "fr"
+            else f"\nما تكررش هاد الأسئلة اللي سبق طرحهم:\n{avoid_list}"
+        )
+        user_turn = user_turn + avoid_hint
+
+    # Same French/Darija model split llm.py:534 and demo.py:70 use -- this
+    # branch was previously missing here, so every French-language quiz was
+    # silently served by the Darija-tuned model instead of iblog-tutor-fr.
+    model = settings.ollama_model_fr if language == "fr" else settings.ollama_model
 
     url = f"{settings.ollama_base_url.rstrip('/')}/api/generate"
     payload = {
-        "model": settings.ollama_model,
+        "model": model,
         "prompt": user_turn,
         "system": system_prompt,
         "stream": False,
@@ -107,7 +140,7 @@ def generate_quiz_questions(
     try:
         logger.info(
             "Calling Ollama for quiz model=%s domain=%s topic=%s",
-            settings.ollama_model, domain, topic,
+            model, domain, topic,
         )
         with urllib.request.urlopen(req, timeout=180) as response:
             res_body = response.read().decode("utf-8")
@@ -122,7 +155,7 @@ def generate_quiz_questions(
             return questions[:n]
     except urllib.error.URLError as e:
         logger.error("Ollama connection failed (quiz): %s", e)
-        raise OllamaConnectionError(settings.ollama_model, settings.ollama_base_url) from e
+        raise OllamaConnectionError(model, settings.ollama_base_url) from e
     except json.JSONDecodeError as e:
         logger.error("Invalid JSON from Ollama (quiz): %s", e)
         raise GenerationError(f"Invalid JSON response: {e}") from e

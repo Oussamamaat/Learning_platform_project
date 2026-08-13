@@ -12,6 +12,8 @@ export interface ChatMessage {
   quiz?: QuizResponse;
   pending?: boolean;
   error?: boolean;
+  crossLanguage?: boolean;
+  priorQuestions?: string[];
 }
 
 export interface ChatSession {

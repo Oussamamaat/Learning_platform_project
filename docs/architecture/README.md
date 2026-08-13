@@ -8,11 +8,14 @@ distills them.
 ## How the pieces fit
 
 A tenant's question arrives at `POST /api/v1/chat` ([chat.py](../../app/routers/chat.py)).
-The backend embeds the query, retrieves the top-k matching chunks from that tenant's
-documents in pgvector, builds a system prompt in the detected language (Darija or
-French) around that retrieved context, and sends it to the tenant's model in Ollama.
-The model is instructed to ground its answer strictly in the retrieved context and to
-refuse rather than fabricate when the context doesn't cover the question.
+The backend auto-resolves domain and language per turn (no UI selector for either),
+reuses a pinned retrieval context across same-topic follow-ups via server-side
+conversation history, embeds the query, retrieves the top-k matching chunks from that
+tenant's documents in pgvector, builds a system prompt in the resolved language (Darija
+or French, each served by its own fine-tuned model) around that context and any prior
+turns, and sends it to Ollama. The model is instructed to ground its answer strictly in
+the retrieved context and to refuse rather than fabricate when the context doesn't
+cover the question.
 
 - [data-and-retrieval.md](data-and-retrieval.md) — corpus, chunking, embeddings, pgvector
 - [finetune-pipeline.md](finetune-pipeline.md) — base model, LoRA config, generation + training pipeline
@@ -27,4 +30,5 @@ root is external reference material (condensed from a published systems-design b
 not this project's own history) — useful for pattern ideas at much larger scale, not a
 description of what's built here.
 
-**Detail & rationale:** `../../CLAUDE.md`, `../../PROJECT_STATE.md`.
+**Detail & rationale:** `../../CLAUDE.md`, `../../resurrection.md` (current status/open
+decisions — `PROJECT_STATE.md` was superseded and archived on 2026-08-03).

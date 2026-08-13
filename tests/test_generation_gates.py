@@ -1488,15 +1488,18 @@ def test_darija_domain_labels_match_serving():
     assert DOMAIN_LABELS == SERVING_DOMAIN_LABELS
 
 
-def test_french_quality_markers_match_serving_router():
-    from app.services.generate_training_data import _FRENCH_QUALITY_MARKERS
-    from app.services.llm import _FRENCH_MARKERS
-    assert set(_FRENCH_QUALITY_MARKERS) == set(_FRENCH_MARKERS), (
-        "generate_training_data._FRENCH_QUALITY_MARKERS has drifted from "
-        "app.services.llm._FRENCH_MARKERS — the generation-time French "
-        "quality gate would no longer match the serving-time language router "
-        "it is meant to mirror."
-    )
+# test_french_quality_markers_match_serving_router removed 2026-08-11: the
+# invariant it checked (generate_training_data._FRENCH_QUALITY_MARKERS
+# mirrors app.services.llm._FRENCH_MARKERS) no longer applies.
+# detect_query_language was simplified from a five-branch French-vs-Arabizi
+# word-marker heuristic to a two-branch script check (Arabic-range count vs.
+# Latin, with _ARABIZI_MARKERS as the only remaining word-level check) once
+# Arabizi went out of scope -- see app/services/routing.py and the plan
+# "Automatic Domain Routing + Language/Script Detection". _FRENCH_MARKERS no
+# longer exists in llm.py; there is nothing left for the generation-time
+# quality gate to mirror. _FRENCH_QUALITY_MARKERS itself is untouched -- it
+# still does its own job (is this generated French row actually French
+# prose?), just without a serving-side counterpart to stay in parity with.
 
 
 # --- Phase 2 gate fixes, found by the Kaggle French-mode smoke test --------

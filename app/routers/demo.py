@@ -1,8 +1,8 @@
 from fastapi import APIRouter
 from pydantic import BaseModel
-import json
-import urllib.request
-import urllib.error
+
+from app.config import get_settings
+from app.services.llm import _call_ollama_generate
 
 router = APIRouter(prefix="/api/v1/demo", tags=["demo"])
 
@@ -53,49 +53,30 @@ DEMO_CONVERSATIONS = {
     ]
 }
 
-def call_ollama(model: str, prompt: str, system: str) -> str:
-    """Call Ollama model directly."""
-    url = "http://localhost:11434/api/generate"
-    payload = {
-        "model": model,
-        "prompt": prompt,
-        "system": system,
-        "stream": False,
-        "options": {"temperature": 0.2}
-    }
-    data = json.dumps(payload).encode("utf-8")
-    req = urllib.request.Request(
-        url,
-        data=data,
-        headers={"Content-Type": "application/json"},
-        method="POST"
-    )
-    try:
-        with urllib.request.urlopen(req, timeout=60) as response:
-            res = json.loads(response.read().decode("utf-8"))
-            return res.get("response", "").strip()
-    except Exception as e:
-        return f"Error: {str(e)}"
-
 @router.post("/conversation")
 def get_demo_conversation(request: DemoRequest):
     """Generate a demo multi-turn conversation."""
     language = request.language  # "fr" or "darija"
     turn = request.turn  # 1, 2, or 3
-    
+
     if language not in DEMO_CONVERSATIONS:
         return {"error": f"Language {language} not supported. Use 'fr' or 'darija'"}
-    
+
     if turn < 1 or turn > 3:
         return {"error": "Turn must be 1, 2, or 3"}
-    
+
     demo_turn = DEMO_CONVERSATIONS[language][turn - 1]
-    model = "iblog-tutor-fr:latest" if language == "fr" else "IBLOG_TUTOR:latest"
-    
+    settings = get_settings()
+    model = settings.ollama_model_fr if language == "fr" else settings.ollama_model
+
     # Generate response from Ollama
-    full_prompt = f"{demo_turn['system']}\n\n{demo_turn['context']}\n\nÉ: {demo_turn['user_question']}"
-    response = call_ollama(model, demo_turn['user_question'], demo_turn['system'] + "\n\n" + demo_turn['context'])
-    
+    try:
+        response = _call_ollama_generate(
+            model, demo_turn['user_question'], demo_turn['system'] + "\n\n" + demo_turn['context'], timeout=60
+        )
+    except Exception as e:
+        response = f"Error: {str(e)}"
+
     return {
         "turn": turn,
         "language": language,

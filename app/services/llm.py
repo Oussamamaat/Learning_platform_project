@@ -11,7 +11,7 @@ import urllib.request
 import urllib.error
 from typing import Optional
 from app.config import get_settings
-from app.errors import OllamaConnectionError, OllamaTimeoutError, GenerationError
+from app.errors import OllamaConnectionError, GenerationError
 from app.services.citations import (
     extract_citations,
     inject_citations,
@@ -19,6 +19,44 @@ from app.services.citations import (
 )
 
 logger = logging.getLogger(__name__)
+
+# The separator the training notebook uses to fold `system` into the first
+# user turn (nb_dump.txt cell 14/15, SYSTEM_JOIN). Kept as a named constant
+# here because render_conversation() below is a Python port of that exact
+# logic and must stay byte-identical to it.
+SYSTEM_JOIN = "\n\n"
+
+
+def render_conversation(messages: list[dict], *, add_generation_prompt: bool = True) -> str:
+    """Render a ChatML messages list to the exact text shape the model was
+    trained on (nb_dump.txt cell 15 `render()`, ported verbatim).
+
+    Deliberately WITHOUT a literal ``<bos>``: the GGUF's own tokenizer adds
+    exactly one automatically, and a literal ``<bos>`` in the text would
+    produce the double-BOS the training notebook explicitly warns against.
+    This is why the render lives here rather than being reconstructed ad
+    hoc per caller -- see probe_history_parity.py, which asserts this
+    reproduces what Ollama's own `/api/chat` templating sends, token for
+    token, before anything is built on top of it.
+    """
+    if messages and messages[0]["role"] == "system":
+        system_text = messages[0]["content"].strip()
+        body = messages[1:]
+    else:
+        system_text = None
+        body = messages
+
+    out = []
+    for i, m in enumerate(body):
+        role = "model" if m["role"] == "assistant" else "user"
+        content = m["content"].strip()
+        if i == 0 and system_text:
+            content = system_text + SYSTEM_JOIN + content
+        out.append(f"<start_of_turn>{role}\n{content}<end_of_turn>\n")
+    if add_generation_prompt:
+        out.append("<start_of_turn>model\n")
+    return "".join(out)
+
 
 DOMAIN_LABELS = {
     "industrial": "industrial safety and workplace protocols",
@@ -163,56 +201,172 @@ _ARABIZI_MARKERS = (
     "walo", "bzaf", "daba", "smiti", "3andi", "mzyan", "wa5a", "labas",
 )
 
-# Function words that are French and not shared with English, so an English
-# question does not get misrouted here.
-_FRENCH_MARKERS = (
-    "que", "qui", "quoi", "quel", "quelle", "quelles", "quels", "est",
-    "sont", "les", "des", "une", "dans", "pour", "avec", "sur", "comment",
-    "pourquoi", "quand", "doit", "peut", "vous", "je", "nous", "bonjour",
-    "merci", "s'il", "ce", "cette", "ces", "du", "au", "aux", "et", "ou",
-    "un", "le", "la", "de", "en", "par", "plus", "mais", "donc", "aussi",
-    "tout", "tous", "toute", "toutes", "faire", "etre", "avoir", "selon",
-    "entre", "apres", "avant", "sans", "sous", "leur", "leurs", "notre",
-    "votre", "mon", "ma", "mes", "son", "sa", "ses", "il", "elle", "ils",
-    "elles", "on", "peuvent", "expliquer", "quelles",
-    "moi", "toi", "lui", "leur", "y", "en", "veux", "veuillez", "svp",
-)
-
-# Accented characters French uses and Arabizi does not. One is enough on its
-# own — nobody hits e-acute by accident writing Darija in Latin letters.
-_FRENCH_ACCENTS = "éèêëàâäùûüôöîïçœ"
-
-
 def detect_query_language(query: str) -> str:
-    """Which language the answer should come back in: 'fr' or 'darija'.
+    """Which script the query is written in: 'darija' (Arabic script) or
+    'fr' (Latin script).
 
-    Arabic script is unambiguous. Latin script is not — it is either French or
-    Arabizi, and those want opposite answers, so Arabizi markers win over
-    French ones. Anything undecidable falls back to 'darija', which is the
-    trained behaviour and therefore the safe default.
+    Arabizi is out of scope (2026-08-11 decision), which makes this a plain
+    two-branch script check rather than the five-branch French-vs-Arabizi
+    heuristic it replaced: with Arabizi gone, Latin script is unambiguously
+    French, so there is no longer anything for _FRENCH_MARKERS/accent
+    detection to disambiguate against. Undecidable/empty input now falls to
+    'fr' (Latin default), not 'darija' -- the direct consequence of that
+    same decision, not an independent choice.
+
+    _ARABIZI_MARKERS is kept as a silent tiebreaker on Latin-only input:
+    free, already tested, and it means a Darija speaker typing Latin letters
+    ("chno kayn f had l'article") still gets an Arabic-script answer instead
+    of a French one. "Not supported" means "not advertised or tested", not
+    "actively answered in the wrong language".
     """
     if not query:
-        return "darija"
+        return "fr"
 
     arabic = sum(1 for c in query if "؀" <= c <= "ۿ")
     latin = sum(1 for c in query if c.isascii() and c.isalpha())
     if arabic > latin:
         return "darija"
 
-    # Split on hyphens too: French imperative-with-pronoun forms like
-    # "explique-moi" or "dis-moi" hide their pronoun marker inside a single
-    # whitespace-delimited token otherwise (found 2026-08-02, the §4.2 live
-    # demo script routed "Explique-moi la procedure LOTO." to Darija because
-    # "moi" was never split out of "explique-moi" to be checked).
+    # Split on hyphens too: Arabizi imperative-with-pronoun forms like
+    # "3tini" or marker-adjacent tokens can hide inside a single
+    # whitespace-delimited token otherwise.
     raw_words = query.replace("-", " ").split()
     words = {w.strip(".,!?;:()\"'").lower() for w in raw_words}
     if words & set(_ARABIZI_MARKERS):
         return "darija"
-    if any(c in _FRENCH_ACCENTS for c in query.lower()):
-        return "fr"
-    if len(words & set(_FRENCH_MARKERS)) >= 2:
-        return "fr"
-    return "darija"
+    return "fr"
+
+
+# Precedes an explicit language instruction ("réponds en darija") for it to
+# count as an instruction rather than incidental content ("quels documents
+# sont disponibles en arabe ?" is a question ABOUT Arabic material, not an
+# instruction to answer in it).
+_RESPONSE_VERBS_FR = ("reponds", "repond", "explique", "parle", "ecris", "dis")
+_RESPONSE_VERBS_AR = ("جاوب", "جاوبني", "شرح", "كتب")
+
+_LANG_INSTRUCTION_DARIJA = ("en darija", "en arabe", "bdarija", "بالدارجة", "بالعربية")
+_LANG_INSTRUCTION_FR = ("en francais", "en français", "بالفرنسية")
+
+# A trailing clause after one of these punctuation marks reads as an
+# instruction appended to the question ("...comment on fait cela, en
+# darija ?") even without a response verb right before it.
+_CLAUSE_BOUNDARY = ",;.؟?"
+
+
+def _strip_accents(text: str) -> str:
+    return (
+        text.replace("é", "e").replace("è", "e").replace("ê", "e")
+        .replace("à", "a").replace("ç", "c")
+    )
+
+
+def _trailing_words(text: str, n: int = 5) -> list[str]:
+    """Last `n` whitespace-delimited words of `text`, punctuation-stripped.
+    Whole-word, not substring -- "disponibles" must not match the verb
+    "dis" the way naive substring containment would."""
+    words = [w.strip(".,!?;:()\"'؟").lower() for w in text.replace("-", " ").split()]
+    return words[-n:]
+
+
+def detect_language_instruction(text: str) -> Optional[str]:
+    """An explicit in-message instruction about the RESPONSE language --
+    'fr' or 'darija' -- or None if the message carries no such instruction.
+
+    Precision guard: a language phrase only counts when it is either preceded
+    by a response verb (reponds/explique/جاوب/...) or appears as a trailing
+    clause after a clause boundary (',', ';', '.', '?', '؟'). This is what
+    keeps "quels documents sont disponibles en arabe ?" (content question,
+    no instruction) from being misread as "answer in Arabic" -- neither
+    condition holds for it: "en arabe" isn't preceded by a response verb,
+    and it's the tail of the ONLY clause in the sentence, not a clause
+    appended after the real question.
+    """
+    if not text:
+        return None
+    lowered = _strip_accents(text.lower())
+
+    for lang, phrases in (("darija", _LANG_INSTRUCTION_DARIJA), ("fr", _LANG_INSTRUCTION_FR)):
+        for phrase in phrases:
+            phrase_norm = _strip_accents(phrase.lower())
+            idx = lowered.find(phrase_norm)
+            if idx == -1:
+                continue
+
+            before = lowered[:idx]
+            preceded_by_verb = bool(
+                set(_trailing_words(before)) & set(_RESPONSE_VERBS_FR + _RESPONSE_VERBS_AR)
+            )
+
+            # Trailing clause: everything before the phrase, back to the
+            # nearest clause boundary, must be short (a connector like "en"
+            # sitting right before it, not a whole independent clause) OR
+            # a boundary character sits immediately before that gap.
+            tail_start = max((before.rfind(c) for c in _CLAUSE_BOUNDARY), default=-1)
+            is_trailing_clause = tail_start != -1 and len(before[tail_start + 1:].strip()) <= 3
+
+            if preceded_by_verb or is_trailing_clause:
+                return lang
+    return None
+
+
+# Closed, per-language anaphora lists: a message matching one of these is a
+# continuation of the prior turn ("why?", "and after that?"), not a
+# self-contained new topic. Retrieval on it alone would run on a fragment
+# with no standalone signal -- these mark when to condense the retrieval
+# query with the prior turn instead (condense_retrieval_query below), and
+# double as the primary guard against a false segment reset in
+# app/routers/chat.py: a message matching this list can never trigger one,
+# because by definition it carries no self-contained retrieval signal of
+# its own to judge a topic shift by.
+_ANAPHORA_MARKERS_FR = (
+    "pourquoi", "comment", "quoi", "explique", "expliquer", "donc",
+    "alors", "après", "apres", "ensuite", "ça", "ca", "ceci", "cela",
+)
+_ANAPHORA_MARKERS_DARIJA = (
+    "علاش", "كيفاش", "شنو", "وشنو", "بعد", "زيد", "زيدني",
+)
+
+# A message shorter than this many whitespace-delimited tokens is treated
+# as anaphoric regardless of content -- too short to carry a standalone
+# retrieval signal ("و لماذا؟", "et pourquoi ?", "d'accord").
+_SHORT_QUERY_TOKEN_THRESHOLD = 4
+
+
+def is_anaphoric_followup(message: str) -> bool:
+    """True if `message` reads as a continuation of a prior turn rather
+    than a self-contained new topic: either it is short, or it matches a
+    closed per-language anaphora marker list. Same tokenization approach
+    as detect_query_language (hyphen-split, stripped punctuation) so a
+    French imperative like "explique-moi" is still caught.
+    """
+    if not message or not message.strip():
+        return False
+
+    raw_words = message.replace("-", " ").split()
+    if len(raw_words) < _SHORT_QUERY_TOKEN_THRESHOLD:
+        return True
+
+    words = {w.strip(".,!?;:()\"'؟").lower() for w in raw_words}
+    return bool(words & set(_ANAPHORA_MARKERS_FR)) or bool(words & set(_ANAPHORA_MARKERS_DARIJA))
+
+
+def condense_retrieval_query(current_message: str, prior_user_turn: Optional[str]) -> str:
+    """The query RETRIEVAL should search on -- current_message alone
+    unless it looks anaphoric and a prior turn exists to combine it with,
+    in which case the retrieval query becomes `prior_user_turn +
+    current_message`.
+
+    The GENERATION prompt is never touched by this: the user turn the
+    model sees is always exactly what the user typed
+    (app.routers.chat.py sends `current_message` to generate_llm_response
+    regardless of what this function returns) -- only the string handed to
+    the retriever changes, so a vague follow-up retrieves against real
+    content instead of a fragment, without the model ever seeing a
+    synthesized user turn it didn't write.
+    """
+    if prior_user_turn and is_anaphoric_followup(current_message):
+        return f"{prior_user_turn} {current_message}"
+    return current_message
 
 
 def _build_system_prompt(domain: str, context: str, language: str = "darija") -> str:
@@ -226,12 +380,128 @@ def _build_system_prompt(domain: str, context: str, language: str = "darija") ->
     return SYSTEM_PROMPT_TEMPLATE.format(domain=domain_label, context=context)
 
 
+def _call_ollama_generate(
+    model: str,
+    prompt: str,
+    system: str,
+    *,
+    timeout: int = 180,
+    format_schema: Optional[dict] = None,
+) -> str:
+    """POST to Ollama's /api/generate and return the raw `response` string.
+
+    Shared by chat, quiz, and demo serving paths so the request-building and
+    URLError/JSONDecodeError-to-AppError mapping lives in one place instead
+    of being copy-pasted per caller.
+
+    Raises OllamaConnectionError on network failure, GenerationError on an
+    empty or invalid response.
+    """
+    settings = get_settings()
+    url = f"{settings.ollama_base_url.rstrip('/')}/api/generate"
+    payload = {
+        "model": model,
+        "prompt": prompt,
+        "system": system,
+        "stream": False,
+        "options": {"temperature": 0.2},
+    }
+    if format_schema is not None:
+        payload["format"] = format_schema
+
+    data = json.dumps(payload).encode("utf-8")
+    req = urllib.request.Request(
+        url,
+        data=data,
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as response:
+            res_body = response.read().decode("utf-8")
+            res_json = json.loads(res_body)
+            result = res_json.get("response", "").strip()
+            if not result:
+                raise GenerationError("Ollama returned empty response")
+            return result
+    except urllib.error.URLError as e:
+        logger.error("Ollama connection failed: %s", e)
+        raise OllamaConnectionError(model, settings.ollama_base_url) from e
+    except json.JSONDecodeError as e:
+        logger.error("Invalid JSON from Ollama: %s", e)
+        raise GenerationError(f"Invalid JSON response: {e}") from e
+    except (OllamaConnectionError, GenerationError):
+        raise
+    except Exception as e:
+        logger.error("Unexpected LLM error: %s", e)
+        raise GenerationError(str(e)) from e
+
+
+def _call_ollama_chat(
+    model: str,
+    messages: list[dict],
+    *,
+    timeout: int = 180,
+    format_schema: Optional[dict] = None,
+) -> str:
+    """POST to Ollama's /api/chat with a messages array and return the
+    assistant's reply text.
+
+    Sibling to _call_ollama_generate, same error mapping. Exists because
+    conversation history must be sent as alternating role turns (the
+    trained ChatML shape -- see render_conversation() above and
+    probe_history_parity.py), not stuffed into a single flat `prompt`
+    string, which would place the transcript inside the first user turn
+    with no turn separators -- a shape that appears nowhere in training.
+    """
+    settings = get_settings()
+    url = f"{settings.ollama_base_url.rstrip('/')}/api/chat"
+    payload = {
+        "model": model,
+        "messages": messages,
+        "stream": False,
+        "options": {"temperature": 0.2},
+    }
+    if format_schema is not None:
+        payload["format"] = format_schema
+
+    data = json.dumps(payload).encode("utf-8")
+    req = urllib.request.Request(
+        url,
+        data=data,
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as response:
+            res_body = response.read().decode("utf-8")
+            res_json = json.loads(res_body)
+            result = res_json.get("message", {}).get("content", "").strip()
+            if not result:
+                raise GenerationError("Ollama returned empty response")
+            return result
+    except urllib.error.URLError as e:
+        logger.error("Ollama connection failed: %s", e)
+        raise OllamaConnectionError(model, settings.ollama_base_url) from e
+    except json.JSONDecodeError as e:
+        logger.error("Invalid JSON from Ollama: %s", e)
+        raise GenerationError(f"Invalid JSON response: {e}") from e
+    except (OllamaConnectionError, GenerationError):
+        raise
+    except Exception as e:
+        logger.error("Unexpected LLM error: %s", e)
+        raise GenerationError(str(e)) from e
+
+
 def generate_llm_response(
     query: str,
     context: str,
     domain: str = "industrial",
     system_prompt_override: str = None,
     language: Optional[str] = None,
+    history: Optional[list[dict]] = None,
 ) -> str:
     """
     Query the local Ollama LLM with RAG context.
@@ -245,6 +515,12 @@ def generate_llm_response(
             detect_query_language(query) -- the pre-existing heuristic, kept
             as the default so every caller that predates this parameter is
             unaffected.
+        history: prior alternating (user, assistant) turns to replay before
+            `query`, already filtered to (domain, language, segment) by the
+            caller (app/services/history.py). Omitted or empty behaves
+            exactly as before this parameter existed -- a single-turn
+            [system, user] request, proven byte-equivalent to the old
+            /api/generate transport by probe_history_parity.py.
 
     Returns:
         Generated text from LLM
@@ -255,58 +531,27 @@ def generate_llm_response(
     system_prompt = system_prompt_override or _build_system_prompt(
         domain, context, language
     )
-
     model = settings.ollama_model_fr if language == "fr" else settings.ollama_model
-    url = f"{settings.ollama_base_url.rstrip('/')}/api/generate"
-    payload = {
-        "model": model,
-        "prompt": query,
-        "system": system_prompt,
-        "stream": False,
-        "options": {
-            "temperature": 0.2
-        }
-    }
 
-    data = json.dumps(payload).encode("utf-8")
+    messages = [{"role": "system", "content": system_prompt}]
+    messages.extend(history or [])
+    messages.append({"role": "user", "content": query})
 
-    req = urllib.request.Request(
-        url,
-        data=data,
-        headers={"Content-Type": "application/json"},
-        method="POST"
+    logger.info(
+        "Calling Ollama model=%s domain=%s language=%s history_turns=%d",
+        model, domain, language, len(history or []),
     )
+    result = _call_ollama_chat(model, messages)
 
-    try:
-        logger.info("Calling Ollama model=%s domain=%s language=%s", model, domain, language)
-        with urllib.request.urlopen(req, timeout=180) as response:
-            res_body = response.read().decode("utf-8")
-            res_json = json.loads(res_body)
-            result = res_json.get("response", "").strip()
-            if not result:
-                raise GenerationError("Ollama returned empty response")
-            # Citations are derived from the retrieved context, not trusted
-            # from the model — see app/services/citations.py for why. Only
-            # references that genuinely appear in the context are rewritten,
-            # so this can never manufacture the appearance of grounding.
-            citations = extract_citations(context)
-            if citations:
-                # detect_target_script only distinguishes Arabic from Arabizi.
-                # A French answer is Latin-script but wants "Article 18", not
-                # the Arabizi gloss "المادة 18 (l-madda 18)".
-                target_script = (
-                    "french" if language == "fr" else detect_target_script(result)
-                )
-                result = inject_citations(result, citations, target_script)
-            return result
-    except urllib.error.URLError as e:
-        logger.error("Ollama connection failed: %s", e)
-        raise OllamaConnectionError(settings.ollama_model, settings.ollama_base_url) from e
-    except json.JSONDecodeError as e:
-        logger.error("Invalid JSON from Ollama: %s", e)
-        raise GenerationError(f"Invalid JSON response: {e}") from e
-    except (OllamaConnectionError, GenerationError):
-        raise
-    except Exception as e:
-        logger.error("Unexpected LLM error: %s", e)
-        raise GenerationError(str(e)) from e
+    # Citations are derived from the retrieved context, not trusted from the
+    # model — see app/services/citations.py for why. Only references that
+    # genuinely appear in the context are rewritten, so this can never
+    # manufacture the appearance of grounding.
+    citations = extract_citations(context)
+    if citations:
+        # detect_target_script only distinguishes Arabic from Arabizi. A
+        # French answer is Latin-script but wants "Article 18", not the
+        # Arabizi gloss "المادة 18 (l-madda 18)".
+        target_script = "french" if language == "fr" else detect_target_script(result)
+        result = inject_citations(result, citations, target_script)
+    return result

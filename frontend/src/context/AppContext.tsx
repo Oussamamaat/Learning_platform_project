@@ -8,7 +8,7 @@ import {
   useState,
 } from "react";
 import type { ReactNode } from "react";
-import type { Domain, Language } from "../types/api";
+import type { Domain, DomainSource, Language, ResponseLang } from "../types/api";
 import { generateQuiz, pingHealth, sendChatMessage } from "../services/api";
 import {
   newMessageId,
@@ -29,14 +29,49 @@ interface HealthState {
 export interface GenerateQuizPayload {
   topic: string;
   numQuestions: number;
-  language: Language;
+}
+
+// A language switch under serial model loading (one model resident in
+// VRAM at a time) is a ~30s infrastructure event -- a cold model load
+// dominates at ~25-30s, vs 5-9s once warm (docs/architecture/rectified,
+// analyze_04). Matches that measured ceiling so the loading state clears
+// itself even if no message is sent after the switch.
+const MODEL_SWAP_TIMEOUT_MS = 30000;
+
+// Client-side mirror of app.services.llm.detect_query_language's core
+// script check (Arabic-range count vs. Latin-letter count) -- just enough
+// to guess, BEFORE the server round-trip, whether this message is likely
+// to need the OTHER resident model (ary/fr are served by different models
+// under serial loading, so a language flip is a real ~30s swap, not a
+// relabel). The server's own resolution (app.services.routing, including
+// the Arabizi tiebreaker and any in-message instruction) is authoritative;
+// this only starts the loading indicator a beat earlier than waiting for
+// the response would.
+function looksLikeArabicScript(text: string): boolean {
+  let arabic = 0;
+  let latin = 0;
+  for (const ch of text) {
+    const code = ch.codePointAt(0) ?? 0;
+    if (code >= 0x0600 && code <= 0x06ff) arabic++;
+    else if (/[a-zA-Z]/.test(ch)) latin++;
+  }
+  return arabic > latin;
+}
+
+function responseLangToLanguage(lang: ResponseLang): Language {
+  return lang === "darija" ? "ar-MA" : "fr";
 }
 
 interface AppContextValue {
+  // Display state only, since 2026-08-11 (Automatic Domain Routing) --
+  // there is no user-facing selector for either anymore. Both are seeded
+  // with a reasonable pre-first-message default and then kept in sync
+  // with each response's resolved domain/language (app.services.routing).
   activeDomain: Domain;
   setActiveDomain: (domain: Domain) => void;
   activeLanguage: Language;
-  setActiveLanguage: (language: Language) => void;
+  lastDomainSource: DomainSource | null;
+  isModelSwapping: boolean;
   modelName: string;
   health: HealthState;
   refreshHealth: () => Promise<void>;
@@ -63,6 +98,8 @@ const AppContext = createContext<AppContextValue | null>(null);
 export function AppProvider({ children }: { children: ReactNode }) {
   const [activeDomain, setActiveDomain] = useState<Domain>("industrial");
   const [activeLanguage, setActiveLanguage] = useState<Language>("fr");
+  const [lastDomainSource, setLastDomainSource] = useState<DomainSource | null>(null);
+  const [isModelSwapping, setIsModelSwapping] = useState(false);
   const [health, setHealth] = useState<HealthState>({ status: "checking", lastChecked: null });
   const [quizModalOpen, setQuizModalOpen] = useState(false);
   const [isSending, setIsSending] = useState(false);
@@ -71,6 +108,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const chat = useChatSessions();
   const { activeSessionId, ensureActiveSession, addMessage, updateMessage } = chat;
+
+  const swapTimerRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (swapTimerRef.current) window.clearTimeout(swapTimerRef.current);
+    };
+  }, []);
 
   const sendingRef = useRef(false);
 
@@ -107,18 +152,45 @@ export function AppProvider({ children }: { children: ReactNode }) {
         pending: true,
       });
 
+      // Optimistic swap indicator: if this message's script implies a
+      // different resident model than the last resolved response, start
+      // the loading state now instead of waiting for the round trip --
+      // ary/fr are served by different models under serial loading, so a
+      // language flip is a real ~30s infrastructure event.
+      const likelyNextLanguage: Language = looksLikeArabicScript(trimmed) ? "ar-MA" : "fr";
+      if (likelyNextLanguage !== activeLanguage) {
+        setIsModelSwapping(true);
+        if (swapTimerRef.current) window.clearTimeout(swapTimerRef.current);
+        swapTimerRef.current = window.setTimeout(() => {
+          setIsModelSwapping(false);
+          swapTimerRef.current = null;
+        }, MODEL_SWAP_TIMEOUT_MS);
+      }
+
       try {
-        const reply = await sendChatMessage({
-          message: trimmed,
-          session_id: sessionId,
-          domain: activeDomain,
-          language: activeLanguage,
-        });
+        // domain/language omitted -- the server resolves both
+        // automatically (app.services.routing); no user-facing selector
+        // sets them anymore. ChatResponse.domain/domain_source/language
+        // report back what was actually decided.
+        const reply = await sendChatMessage({ message: trimmed, session_id: sessionId });
         updateMessage(sessionId, assistantId, {
           content: reply.response,
           sources: reply.sources,
+          crossLanguage: reply.cross_language,
+          priorQuestions: reply.prior_questions,
           pending: false,
         });
+        setActiveDomain(reply.domain);
+        setActiveLanguage(responseLangToLanguage(reply.language));
+        setLastDomainSource(reply.domain_source);
+        // A successful reply proves the resident model is already warm --
+        // no need to keep the swap-loading state around for its full
+        // timeout once real evidence says the swap (if any) is done.
+        if (swapTimerRef.current) {
+          window.clearTimeout(swapTimerRef.current);
+          swapTimerRef.current = null;
+        }
+        setIsModelSwapping(false);
       } catch (err) {
         const message = err instanceof Error ? err.message : "Unexpected error";
         toastError(message);
@@ -133,7 +205,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
       }
     },
     [
-      activeDomain,
       activeLanguage,
       addMessage,
       ensureActiveSession,
@@ -149,11 +220,16 @@ export function AppProvider({ children }: { children: ReactNode }) {
       const now = Date.now();
 
       try {
+        // language omitted -- auto-detected server-side from `topic`
+        // (app.services.routing), same as chat. quiz.domain/domain_source/
+        // language report what was actually decided.
         const quiz = await generateQuiz({
           topic: payload.topic,
           num_questions: payload.numQuestions,
-          language: payload.language,
         });
+        setActiveDomain(quiz.domain);
+        setActiveLanguage(responseLangToLanguage(quiz.language));
+        setLastDomainSource(quiz.domain_source);
 
         if (quiz.questions.length > 0) {
           addMessage(sessionId, {
@@ -164,7 +240,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
             quiz,
             sources: quiz.sources,
           });
-          toastSuccess(`Quiz generated — ${quiz.total_questions} grounded question(s)`);
+          toastSuccess(
+            quiz.total_questions < quiz.requested_questions
+              ? `Quiz generated — ${quiz.total_questions}/${quiz.requested_questions} requested (limited source material)`
+              : `Quiz generated — ${quiz.total_questions} grounded question(s)`,
+          );
         } else {
           addMessage(sessionId, {
             id: messageId,
@@ -199,7 +279,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
       activeDomain,
       setActiveDomain,
       activeLanguage,
-      setActiveLanguage,
+      lastDomainSource,
+      isModelSwapping,
       modelName: MODEL_NAME,
       health,
       refreshHealth,
@@ -223,6 +304,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
     [
       activeDomain,
       activeLanguage,
+      lastDomainSource,
+      isModelSwapping,
       health,
       refreshHealth,
       chat.sessions,

@@ -1,12 +1,10 @@
 import { useMemo, useState } from "react";
 import { CheckCircle2, CircleX, HelpCircle } from "lucide-react";
 import type { QuizResponse } from "../../types/api";
-import { useApp } from "../../context/AppContext";
 
 const LETTERS = ["A", "B", "C", "D", "E", "F"];
 
 export default function QuizCard({ quiz }: { quiz: QuizResponse }) {
-  const { activeLanguage } = useApp();
   const [answers, setAnswers] = useState<Record<number, number>>({});
 
   const score = useMemo(
@@ -15,7 +13,10 @@ export default function QuizCard({ quiz }: { quiz: QuizResponse }) {
   );
   const answeredCount = Object.keys(answers).length;
   const done = answeredCount === quiz.questions.length;
-  const dir = activeLanguage === "ar-MA" ? "rtl" : "ltr";
+  // This quiz's own resolved language (app.services.routing), not the
+  // session-global activeLanguage -- more accurate now that each quiz
+  // generation is auto-detected independently from its own topic text.
+  const dir = quiz.language === "darija" ? "rtl" : "ltr";
 
   return (
     <div dir={dir} className="space-y-3">
@@ -31,6 +32,13 @@ export default function QuizCard({ quiz }: { quiz: QuizResponse }) {
           {done ? `Score: ${score}/${quiz.questions.length}` : `Answered ${answeredCount}/${quiz.questions.length}`}
         </span>
       </div>
+
+      {quiz.total_questions < quiz.requested_questions && (
+        <p className="text-[11.5px] text-ink-faint">
+          {quiz.total_questions} of {quiz.requested_questions} requested — limited source
+          material for this topic.
+        </p>
+      )}
 
       {quiz.questions.map((q, qi) => {
         const chosen = answers[qi];

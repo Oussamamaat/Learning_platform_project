@@ -1,13 +1,14 @@
 import { useState } from "react";
 import { FileQuestion, Loader2, Minus, Plus, X } from "lucide-react";
 import { useApp } from "../../context/AppContext";
-import type { Language } from "../../types/api";
 
+// Language is auto-detected server-side from `topic` (app.services.routing,
+// same script-detection + instruction-override logic chat uses) -- no
+// selector here since 2026-08-12.
 export default function QuizModal() {
-  const { quizModalOpen, setQuizModalOpen, generateQuizInSession, activeLanguage } = useApp();
+  const { quizModalOpen, setQuizModalOpen, generateQuizInSession } = useApp();
   const [topic, setTopic] = useState("");
   const [numQuestions, setNumQuestions] = useState(5);
-  const [language, setLanguage] = useState<Language>(activeLanguage);
   const [loading, setLoading] = useState(false);
 
   if (!quizModalOpen) return null;
@@ -18,11 +19,7 @@ export default function QuizModal() {
     if (!canSubmit) return;
     setLoading(true);
     try {
-      await generateQuizInSession({
-        topic: topic.trim(),
-        numQuestions,
-        language,
-      });
+      await generateQuizInSession({ topic: topic.trim(), numQuestions });
       setTopic("");
       setNumQuestions(5);
       setQuizModalOpen(false);
@@ -76,55 +73,39 @@ export default function QuizModal() {
           <textarea
             value={topic}
             onChange={(e) => setTopic(e.target.value)}
-            placeholder="e.g. LOTO lockout/tagout procedure, Article 16 of the Labour Code…"
+            placeholder="e.g. LOTO lockout/tagout procedure, Article 16 of the Labour Code… (language detected automatically)"
             rows={3}
             className="w-full resize-none rounded-xl border border-edge bg-surface px-3.5 py-2.5 text-[13.5px] text-ink placeholder:text-ink-faint outline-none transition-colors focus:border-brand"
           />
         </label>
 
-        <div className="mt-4 flex items-end justify-between gap-4">
-          <div>
-            <span className="mb-1.5 block text-[11px] font-semibold uppercase tracking-wide text-ink-faint">
-              Number of questions
-            </span>
-            <div className="flex items-center gap-2.5">
-              <button
-                type="button"
-                onClick={() => step(-1)}
-                disabled={numQuestions <= 1}
-                className="flex h-7 w-7 items-center justify-center rounded-lg border border-edge bg-surface text-ink-dim transition-colors hover:border-brand hover:text-ink disabled:opacity-40"
-                aria-label="Fewer questions"
-              >
-                <Minus className="h-3.5 w-3.5" />
-              </button>
-              <span className="w-8 text-center font-mono text-[14px] font-semibold text-ink">
-                {numQuestions}
-              </span>
-              <button
-                type="button"
-                onClick={() => step(1)}
-                disabled={numQuestions >= 20}
-                className="flex h-7 w-7 items-center justify-center rounded-lg border border-edge bg-surface text-ink-dim transition-colors hover:border-brand hover:text-ink disabled:opacity-40"
-                aria-label="More questions"
-              >
-                <Plus className="h-3.5 w-3.5" />
-              </button>
-            </div>
-          </div>
-
-          <label className="block">
-            <span className="mb-1.5 block text-[11px] font-semibold uppercase tracking-wide text-ink-faint">
-              Language
-            </span>
-            <select
-              value={language}
-              onChange={(e) => setLanguage(e.target.value as Language)}
-              className="cursor-pointer rounded-xl border border-edge bg-surface px-3 py-2 text-[13px] font-semibold text-ink outline-none transition-colors focus:border-brand"
+        <div className="mt-4">
+          <span className="mb-1.5 block text-[11px] font-semibold uppercase tracking-wide text-ink-faint">
+            Number of questions
+          </span>
+          <div className="flex items-center gap-2.5">
+            <button
+              type="button"
+              onClick={() => step(-1)}
+              disabled={numQuestions <= 1}
+              className="flex h-7 w-7 items-center justify-center rounded-lg border border-edge bg-surface text-ink-dim transition-colors hover:border-brand hover:text-ink disabled:opacity-40"
+              aria-label="Fewer questions"
             >
-              <option value="fr" className="bg-surface text-ink">Français</option>
-              <option value="ar-MA" className="bg-surface text-ink">Darija</option>
-            </select>
-          </label>
+              <Minus className="h-3.5 w-3.5" />
+            </button>
+            <span className="w-8 text-center font-mono text-[14px] font-semibold text-ink">
+              {numQuestions}
+            </span>
+            <button
+              type="button"
+              onClick={() => step(1)}
+              disabled={numQuestions >= 20}
+              className="flex h-7 w-7 items-center justify-center rounded-lg border border-edge bg-surface text-ink-dim transition-colors hover:border-brand hover:text-ink disabled:opacity-40"
+              aria-label="More questions"
+            >
+              <Plus className="h-3.5 w-3.5" />
+            </button>
+          </div>
         </div>
 
         <button

@@ -15,7 +15,9 @@ history and architectural decisions.
 **Tenant model.** Each tenant uploads its own course materials and brings its own
 language mix; onboarding means adding documents and a per-tenant LoRA adapter, not code
 changes. **Tenant #1** (Moroccan safety/security regulations, "sécurité et sûreté") is the
-current live instance, served by the `atlas-darija-tutor` model (Atlas-Chat-9B LoRA, Arabic
-script Darija + French). The platform direction is a **neutral multilingual base model with
-per-tenant LoRA adapters** before onboarding tenant #2 — a tenant's language and domain
-become an adapter, not a baked-in base.
+current live instance, served by two merged Atlas-Chat-9B fine-tunes (Q4_K_M GGUF via
+Ollama) selected per turn by resolved response language: `IBLOG_TUTOR:latest` (Arabic-
+script Darija) and `iblog-tutor-fr:latest` (French). The platform direction is a
+**neutral multilingual base model with per-tenant, hot-swappable LoRA adapters**
+(currently frozen-merged, not hot-swappable) before onboarding tenant #2 — see
+`docs/architecture/serving.md` for what's deployed vs. that target.
