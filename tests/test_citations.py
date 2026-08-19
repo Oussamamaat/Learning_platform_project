@@ -167,3 +167,93 @@ def test_page_reference_does_not_false_positive_on_ip_rating():
     a real and common industrial ingress-protection rating in this corpus."""
     found = extract_citations("Le boîtier doit respecter la norme IP 65.")
     assert ("P.", "65") not in found
+
+
+# --- Arabic orthographic normalization (fold_arabic / _ar) -----------------
+#
+# Measured against a real 80-page administrative PDF: the native text layer
+# preserved teh marbuta correctly (1278 occurrences), but a PaddleOCR gate
+# run separately misread it as heh in 3/5 test headings, and the PDF's own
+# table pages extracted as Unicode Presentation Forms B glyphs where a
+# teh-marbuta-ending word literally contains no ة codepoint at all. These
+# cases prove extraction survives both.
+
+def test_extract_citations_survives_teh_marbuta_heh_confusion():
+    """The exact defect that gated OCR off (ocr_engine='none'): a source
+    reading "الماده" instead of "المادة" must still extract, and --
+    critically -- extract_citations derives `canonical` from its own
+    template (citations.py's extract_citations docstring), never from the
+    matched text, so the corrupted spelling never leaks into output."""
+    found = extract_citations("حسب الماده 8، يجب على العامل...")
+    assert found == {("المادة", "8"): {"canonical": "المادة 8", "arabizi": "l-madda 8"}}
+
+
+@pytest.mark.parametrize("source,key", [
+    ("صفحه 17 توضح الاجراء.", ("صفحة", "17")),
+    ("الفقره 3 ديال القسم.", ("الفقرة", "3")),
+])
+def test_extract_citations_survives_teh_marbuta_heh_confusion_other_heads(source, key):
+    assert key in extract_citations(source)
+
+
+def test_extract_citations_tolerates_harakat():
+    """Harakat sit inside the U+0600-06FF block, so a naive [^\\w؀-ۿ]
+    strip (as the grounding gate used before this fix) does NOT remove
+    them -- "المادةُ" must still match "المادة"."""
+    found = extract_citations("المادةُ 12 تنص على ذلك.")
+    assert ("المادة", "12") in found
+
+
+def test_extract_citations_tolerates_tatweel():
+    found = extract_citations("المــادة 12 تنص على ذلك.")
+    assert ("المادة", "12") in found
+
+
+def test_extract_citations_arabic_indic_digit_keys_same_as_ascii():
+    """\\d in Python's re already matches Arabic-Indic digits (Unicode
+    category Nd), so without folding, "المادة ٥" and "المادة 5" extracted
+    under two DIFFERENT keys for the same reference."""
+    assert set(extract_citations("المادة ٥ تنص...").keys()) == \
+        set(extract_citations("المادة 5 تنص...").keys())
+
+
+def test_extract_citations_finds_decree_and_decision():
+    """المرسوم (decree) and القرار (decision) -- measured on a real
+    administrative guide to outnumber المادة itself (7 and 13 occurrences
+    vs. 3) and were completely absent from ARABIC_REFERENCES before this."""
+    found = extract_citations("المرسوم رقم 2.18.781 الصادر... والقرار 1234 كذلك")
+    assert ("المرسوم", "2.18.781") in found
+    assert ("القرار", "1234") in found
+
+
+@pytest.mark.parametrize("source", [
+    "المهاد 12 و الماذة 3",  # unrelated words, must not false-positive
+    "هاد الشي مادي 12",       # "مادي" (material) is not "مادة" (article)
+])
+def test_widened_patterns_do_not_introduce_false_positives(source):
+    """The widening only folds ة<->ه, alef variants, ya/waw-hamza -- it must
+    never fold letters that distinguish genuinely different words (د/ذ,
+    ر/ز, ت/ث, س/ش), or "المادة" would start matching fabricated lookalikes."""
+    assert extract_citations(source) == {}
+
+
+def test_inject_citations_backfills_gloss_for_corrupted_spelling(arabic_citations):
+    """A model that reproduces a corrupted spelling (its own minor variance,
+    or content quoted from an OCR'd source) must still get the Arabizi
+    gloss backfilled, not silently skipped for not matching exactly."""
+    result = inject_citations(
+        "حسب الماده 1، يخضع الشخص لهذا القانون.", arabic_citations, target_script="arabizi",
+    )
+    assert "l-madda 1" in result
+
+
+def test_inject_citations_does_not_double_wrap_corrupted_self_gloss(arabic_citations):
+    """The double-wrap this normalization is required to prevent: a model
+    that already self-glossed using a corrupted spelling must be recognised
+    as already-cited, not re-wrapped into
+    "الماده 1 (المادة 1 (l-madda 1))"."""
+    already_glossed = "حسب الماده 1 (l-madda 1)، يخضع الشخص لهذا القانون."
+    result = inject_citations(already_glossed, arabic_citations, target_script="arabizi")
+    assert result.count("l-madda 1") == 1
+    assert "المادة 1 (المادة 1" not in result
+    assert "الماده 1 (المادة 1" not in result

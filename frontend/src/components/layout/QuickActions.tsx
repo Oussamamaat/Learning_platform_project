@@ -13,7 +13,7 @@ export default function QuickActions() {
         <button
           type="button"
           onClick={() => setQuizModalOpen(true)}
-          className="group flex flex-col items-start gap-1.5 rounded-xl border border-edge bg-surface px-3 py-2.5 text-left transition-colors hover:border-brand hover:bg-brand-soft"
+          className="press group flex flex-col items-start gap-1.5 rounded-xl border border-edge bg-surface px-3 py-2.5 text-left hover:border-brand hover:bg-brand-soft"
         >
           <FileQuestion className="h-4 w-4 text-brand transition-transform group-hover:scale-110" />
           <span className="text-[12.5px] font-semibold text-ink">Generate Quiz</span>
@@ -24,7 +24,7 @@ export default function QuickActions() {
         <button
           type="button"
           onClick={() => toastInfo("Video generation is coming soon.")}
-          className="group flex flex-col items-start gap-1.5 rounded-xl border border-edge bg-surface px-3 py-2.5 text-left transition-colors hover:bg-surface-3"
+          className="press group flex flex-col items-start gap-1.5 rounded-xl border border-edge bg-surface px-3 py-2.5 text-left hover:bg-surface-3"
         >
           <Video className="h-4 w-4 text-ink-faint transition-transform group-hover:scale-110" />
           <span className="text-[12.5px] font-semibold text-ink-dim">Generate Video</span>

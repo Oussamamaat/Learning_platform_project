@@ -20,6 +20,8 @@ cover the question.
 - [data-and-retrieval.md](data-and-retrieval.md) — corpus, chunking, embeddings, pgvector
 - [finetune-pipeline.md](finetune-pipeline.md) — base model, LoRA config, generation + training pipeline
 - [serving.md](serving.md) — what's deployed today vs. the documented target architecture
+- [video-generation-interface.md](video-generation-interface.md) — contract with the
+  explanatory-video feature (separate contributor, separate model)
 
 ## Not architecture
 

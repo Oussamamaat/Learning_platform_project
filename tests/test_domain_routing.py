@@ -64,10 +64,21 @@ def test_resolve_domain_pgvector_tier2_wins_when_vote_clears_threshold():
         assert mock_search.call_args.kwargs["domain"] is None
 
 
-def test_resolve_domain_pgvector_falls_to_tenant_default_when_vote_empty():
+def test_resolve_domain_pgvector_reports_no_match_when_vote_clears_nothing():
+    """A tier-2 vote that RAN and cleared nothing is a positive signal that
+    the query is out of corpus -- distinct from "routing could form no
+    opinion" (disk backend / DB error), which stays "tenant_default".
+
+    This distinction is the whole out-of-domain refusal fix: both cases used
+    to collapse into "tenant_default", so an off-topic question was routed to
+    the default domain, retrieved its nearest-but-irrelevant chunks, and got
+    answered as if grounded -- chat's `if not context.strip()` refusal never
+    fired because domain-scoped retrieval almost always returns something."""
     with patch("app.services.routing.search_similar_chunks", return_value=[]):
         domain, source = resolve_domain("q", tenant_id="t1", backend="pgvector")
-        assert source == "tenant_default"
+        assert source == "no_match"
+        # Still a usable domain: a caller that chooses not to refuse needs
+        # one to carry on with.
         assert domain  # settings.default_domain, non-empty
 
 

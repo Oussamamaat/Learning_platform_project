@@ -119,7 +119,7 @@ def resolve_language(
     )
 
 
-def vote_domain(candidates: list[dict], *, threshold: float = 0.15) -> Optional[str]:
+def vote_domain(candidates: list[dict], *, threshold: Optional[float] = None) -> Optional[str]:
     """Similarity-weighted domain vote over UNFILTERED retrieval candidates
     (each a dict with 'domain' and 'similarity', the shape
     search_similar_chunks returns). Returns the domain with the highest
@@ -132,11 +132,12 @@ def vote_domain(candidates: list[dict], *, threshold: float = 0.15) -> Optional[
     belongs to, and letting it vote would be exactly the kind of silent
     cross-domain leak the domain column exists to prevent.
     """
+    effective_threshold = threshold if threshold is not None else get_settings().domain_vote_threshold
     scores: dict[str, float] = {}
     for c in candidates:
         domain = c.get("domain")
         similarity = c.get("similarity", 0.0)
-        if not domain or similarity < threshold:
+        if not domain or similarity < effective_threshold:
             continue
         scores[domain] = scores.get(domain, 0.0) + similarity
     if not scores:
@@ -145,7 +146,8 @@ def vote_domain(candidates: list[dict], *, threshold: float = 0.15) -> Optional[
 
 
 def resolve_domain(
-    query: str, *, tenant_id: str, backend: str, threshold: float = 0.15
+    query: str, *, tenant_id: str, backend: str, threshold: Optional[float] = None,
+    source_ids: Optional[list[str]] = None,
 ) -> tuple[str, str]:
     """Resolve which domain this turn belongs to, for callers that don't
     already have one from page context (tier 1 -- handled entirely by the
@@ -160,25 +162,46 @@ def resolve_domain(
     a domain's true top-k out of a fixed-size candidate pool. Sub-ms at this
     corpus size.
 
-    Tier 3: settings.default_domain. Fires when tier 2 ran and found nothing
-    above threshold, when backend == "disk" (the disk backend has no single
-    cross-domain corpus to vote over without embedding all three domains'
-    text at once -- app.services.retrieval._disk_candidates is keyed
-    per-domain by design, so it skips straight to the tenant default), or
-    when tier 2's search itself raised (fail-open -- a Postgres hiccup
-    degrades routing to the tenant default rather than crashing the
-    request, the same contract app.routers.chat._retrieve_context already
-    applies to pgvector retrieval).
+    `source_ids`, forwarded to the tier-2 vote: without it, a DISABLED
+    tenant upload could still swing the automatic domain vote even though
+    it's excluded from every other part of retrieval. None (default)
+    means no filter, same as before uploads existed.
+
+    Tier 3: settings.default_domain, under one of two DISTINCT sources --
+    the distinction is the point, so callers can tell "we don't know" from
+    "nothing matched":
+
+      "tenant_default" -- routing could not form an opinion at all: backend
+          == "disk" (the disk backend has no single cross-domain corpus to
+          vote over without embedding all three domains' text at once --
+          app.services.retrieval._disk_candidates is keyed per-domain by
+          design, so it skips straight to the tenant default), or tier 2's
+          search itself raised (fail-open -- a Postgres hiccup degrades
+          routing to the tenant default rather than crashing the request,
+          the same contract app.routers.chat._retrieve_context already
+          applies to pgvector retrieval).
+
+      "no_match" -- tier 2 ran successfully and found NOTHING above
+          domain_vote_threshold. That is a real, positive signal that the
+          query is out of corpus, and it used to be discarded: every branch
+          collapsed into "tenant_default", so an off-topic question ("how do
+          I bake bread") was silently answered under the default domain.
+          Retrieval then almost always returns SOMETHING for it, so
+          app.routers.chat's `if not context.strip()` refusal never fired.
+          Returned so that caller can refuse; the domain is still the tenant
+          default, since a caller that chooses NOT to refuse needs a usable
+          domain to carry on with.
     """
     settings = get_settings()
     if backend == "pgvector":
         try:
             candidates = search_similar_chunks(
-                query=query, tenant_id=tenant_id, top_k=20, domain=None
+                query=query, tenant_id=tenant_id, top_k=20, domain=None, source_ids=source_ids
             )
             voted = vote_domain(candidates, threshold=threshold)
             if voted:
                 return voted, "retrieval"
+            return settings.default_domain, "no_match"
         except Exception:
             logger.exception(
                 "tier-2 domain routing failed for tenant=%s; falling back to tenant default",

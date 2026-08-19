@@ -4,6 +4,8 @@ import type {
   ChatResponse,
   QuizRequest,
   QuizResponse,
+  SourceFile,
+  SourceListResponse,
 } from "../types/api";
 
 const env = (import.meta as { env?: { VITE_API_BASE?: string } }).env;
@@ -19,21 +21,7 @@ export class ApiError extends Error {
   }
 }
 
-async function request<T>(path: string, body: unknown): Promise<T> {
-  let res: Response;
-  try {
-    res = await fetch(`${API_BASE}${path}`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    });
-  } catch {
-    throw new ApiError(
-      "NETWORK_ERROR",
-      `Cannot reach backend at ${API_BASE} — is uvicorn running?`,
-    );
-  }
-
+async function handleResponse<T>(res: Response): Promise<T> {
   if (!res.ok) {
     let payload: ApiErrorPayload | undefined;
     try {
@@ -46,8 +34,46 @@ async function request<T>(path: string, body: unknown): Promise<T> {
       payload?.error?.message ?? `Request failed with status ${res.status}`,
     );
   }
-
   return (await res.json()) as T;
+}
+
+async function request<T>(
+  path: string,
+  body?: unknown,
+  method: "GET" | "POST" | "PATCH" | "DELETE" = "POST",
+): Promise<T> {
+  let res: Response;
+  try {
+    res = await fetch(`${API_BASE}${path}`, {
+      method,
+      headers: body !== undefined ? { "Content-Type": "application/json" } : undefined,
+      body: body !== undefined ? JSON.stringify(body) : undefined,
+    });
+  } catch {
+    throw new ApiError(
+      "NETWORK_ERROR",
+      `Cannot reach backend at ${API_BASE} — is uvicorn running?`,
+    );
+  }
+  return handleResponse<T>(res);
+}
+
+// Multipart upload -- deliberately NOT reusing request<T>, which hardcodes
+// a JSON Content-Type header. A FormData body needs NO Content-Type set
+// explicitly: the browser computes the multipart boundary itself and sets
+// the header accordingly, so setting it manually here would break the
+// upload by omitting that boundary.
+async function requestForm<T>(path: string, form: FormData): Promise<T> {
+  let res: Response;
+  try {
+    res = await fetch(`${API_BASE}${path}`, { method: "POST", body: form });
+  } catch {
+    throw new ApiError(
+      "NETWORK_ERROR",
+      `Cannot reach backend at ${API_BASE} — is uvicorn running?`,
+    );
+  }
+  return handleResponse<T>(res);
 }
 
 export async function sendChatMessage(req: ChatRequest): Promise<ChatResponse> {
@@ -56,6 +82,25 @@ export async function sendChatMessage(req: ChatRequest): Promise<ChatResponse> {
 
 export async function generateQuiz(req: QuizRequest): Promise<QuizResponse> {
   return request<QuizResponse>("/api/v1/quiz/", req);
+}
+
+export async function uploadSources(files: File[], domain?: string): Promise<SourceFile[]> {
+  const form = new FormData();
+  for (const file of files) form.append("files", file);
+  if (domain) form.append("domain", domain);
+  return requestForm<SourceFile[]>("/api/v1/ingest/upload", form);
+}
+
+export async function listSources(): Promise<SourceListResponse> {
+  return request<SourceListResponse>("/api/v1/ingest/sources", undefined, "GET");
+}
+
+export async function setSourceEnabled(id: string, enabled: boolean): Promise<SourceFile> {
+  return request<SourceFile>(`/api/v1/ingest/sources/${id}`, { enabled }, "PATCH");
+}
+
+export async function deleteSource(id: string): Promise<{ deleted_chunks: number }> {
+  return request<{ deleted_chunks: number }>(`/api/v1/ingest/sources/${id}`, undefined, "DELETE");
 }
 
 export async function pingHealth(): Promise<boolean> {

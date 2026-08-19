@@ -12,20 +12,24 @@ will need revisiting once real documents replace it.
 
 ## Ingestion → chunking → embedding
 
-[ingestion.py](../../app/services/ingestion.py): `.txt`/`.md` files, markdown stripped
-before chunking so the embedding model sees clean content.
+[ingestion.py](../../app/services/ingestion.py): `.txt`/`.md`/`.pdf`/`.docx`/`.pptx`/
+`.xlsx`/`.csv`/images, all normalized to markdown before chunking so the embedding model
+sees clean content and a single heading-aware chunker covers every format. See the
+2026-08-13 section below for the multi-format parsing and embedding-model migration.
 
-| Setting | Value |
-|---|---|
-| Chunker | `RecursiveCharacterTextSplitter` |
-| Chunk size | 400 chars |
-| Chunk overlap | 50 chars |
-| Embedding model | `paraphrase-multilingual-MiniLM-L12-v2` (384-dim) |
-| Batch size | 64 |
+| Setting | Value | Since |
+|---|---|---|
+| Chunker | `RecursiveCharacterTextSplitter` | — |
+| Chunk size | 2000 chars | 2026-08-13 (was 400) |
+| Chunk overlap | 250 chars | 2026-08-13 (was 50) |
+| Embedding model | `BAAI/bge-m3` (1024-dim, 8192-token window) | 2026-08-13 (was `paraphrase-multilingual-MiniLM-L12-v2`, 384-dim) |
+| Batch size | 64 | — |
 
-None of these were benchmarked against this corpus — they're framework defaults. 400
-chars is small for legal prose; an article can split across chunks, which is a risk to
-the verbatim-citation behavior the whole grounding design depends on.
+The old 400-char chunk size was not an arbitrary framework default, as first thought —
+it was implicitly matched to the old embedding model's actual `max_seq_length: 128`
+(confirmed from its cached `sentence_bert_config.json`), which silently truncated
+anything longer. bge-m3's 8192-token window removes that ceiling; chunk size raised
+accordingly.
 
 ## Retrieval
 
@@ -334,3 +338,159 @@ language, fed from each response.
 
 **Detail & rationale:** plan file `now-i-wanna-tackle-sleepy-valley.md`
 ("Automatic Domain Routing + Language/Script Detection").
+
+### Embedding model migration: MiniLM → bge-m3 (2026-08-13)
+
+Driven by the tenant document-upload feature ("Multi-format ingestion + Sources panel"
+plan): real uploaded PDFs/slides run far longer than this corpus's short regulatory
+articles, and the old embedding model (`paraphrase-multilingual-MiniLM-L12-v2`) silently
+truncates at 128 tokens (`max_seq_length` in its own `sentence_bert_config.json`) — the
+400-char chunk size it shipped with wasn't an arbitrary default, it was implicitly sized
+to that ceiling. Swapped to `BAAI/bge-m3` (1024-dim, 8192-token window, no
+instruction-prefix requirement, stronger Arabic). This is a **breaking change** to
+`documents.embedding`'s vector width (384 → 1024) — `scripts/migrate_to_bge_m3.py`
+archives the 84 legacy `domain IS NULL` road-traffic rows to `documents_legacy_384`
+(not reproducible from `raw/`, unlike every domained row), truncates `documents`,
+alters the column, and fully re-ingests `raw/shared` with the new model.
+
+**Every number below is fresh — the old MiniLM-era tables above this section remain as
+history, not as a comparison baseline; the two models' cosine distributions aren't on
+the same scale.** All measured via `scripts/eval_retrieval.py` (pgvector + disk
+backends) and a single-process sweep script (avoids a Windows-specific issue where
+`sentence-transformers`/CUDA repeatedly spawned from a shell loop would intermittently
+stall on process startup — loading the model once and reusing it across thresholds
+sidesteps it entirely) against the same 50-pair `tests/data/retrieval_eval.jsonl`.
+
+**Ceiling (threshold 0.0), pgvector, language-affinity on:**
+
+| Metric | bge-m3 | Old MiniLM ceiling |
+|---|---|---|
+| `recall@4` | **1.000** | 0.978 |
+| `MRR` | **0.989** | 0.887 |
+| `gold_substring_present_in_context` | **0.978** | 0.756 |
+| `cross_language_rate` | **0.133** | 0.156 |
+
+A clean win on every axis before any threshold is even applied.
+
+**Threshold sweep, pgvector, language-affinity on** (`empty_context_rate_ood` = out-of-
+domain refusal rate, want 1.0):
+
+| `similarity_threshold` | `recall@4` | `MRR` | `empty_context_rate_ood` |
+|---|---|---|---|
+| 0.0 – 0.2 | 1.000 | 0.989 | 0.000 |
+| 0.3 | 1.000 | 0.989 | 0.200 |
+| **0.4 (new default)** | **1.000** | **0.989** | **0.800** |
+| 0.5 | 0.800 | 0.778 | 0.800 |
+| 0.6 | 0.511 | 0.500 | 1.000 |
+| 0.7 | 0.178 | 0.178 | 1.000 |
+
+**0.4 is an unusually clean optimum, not just a compromise point**: it's the *last*
+threshold with zero recall cost (still a perfect 1.000) while already capturing most of
+the achievable refusal protection (0.8 of the 1.0 ceiling) — above it, recall craters
+faster than refusal improves. This is a much sharper separation between relevant and
+irrelevant matches than the old model had at its own tuned value (0.15) — a direct
+relevant-vs-irrelevant spot check (a French and an Arabic-script query each against a
+real corpus doc and an off-topic "tajine recipe" control) scored relevant pairs at
+0.58–0.64 against irrelevant pairs at 0.23–0.37, a much wider margin than the old
+model showed at this corpus's scale.
+
+`similarity_threshold` (`app/config.py`) set to **0.4** (was 0.15).
+
+**Domain-vote threshold, `--auto-domain`** (separate question from the above — "does
+this chunk get a vote," not "is this chunk usable"), swept independently:
+
+| `domain_vote_threshold` | accuracy (45 in-domain rows) |
+|---|---|
+| 0.15 | 0.667 |
+| 0.3 | 0.689 |
+| **0.4 (new default)** | **0.889** |
+| 0.5 | 0.867 |
+
+0.4 also wins here, and by a wide margin over the low end — **an improvement over the
+old model's own measured baseline (0.778)**, not just a like-for-like swap. Misses at
+0.4 remain concentrated on `securite`, confused mostly with `industrial`/`blockchain`,
+consistent with the pre-existing (unrelated to this migration) vocabulary-overlap note
+recorded above. `domain_vote_threshold` (`app/config.py`) set to **0.4** (was 0.15).
+
+**Disk backend**, language-affinity on: `recall@4=1.000`, `MRR=0.989` — matches the
+pgvector ceiling exactly, as expected (no threshold on this backend).
+
+**Corpus re-ingest**: 25 files, 37 chunks (down from the old model's larger chunk count,
+expected given `CHUNK_SIZE` 400→2000 — most of this placeholder corpus's short articles
+now fit in a single chunk). All 37 rows confirmed with a non-NULL `embedding`.
+
+**Two context-budget fixes landed in the same change**, both promoted from theoretical
+to certain by the larger chunk size: `retrieval._build_context`'s truncation branch was
+dropping a chunk's `source_name` before appending its (truncated) text — at 400-char
+chunks this essentially never fired, but at ~2000-char chunks the *first* chunk alone
+can exhaust the context budget, which would have produced answers with real grounded
+text but an empty `sources` list. Fixed to append the source before truncating.
+Separately, `app/services/llm.py`'s two Ollama calls now send an explicit
+`"num_ctx": 8192` (verified via `ollama show --modelfile`: both `IBLOG_TUTOR` and
+`iblog-tutor-fr` ship `num_ctx 4096`, too little headroom for a 6000-char/~1500-token
+context budget plus conversation history plus the response itself). `max_context_length`
+raised 2000 → 6000 chars to match.
+
+**PaddleOCR-VL vs. `baidu/Unlimited-OCR`** (the OCR engine named in a prior stalled
+spike, referenced in `app/services/ingestion.py`'s original docstring): checked, not
+assumed. Unlimited-OCR is real (MIT, 3B params, genuinely well-suited to long documents)
+but its model card names no explicit language list and it's reported as optimized
+heavily for English/Chinese; it also pins `torch==2.10.0`/CUDA 12.9, incompatible with
+`.gguf_venv`'s torch 2.11.0+cu128. PaddleOCR-VL has explicit, dedicated Arabic
+recognition and the strongest published OmniDocBench v1.6 score in its class — set as
+the default engine (`app/services/ocr.py`), with Unlimited-OCR kept as a second
+pluggable backend. Neither is trusted by default: `settings.ocr_engine` stays `"none"`
+until `scripts/verify_ocr_arabic.py` passes against the committed ground-truth image
+(`tests/data/ocr/1.12_ar_procedure_consignation.png`) — see that script for the four
+gates (fidelity, logical order, not-reversed, digit integrity).
+
+**Detail & rationale:** plan file `you-are-an-expert-shiny-breeze.md` ("Multi-format
+ingestion + Sources panel"), Phase 1.
+
+### OCR gate run: PaddleOCR-VL fails on one character (2026-08-14)
+
+First real run of `scripts/verify_ocr_arabic.py --engine paddleocr` against the committed
+ground-truth image. **Result: FAILED — `settings.ocr_engine` stays `"none"`.**
+
+| Gate | Measured | Verdict |
+|---|---|---|
+| 1. Fidelity | 0.946 (≥ 0.90 required) | PASS |
+| 2. Logical order | gold `[1,2,3,4,5]` vs ocr `[1,4]` | **FAIL** |
+| 3. Not reversed | forward 0.946 vs reversed 0.009 | PASS |
+| 4. Digit integrity | no Arabic-Indic ↔ ASCII substitution | PASS |
+
+Gate 3 passing this decisively is the useful half: it answers the question the original
+stalled OCR spike never reached. PaddleOCR-VL emits **logical-order** RTL, not visual
+order, so the engine is not disqualified in principle.
+
+Gate 2's failure has a single, precise cause — worth recording because the aggregate
+fidelity score actively hides it. The engine did **not** drop the three headings and did
+not scramble their order or digits. It read **teh marbuta `ة` (U+0629) as heh `ه`
+(U+0647)** in three of five headings:
+
+```
+gold:  المادة 2: مجال التطبيق
+ocr:   الماده 2: مجال التطبيق      <- one character
+```
+
+The arithmetic closes exactly: 2 correct markers + 3 heh-variants = the 5 gold headings.
+A one-character-in-six substitution costs almost nothing on `SequenceMatcher` (hence
+0.946) while breaking **exact-match citation extraction completely**. This is precisely
+the class of defect gates 2–4 exist to catch and a similarity score alone cannot.
+
+**Carried forward — this is not only an OCR problem.** `app/services/citations.py:46`
+matches `re.compile(r'المادة\s+(\d+)')`, an exact literal, and there is no Arabic
+orthographic normalization anywhere in the extraction path. Moroccan writers routinely
+type `ه` for final `ة` by hand, so human-authored corpus text hits the identical miss —
+independent of OCR. Normalizing orthographic variants (`ة`/`ه`, `ا`/`أ`/`إ`/`آ`,
+`ى`/`ي`) before matching would fix both at once, but it changes a core, citation-sensitive
+regex covered by `tests/test_citations.py` and was outside this plan's scope; it is left
+as an open decision rather than a silent edit. **The gate was deliberately not loosened to
+make the engine pass** — under today's exact-match extraction the failure is real.
+
+Two harness defects fixed while getting this number, both of which had been burning a
+full multi-minute model load per diagnosis: the script now writes raw OCR output to
+`tests/data/ocr/<name>.<engine>.out.txt` **before** gating (so a failure can be diagnosed
+without re-running the model), and reconfigures stdout/stderr to UTF-8 (a Windows console
+is cp1252 and raised `UnicodeEncodeError` on any Arabic diagnostic, killing the run
+*after* the model load).

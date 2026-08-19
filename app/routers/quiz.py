@@ -9,6 +9,7 @@ from app.services.quiz import generate_quiz_questions
 from app.services.grounding import filter_grounded_questions
 from app.services.llm import deterministic_refusal, UI_LANG_TO_MODEL_LANG
 from app.services.routing import resolve_domain, resolve_language
+from app.services.sources import active_source_ids
 from app.errors import AppError
 
 logger = logging.getLogger(__name__)
@@ -62,18 +63,30 @@ def generate_quiz(request: QuizRequest):
     # 1. Retrieve relevant context and sources from pgvector, scoped to
     # `domain` -- previously build_rag_context had no domain filter at
     # all, so a quiz labelled "industrial" could ground in blockchain
-    # chunks (nobody noticed because there was no retrieval eval).
+    # chunks (nobody noticed because there was no retrieval eval). Also
+    # scoped to the tenant's currently-enabled uploaded sources (server-
+    # side only -- no QuizRequest field, keeping that API surface small,
+    # unlike chat's client-narrowing hint which has an actual UI toggle to
+    # drive it).
     context, sources = build_rag_context(
         query=request.topic,
         tenant_id=tenant,
         top_k=4,
         domain=domain,
         ui_lang=lang.query_lang,
+        source_ids=active_source_ids(tenant),
     )
 
     # 2. No usable source material: refuse deterministically rather than let
-    # the model invent quiz content with nothing to ground it in.
-    if not context.strip():
+    # the model invent quiz content with nothing to ground it in. Same two
+    # triggers as chat (see app/routers/chat.py's step 3 for the full
+    # reasoning): an empty context, OR a tier-2 domain vote that cleared
+    # nothing at all ("no_match"), which is the only signal that sees the
+    # whole corpus at once and can tell an out-of-corpus topic from a merely
+    # thin one. Without the second trigger, a quiz on an off-topic subject
+    # lands on the tenant default domain, pulls its nearest-but-irrelevant
+    # chunks, and generates questions "grounded" in unrelated material.
+    if domain_source == "no_match" or not context.strip():
         return QuizResponse(
             questions=[],
             topic=request.topic,

@@ -1,0 +1,141 @@
+\documentclass[11pt]{article}
+
+\usepackage[margin=2.5cm]{geometry}
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage{lmodern}
+\usepackage{titlesec}
+\usepackage{enumitem}
+\usepackage{xcolor}
+\usepackage{hyperref}
+\usepackage{fancyhdr}
+\usepackage{array}
+\usepackage{booktabs}
+\usepackage{parskip}
+
+\definecolor{accent}{RGB}{31,73,125}
+\definecolor{muted}{RGB}{90,90,90}
+
+\hypersetup{
+    colorlinks=true,
+    linkcolor=accent,
+    urlcolor=accent,
+}
+
+\titleformat{\section}
+  {\normalfont\Large\bfseries\color{accent}}
+  {\thesection}{0.6em}{}
+\titlespacing*{\section}{0pt}{1.4em}{0.7em}
+
+\titleformat{\subsection}
+  {\normalfont\large\bfseries\color{accent}}
+  {\thesubsection}{0.6em}{}
+\titlespacing*{\subsection}{0pt}{1.1em}{0.4em}
+
+\pagestyle{fancy}
+\fancyhf{}
+\renewcommand{\headrulewidth}{0.4pt}
+\renewcommand{\footrulewidth}{0.4pt}
+\fancyhead[L]{\small\color{muted}Oussama Maataoui --- Progress Report}
+\fancyhead[R]{\small\color{muted}August 18, 2026}
+\fancyfoot[C]{\small\color{muted}\thepage}
+
+\setlist[itemize]{leftmargin=1.4em, itemsep=0.3em, topsep=0.3em}
+\setlist[enumerate]{leftmargin=1.6em, itemsep=0.3em, topsep=0.3em}
+
+\newcommand{\statusdone}{\textcolor{accent}{\textbf{Done}}}
+\newcommand{\statusprog}{\textcolor{muted}{\textbf{In progress}}}
+\newcommand{\statusblocked}{\textbf{Blocked}}
+
+\begin{document}
+
+\begin{center}
+    {\Huge \bfseries \color{accent} Oussama Maataoui --- Progress Report}\\[0.6em]
+    {\large \color{muted} Adaptive Learning Tutor Platform (RAG + Fine-Tuned LLM)}\\[0.4em]
+    {\normalsize \color{muted} August 18, 2026 \quad$|$\quad Reporting period: past week}
+\end{center}
+
+\vspace{1em}
+\hrule
+\vspace{1.5em}
+
+\section*{Summary}
+This week focused on stabilizing and measuring the retrieval-augmented generation (RAG) core and bringing the document ingestion pipeline (multi-format parsing, OCR, source management) to a working state. One blocking issue was identified and gated before rollout: Arabic-script OCR accuracy. In parallel, the API contract and data-sharing plan for the video generation integration were finalized with my partner. This week's focus is closing the remaining RAG/ingestion gaps and starting two new capabilities: voice (TTS) and auto-generated diagrams.
+
+\section{Progress This Week}
+
+\subsection{RAG Pipeline: Retrieval Quality}
+\statusdone
+\begin{itemize}
+    \item Built and ran a formal retrieval evaluation harness (50 labeled query/document pairs) to measure retrieval quality quantitatively for the first time, rather than relying on spot checks.
+    \item Improved recall@4 from a baseline of 0.911 to 0.978 through two changes: heading-aware chunk packing and a language-affinity boost during ranking (reduces cross-language retrieval noise, e.g. French chunks answering Darija queries).
+    \item Migrated the embedding model from a general-purpose multilingual MiniLM model to \texttt{BAAI/bge-m3}, with chunk size increased from 400 to 2000 characters to better preserve regulatory context per chunk.
+    \item Mean Reciprocal Rank (MRR) is currently 0.887; cross-language retrieval rate is down to 15.6\%.
+\end{itemize}
+
+\subsection{Dual-Model Language Routing}
+\statusdone
+\begin{itemize}
+    \item French queries are routed to \texttt{gemma2:9b} with the French LoRA adapter; Darija queries route to \texttt{IBLOG\_TUTOR} (our Atlas-Chat-9B fine-tune).
+    \item Both models are served serially on the current laptop MVP setup due to VRAM constraints; concurrent loading is planned for the Phase 1 cloud deployment (vLLM co-resident serving), not required for the current milestone.
+\end{itemize}
+
+\subsection{Document Ingestion Pipeline}
+\statusprog
+\begin{itemize}
+    \item Built the full upload-to-ready pipeline: file upload with SHA-256 deduplication, an async processing queue, a Pending $\rightarrow$ Processing $\rightarrow$ Ready/Error state machine, and startup-time recovery of orphaned/stuck jobs.
+    \item Extended document parsing beyond Markdown/plain text to \texttt{.pdf}, \texttt{.docx}, \texttt{.pptx}, \texttt{.xlsx}, \texttt{.csv}, and images, including automatic per-page PDF classification (text vs. scanned/image content).
+    \item Added source-level management: tenants can pin/unpin active source documents, with automatic corpus-versioning so retrieval never silently serves stale or unpinned content.
+    \item Test coverage for this feature is solid: dedicated test suites for the ingestion router, PDF classification, and source management, all passing.
+    \item \textbf{Open issue: Arabic OCR accuracy.} A gate check on a candidate OCR engine (PaddleOCR) surfaced a recurring misread between two visually similar Arabic letters, \emph{teh marbuta} and \emph{heh}, in a subset of test headings. The engine is left disabled (\texttt{ocr\_engine = "none"}) for now while this is investigated. Impact is expected to be limited: most source documents are born-digital text (not scans), and embedded images in these documents rarely contain meaningful text, so this mainly affects citation-critical text extracted from scanned Arabic-script pages specifically. We are still evaluating the right fix (engine tuning vs. post-OCR correction vs. narrowing where OCR is applied) before re-enabling it.
+\end{itemize}
+
+\subsection{Video Generation Integration: Alignment With My Partner}
+\statusdone
+\begin{itemize}
+    \item Agreed on the data-sharing plan: I will provide multiple grounded explanations, in both French and Darija, generated by our fine-tuned model, to serve as training data for her video-generation model.
+    \item Agreed on the trigger model: video generation will \emph{not} be an autonomous AI decision made mid-conversation. Instead, users will be shown an explicit, user-selectable option to request a video for a given explanation (similar in spirit to how Gemini surfaces generation options), keeping the behavior predictable and opt-in.
+    \item The API contract between the two systems is defined: our side sends the finished, grounded explanation text (never the raw user question) along with a language tag (\texttt{fr} / \texttt{en} / \texttt{ar-MA}); her worker polls for pending jobs and reports completion status back via a status update endpoint.
+    \item Remaining open items on this integration: the production base URL for her service is not yet assigned, and there is no authentication between the two systems yet; both are flagged to be resolved before this integration is exposed to more than one tenant.
+\end{itemize}
+
+\section{Plan for This Week}
+
+\begin{enumerate}
+    \item \textbf{Close out the RAG pipeline gaps.}
+    \begin{itemize}
+        \item Continue investigating the Arabic OCR accuracy issue (teh marbuta / heh misreads) and evaluate fix options before re-enabling OCR.
+        \item Add Arabic orthographic normalization to the citation-matching logic, which currently uses exact string matching and misses valid citations due to script variation.
+        \item Fix a related gap where out-of-domain queries currently always retrieve a top-4 context and never trigger the deterministic refusal path (which today only fires on empty retrieval).
+        \item Run the existing end-to-end upload probe against a live environment to confirm the full ingestion pipeline (upload $\rightarrow$ ready $\rightarrow$ pin/version invalidation $\rightarrow$ delete) behaves correctly outside of unit tests.
+    \end{itemize}
+    \item \textbf{Voice feature (text-to-speech).}
+    \begin{itemize}
+        \item Evaluate and select a TTS vendor/engine supporting French and Darija (Arabic script) output --- currently unevaluated and flagged as MVP-critical.
+        \item Define the integration point in the chat pipeline (on-demand per response vs. automatic) and the audio delivery format for the frontend.
+    \end{itemize}
+    \item \textbf{Diagrams feature.}
+    \begin{itemize}
+        \item Begin implementation of the diagram-generation adapter (previously roadmapped, not yet started): scoping which explanation types warrant a diagram and how generation will be triggered and rendered in the chat UI.
+    \end{itemize}
+    \item \textbf{Video integration follow-through.}
+    \begin{itemize}
+        \item Prepare and send the first batch of bilingual (French/Darija) grounded explanations to my partner for her model training.
+        \item Follow up on base URL assignment and authentication design ahead of broader rollout.
+    \end{itemize}
+\end{enumerate}
+
+\section{Risks / Items Needing Attention}
+\begin{itemize}
+    \item \textbf{Arabic OCR} accuracy issue is still under investigation; low urgency for now since most source documents are born-digital text rather than scans, but a fix is needed before scanned Arabic-script pages can be trusted for citation-critical content.
+    \item \textbf{TTS vendor selection} has not started and is on the critical path for the voice feature; needs a decision early this week to stay on schedule.
+    \item \textbf{Video integration security}: no authentication currently exists between our system and the partner's video service. Acceptable for the current single-tenant testing phase, but must be resolved before wider exposure.
+    \item The RAG corpus in use is still a placeholder set of documents pending the client's real regulatory materials; retrieval tuning to date is provisional and may need revisiting once real content is loaded.
+\end{itemize}
+
+\vspace{1em}
+\hrule
+\vspace{0.5em}
+{\small\color{muted} Prepared by Oussama Maataoui \hfill August 18, 2026}
+
+\end{document}

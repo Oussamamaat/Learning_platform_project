@@ -12,7 +12,7 @@
           "chat"
         ],
         "summary": "Chat",
-        "description": "Text-based conversation endpoint.\nReceives user message, performs RAG retrieval, returns AI response.",
+        "description": "Text-based conversation endpoint.\nReceives user message, performs RAG retrieval, and queries the local LLM.",
         "operationId": "chat_api_v1_chat__post",
         "requestBody": {
           "content": {
@@ -125,7 +125,7 @@
           "quiz"
         ],
         "summary": "Generate Quiz",
-        "description": "Quiz generation endpoint.\nRetrieves relevant course material via RAG, generates pedagogical quiz questions.",
+        "description": "Quiz generation endpoint.\nRetrieves relevant course material via RAG, generates pedagogical quiz\nquestions with the fine-tuned model, and filters out any question that\ncites something absent from the retrieved material before returning it.",
         "operationId": "generate_quiz_api_v1_quiz__post",
         "requestBody": {
           "content": {
@@ -144,6 +144,424 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/QuizResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/demo/conversation": {
+      "post": {
+        "tags": [
+          "demo"
+        ],
+        "summary": "Get Demo Conversation",
+        "description": "Generate a demo multi-turn conversation.",
+        "operationId": "get_demo_conversation_api_v1_demo_conversation_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DemoRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/ingest/upload": {
+      "post": {
+        "tags": [
+          "ingest"
+        ],
+        "summary": "Upload Sources",
+        "operationId": "upload_sources_api_v1_ingest_upload_post",
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_upload_sources_api_v1_ingest_upload_post"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/SourceFileOut"
+                  },
+                  "type": "array",
+                  "title": "Response Upload Sources Api V1 Ingest Upload Post"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/ingest/sources": {
+      "get": {
+        "tags": [
+          "ingest"
+        ],
+        "summary": "List Sources",
+        "operationId": "list_sources_api_v1_ingest_sources_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SourceListResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/ingest/sources/{source_id}": {
+      "get": {
+        "tags": [
+          "ingest"
+        ],
+        "summary": "Get Source",
+        "operationId": "get_source_api_v1_ingest_sources__source_id__get",
+        "parameters": [
+          {
+            "name": "source_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Source Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SourceFileOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "patch": {
+        "tags": [
+          "ingest"
+        ],
+        "summary": "Update Source",
+        "operationId": "update_source_api_v1_ingest_sources__source_id__patch",
+        "parameters": [
+          {
+            "name": "source_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Source Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SourceToggleRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SourceFileOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "ingest"
+        ],
+        "summary": "Delete Source",
+        "operationId": "delete_source_api_v1_ingest_sources__source_id__delete",
+        "parameters": [
+          {
+            "name": "source_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Source Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/video/generate": {
+      "post": {
+        "tags": [
+          "video"
+        ],
+        "summary": "Generate Video",
+        "description": "Our side: create a pending job and return immediately -- the caller\npolls GET /jobs/{id} for the result, same pattern as file upload.",
+        "operationId": "generate_video_api_v1_video_generate_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/VideoGenerateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VideoJobOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/video/jobs": {
+      "get": {
+        "tags": [
+          "video"
+        ],
+        "summary": "List Jobs",
+        "description": "Video worker's side: poll with ?status=pending to claim work.",
+        "operationId": "list_jobs_api_v1_video_jobs_get",
+        "parameters": [
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/VideoJobStatus"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/VideoJobOut"
+                  },
+                  "title": "Response List Jobs Api V1 Video Jobs Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/video/jobs/{job_id}": {
+      "get": {
+        "tags": [
+          "video"
+        ],
+        "summary": "Get Job",
+        "description": "Our side: poll for the result.",
+        "operationId": "get_job_api_v1_video_jobs__job_id__get",
+        "parameters": [
+          {
+            "name": "job_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Job Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VideoJobOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "patch": {
+        "tags": [
+          "video"
+        ],
+        "summary": "Update Job",
+        "description": "Video worker's side: report progress/result. Required fields per\nstatus: 'ready' -> video_url, 'error' -> error_message.",
+        "operationId": "update_job_api_v1_video_jobs__job_id__patch",
+        "parameters": [
+          {
+            "name": "job_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Job Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/VideoJobUpdateRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VideoJobOut"
                 }
               }
             }
@@ -231,6 +649,34 @@
         ],
         "title": "Body_process_audio_api_v1_audio__post"
       },
+      "Body_upload_sources_api_v1_ingest_upload_post": {
+        "properties": {
+          "files": {
+            "items": {
+              "type": "string",
+              "format": "binary"
+            },
+            "type": "array",
+            "title": "Files"
+          },
+          "domain": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Domain"
+          }
+        },
+        "type": "object",
+        "required": [
+          "files"
+        ],
+        "title": "Body_upload_sources_api_v1_ingest_upload_post"
+      },
       "ChatRequest": {
         "properties": {
           "message": {
@@ -264,10 +710,42 @@
             "title": "Tenant Id",
             "description": "Company/tenant identifier"
           },
+          "domain": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Domain"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Domain for tutoring context. Explicit value (e.g. a course-module page that already knows its own domain) is authoritative and skips auto-routing entirely; omitted routes automatically via app.services.routing (retrieval-as-router, then the tenant default) -- see ChatResponse.domain_source for what was chosen."
+          },
           "language": {
-            "$ref": "#/components/schemas/Language",
-            "description": "Response language",
-            "default": "fr"
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Language"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Response language. Explicit value is authoritative for both retrieval and the response; omitted routes automatically via app.services.routing (script detection, an in-message instruction like 'réponds en darija', or a sticky prior override) -- see ChatResponse.language."
+          },
+          "active_source_ids": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Active Source Ids",
+            "description": "Which of the tenant's uploaded sources (app/routers/ingest.py) may ground this turn's answer. A NARROWING hint only, like tenant_id -- app.services.sources.active_source_ids intersects this against server-side (status='ready' AND enabled) state, never widens it, so a stale client can't resurrect a source the tenant just disabled. The tenant's always-on global corpus is never affected by this field. Omitted means every currently-enabled uploaded source is eligible."
           }
         },
         "type": "object",
@@ -301,14 +779,79 @@
             "title": "Tokens Used",
             "description": "Total tokens consumed",
             "default": 0
+          },
+          "domain": {
+            "type": "string",
+            "title": "Domain",
+            "description": "The domain this turn was actually answered in"
+          },
+          "domain_source": {
+            "type": "string",
+            "title": "Domain Source",
+            "description": "How `domain` was resolved: 'page_context' (caller supplied it), 'retrieval' (auto-routed by a similarity-weighted vote over unfiltered top chunks), 'pinned' (reused this session's existing segment), 'no_match' (the vote ran and NOTHING cleared the threshold -- the query is out of corpus, and this response is a deterministic refusal), or 'tenant_default' (routing could form no opinion at all: disk backend, or the vote's own search failed)."
+          },
+          "language": {
+            "type": "string",
+            "title": "Language",
+            "description": "The response language actually used: 'fr' or 'darija'."
+          },
+          "prior_questions": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Prior Questions",
+            "description": "Socratic questions the tutor already asked in turns that fell out of the replayed history window (deterministic extraction, not a model summary) -- for the UI to show 'already asked' state without the server re-asking them in the prompt."
+          },
+          "cross_language": {
+            "type": "boolean",
+            "title": "Cross Language",
+            "description": "True when retrieval could not find enough same-language source material (ADR 0002 decision 5) and fell back across the language line -- the answer is still grounded and in the requested language, but the UI should surface that the underlying sources are in a different script.",
+            "default": false
+          },
+          "degraded": {
+            "type": "boolean",
+            "title": "Degraded",
+            "description": "True when pgvector retrieval raised and this answer fell back to the disk backend (app/routers/chat.py's _retrieve_context) -- which knows nothing about tenant uploads. The answer is still grounded in the built-in corpus, but any uploaded sources are silently absent from it until Postgres recovers; the UI should say so rather than let a confident, cited-looking answer imply otherwise.",
+            "default": false
           }
         },
         "type": "object",
         "required": [
           "response",
-          "session_id"
+          "session_id",
+          "domain",
+          "domain_source",
+          "language"
         ],
         "title": "ChatResponse"
+      },
+      "DemoRequest": {
+        "properties": {
+          "language": {
+            "type": "string",
+            "title": "Language"
+          },
+          "turn": {
+            "type": "integer",
+            "title": "Turn"
+          }
+        },
+        "type": "object",
+        "required": [
+          "language",
+          "turn"
+        ],
+        "title": "DemoRequest"
+      },
+      "Domain": {
+        "type": "string",
+        "enum": [
+          "industrial",
+          "securite",
+          "blockchain"
+        ],
+        "title": "Domain"
       },
       "HTTPValidationError": {
         "properties": {
@@ -399,10 +942,27 @@
             "title": "Tenant Id",
             "description": "Company/tenant identifier"
           },
+          "domain": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Domain"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Domain to ground the quiz in. Explicit value is authoritative and enforced at retrieval time (was previously hardcoded server-side to 'industrial' with no domain filter at all -- a quiz labelled industrial could ground in blockchain chunks). Omitted routes automatically via app.services.routing, same as chat -- see QuizResponse.domain_source."
+          },
           "language": {
-            "$ref": "#/components/schemas/Language",
-            "description": "Quiz language",
-            "default": "fr"
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Language"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Quiz language. Explicit value is authoritative; omitted falls back to detecting the language from the topic text."
           }
         },
         "type": "object",
@@ -429,16 +989,248 @@
           "total_questions": {
             "type": "integer",
             "title": "Total Questions",
-            "description": "Total number of questions"
+            "description": "Total number of questions actually returned"
+          },
+          "requested_questions": {
+            "type": "integer",
+            "title": "Requested Questions",
+            "description": "Number of questions the caller asked for (QuizRequest.num_questions) -- compare against total_questions to detect a shortfall, e.g. thin source material."
+          },
+          "message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Message",
+            "description": "Set when no grounded questions could be returned (e.g. no matching source material, or every generated question failed the grounding check)."
+          },
+          "sources": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Sources",
+            "description": "Retrieved document sources the quiz was grounded in"
+          },
+          "domain": {
+            "type": "string",
+            "title": "Domain",
+            "description": "The domain this quiz was actually grounded in"
+          },
+          "domain_source": {
+            "type": "string",
+            "title": "Domain Source",
+            "description": "How `domain` was resolved: 'page_context' | 'retrieval' | 'no_match' (vote cleared nothing -- out of corpus, and this response is a refusal) | 'tenant_default'"
+          },
+          "language": {
+            "type": "string",
+            "title": "Language",
+            "description": "The quiz language actually used: 'fr' or 'darija'."
           }
         },
         "type": "object",
         "required": [
           "questions",
           "topic",
-          "total_questions"
+          "total_questions",
+          "requested_questions",
+          "domain",
+          "domain_source",
+          "language"
         ],
         "title": "QuizResponse"
+      },
+      "SourceFileOut": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "filename": {
+            "type": "string",
+            "title": "Filename"
+          },
+          "status": {
+            "$ref": "#/components/schemas/SourceStatus"
+          },
+          "error_message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error Message"
+          },
+          "enabled": {
+            "type": "boolean",
+            "title": "Enabled"
+          },
+          "domain": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Domain"
+          },
+          "language": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Language"
+          },
+          "chunk_count": {
+            "type": "integer",
+            "title": "Chunk Count",
+            "default": 0
+          },
+          "page_count": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Page Count"
+          },
+          "parser": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Parser",
+            "description": "How the file was parsed: pdf_text | pdf_ocr | pdf_mixed | docx | pptx | xlsx | csv | text | image_ocr -- an audit trail for 'was this text OCR'd'."
+          },
+          "ocr_engine": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ocr Engine"
+          },
+          "unprocessed_pages": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Unprocessed Pages",
+            "description": "Set when status='partial': pages skipped rather than failing the whole document, e.g. [{'page': 4, 'reason': 'ocr_required'}]."
+          },
+          "size_bytes": {
+            "type": "integer",
+            "title": "Size Bytes",
+            "default": 0
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "duplicate_of": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Duplicate Of",
+            "description": "Set when this upload's sha256 matched an existing ready source -- the returned row IS that existing source, not a new one."
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "filename",
+          "status",
+          "enabled",
+          "created_at"
+        ],
+        "title": "SourceFileOut",
+        "description": "One tenant-uploaded document, mirroring app.models.database.SourceFile\n-- see app/routers/ingest.py."
+      },
+      "SourceListResponse": {
+        "properties": {
+          "sources": {
+            "items": {
+              "$ref": "#/components/schemas/SourceFileOut"
+            },
+            "type": "array",
+            "title": "Sources"
+          },
+          "ready_count": {
+            "type": "integer",
+            "title": "Ready Count"
+          },
+          "total_chunks": {
+            "type": "integer",
+            "title": "Total Chunks"
+          }
+        },
+        "type": "object",
+        "required": [
+          "sources",
+          "ready_count",
+          "total_chunks"
+        ],
+        "title": "SourceListResponse"
+      },
+      "SourceStatus": {
+        "type": "string",
+        "enum": [
+          "pending",
+          "processing",
+          "ready",
+          "partial",
+          "error"
+        ],
+        "title": "SourceStatus"
+      },
+      "SourceToggleRequest": {
+        "properties": {
+          "enabled": {
+            "type": "boolean",
+            "title": "Enabled"
+          }
+        },
+        "type": "object",
+        "required": [
+          "enabled"
+        ],
+        "title": "SourceToggleRequest"
       },
       "ValidationError": {
         "properties": {
@@ -472,6 +1264,194 @@
           "type"
         ],
         "title": "ValidationError"
+      },
+      "VideoGenerateRequest": {
+        "properties": {
+          "text": {
+            "type": "string",
+            "maxLength": 8000,
+            "minLength": 1,
+            "title": "Text",
+            "description": "Explanation/content to turn into video"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 300
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title",
+            "description": "Short topic label for the video's opening frame, in the same language as text"
+          },
+          "language": {
+            "$ref": "#/components/schemas/Language",
+            "description": "fr | en | ar-MA"
+          },
+          "session_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Session Id",
+            "description": "Chat/quiz session this was triggered from, if any"
+          },
+          "tenant_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tenant Id",
+            "description": "Company/tenant identifier"
+          }
+        },
+        "type": "object",
+        "required": [
+          "text",
+          "language"
+        ],
+        "title": "VideoGenerateRequest",
+        "description": "Input contract: what our app sends to request a video."
+      },
+      "VideoJobOut": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "tenant_id": {
+            "type": "string",
+            "title": "Tenant Id"
+          },
+          "session_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Session Id"
+          },
+          "input_text": {
+            "type": "string",
+            "title": "Input Text"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title"
+          },
+          "language": {
+            "type": "string",
+            "title": "Language"
+          },
+          "status": {
+            "$ref": "#/components/schemas/VideoJobStatus"
+          },
+          "video_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Video Url"
+          },
+          "error_message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error Message"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "tenant_id",
+          "input_text",
+          "language",
+          "status",
+          "created_at"
+        ],
+        "title": "VideoJobOut"
+      },
+      "VideoJobStatus": {
+        "type": "string",
+        "enum": [
+          "pending",
+          "processing",
+          "ready",
+          "error"
+        ],
+        "title": "VideoJobStatus"
+      },
+      "VideoJobUpdateRequest": {
+        "properties": {
+          "status": {
+            "$ref": "#/components/schemas/VideoJobStatus"
+          },
+          "video_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Video Url",
+            "description": "Required when status='ready'"
+          },
+          "error_message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error Message",
+            "description": "Required when status='error'"
+          }
+        },
+        "type": "object",
+        "required": [
+          "status"
+        ],
+        "title": "VideoJobUpdateRequest",
+        "description": "Output contract: what the video worker PATCHes back as it progresses."
       }
     }
   }

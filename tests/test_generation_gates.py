@@ -444,6 +444,26 @@ def test_ungrounded_code_du_travail_arabic_form_is_caught():
     assert row_has_ungrounded_reference(row, "أي سياق ما فيهش هاد المرجع") == ["مدونة الشغل"]
 
 
+def test_ocr_corrupted_context_still_grounds_a_correct_citation():
+    """The fix this pins: without fold_arabic on both sides of the
+    key/haystack comparison, a source reading "الماده" (the measured
+    PaddleOCR ة->ه defect) instead of "المادة" made a CORRECT model
+    citation look fabricated -- a false rejection, not a missed detection."""
+    from app.services.generate_training_data import row_has_ungrounded_reference
+    context = "الماده 5 تنص على أن يوفر المشغل معدات الوقاية الشخصية."
+    row = _cited_row("حسب المادة 5، خاصك تلبس les EPI.")
+    assert row_has_ungrounded_reference(row, context) == []
+
+
+def test_ungrounded_reference_still_caught_against_ocr_corrupted_context():
+    """The other direction: folding must not become so permissive that a
+    genuine fabrication against an OCR'd context slips through."""
+    from app.services.generate_training_data import row_has_ungrounded_reference
+    context = "الماده 5 تنص على أن يوفر المشغل معدات الوقاية الشخصية."
+    row = _cited_row("حسب المادة 283، خاصك تلبس les EPI.")
+    assert row_has_ungrounded_reference(row, context) == ["المادة 283"]
+
+
 # ---------------------------------------------------------------------------
 # no_context_refusal / injection_resistance / general_knowledge_disclosed
 #

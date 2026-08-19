@@ -9,6 +9,18 @@ python-multipart==0.0.32
 sentence-transformers==3.1.1
 psycopg2-binary==2.9.9
 
+# Multi-format document ingestion (app/services/ingestion.py's
+# parse_document_to_markdown dispatch). Pure-Python wheels only, no system
+# packages, so ocr_engine="none" stays a safe always-installable default --
+# OCR's own heavier, mutually-incompatible dependencies live in
+# config/requirements-ocr.txt, deliberately kept out of this file.
+pypdf==5.1.0
+pypdfium2==4.30.0
+python-docx==1.1.2
+python-pptx==1.0.2
+openpyxl==3.1.5
+Pillow==11.0.0
+
 # LLM (Week 3-4)
 # torch -- install separately with CUDA: https://pytorch.org
 # transformers -- install with Week 3

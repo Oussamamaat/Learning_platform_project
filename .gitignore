@@ -5,6 +5,9 @@ __pycache__/
 .pytest_cache/
 *.egg-info/
 .gguf_venv/
+# OCR engines pin their own incompatible torch/paddle runtimes, so they get a
+# dedicated venv rather than sharing .gguf_venv (see config/requirements-ocr.txt)
+.ocr_venv/
 
 # Environment / secrets
 .env
@@ -18,6 +21,11 @@ frontend/dist/
 atlas_gguf_export*/
 unsloth_compiled_cache/
 
+# Tenant-uploaded documents (settings.upload_dir). Runtime data, not source:
+# each file is reachable only via its source_files row, and the rows live in
+# Postgres -- committing the blobs would leak one tenant's corpus into the repo.
+data/uploads/
+
 # Superseded exports/datasets kept locally for comparison only (see CLAUDE.md)
 _archive/
 
@@ -30,3 +38,10 @@ Inter,JetBrains_Mono,Outfit,Plus_Jakarta_Sans/
 # OS
 Thumbs.db
 .DS_Store
+
+# Batch-generation output (scripts/generate_video_samples.py etc.) -- runtime
+# artifacts, not source. The .raw.jsonl debugging log especially must never
+# be sent to the partner or committed.
+out/
+
+*.pdf

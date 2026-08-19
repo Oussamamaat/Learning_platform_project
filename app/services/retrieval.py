@@ -125,7 +125,10 @@ def _disk_search(query: str, domain: str, top_k: int) -> list[dict]:
     return scored[: max(top_k * 4, 20)]
 
 
-def _pgvector_search(query: str, tenant_id: str, domain: Optional[str], top_k: int) -> list[dict]:
+def _pgvector_search(
+    query: str, tenant_id: str, domain: Optional[str], top_k: int,
+    source_ids: Optional[list[str]] = None,
+) -> list[dict]:
     # domain is passed straight into search_similar_chunks's SQL WHERE
     # clause, not filtered in Python after a fixed-size LIMIT. Measured
     # live against a multi-domain tenant: filtering after the fetch let
@@ -138,7 +141,8 @@ def _pgvector_search(query: str, tenant_id: str, domain: Optional[str], top_k: i
     # quiz labelled "industrial" could ground in blockchain chunks (no
     # domain filter existed at all, old quiz.py:28).
     return search_similar_chunks(
-        query=query, tenant_id=tenant_id, top_k=max(top_k * 4, 20), domain=domain
+        query=query, tenant_id=tenant_id, top_k=max(top_k * 4, 20), domain=domain,
+        source_ids=source_ids,
     )
 
 
@@ -185,6 +189,15 @@ def _build_context(selected: list[dict], *, max_context_length: int) -> tuple[st
             remaining = max_context_length - current_length
             if remaining > 100:
                 context_parts.append(content[:remaining] + "...")
+                # Was missing before the chunk-size increase to ~2000
+                # chars (2026-08-13) -- at the old 400-char chunk size this
+                # branch essentially never fired, so the gap was latent.
+                # With larger chunks the FIRST chunk alone can exhaust
+                # max_context_length, and without this line the answer
+                # comes back with real (truncated) context but sources==[],
+                # which reads as "the sidebar is broken" rather than what
+                # it actually is: a citation silently dropped on truncation.
+                sources.append(c.get("source_name", ""))
             break
         context_parts.append(content)
         sources.append(c.get("source_name", ""))
@@ -209,7 +222,8 @@ def retrieve(
     ui_lang: Optional[str] = None,
     top_k: int = 4,
     threshold: Optional[float] = None,
-    max_context_length: int = 2000,
+    max_context_length: int = 6000,
+    source_ids: Optional[list[str]] = None,
 ) -> RetrievalResult:
     """Retrieve context for `query` in `domain`.
 
@@ -231,16 +245,30 @@ def retrieve(
     control -- app/routers/chat.py -- which picks which of those two
     wrappers to call. See docs/architecture/data-and-retrieval.md for why
     the cutover is gated on scripts/eval_retrieval.py, not assumed.
+
+    `source_ids`: forwarded to the pgvector path only (see
+    search_similar_chunks's docstring for the SQL). The disk backend
+    reads raw/shared/<domain>/text/*.md, which by definition never
+    contains a tenant upload, so this parameter has nothing to filter
+    there and is silently ignored on that branch rather than erroring --
+    a caller building one code path for both backends (e.g. the
+    pgvector-with-disk-fallback in app/routers/chat.py) shouldn't have to
+    branch just to drop this argument for disk.
     """
     settings = get_settings()
     target_lang = UI_LANG_TO_DOC_LANG.get(ui_lang) if ui_lang else None
 
     if backend == "pgvector":
-        candidates = _pgvector_search(query, tenant_id or settings.default_tenant_id, domain, top_k)
-        # 0.15, not 0.4 -- see build_rag_context's docstring (app/services/
-        # search.py) for the live threshold sweep this default is from.
+        candidates = _pgvector_search(
+            query, tenant_id or settings.default_tenant_id, domain, top_k, source_ids=source_ids
+        )
+        # settings.similarity_threshold -- see docs/architecture/
+        # data-and-retrieval.md for the live sweep this default is from.
+        # Re-swept for bge-m3 as part of the 2026-08-13 embedding-model
+        # migration; was a hardcoded 0.15 benchmarked against MiniLM.
         selected, cross_language = _select_with_affinity(
-            candidates, target_lang=target_lang, top_k=top_k, threshold=threshold if threshold is not None else 0.15
+            candidates, target_lang=target_lang, top_k=top_k,
+            threshold=threshold if threshold is not None else settings.similarity_threshold,
         )
     elif backend == "disk":
         candidates = _disk_search(query, domain, top_k)

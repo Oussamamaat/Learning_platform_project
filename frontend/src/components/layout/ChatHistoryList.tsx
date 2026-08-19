@@ -36,7 +36,7 @@ export default function ChatHistoryList() {
         return (
           <div
             key={session.id}
-            className={`group flex cursor-pointer items-center gap-2 rounded-lg border px-2.5 py-2 transition-colors ${
+            className={`press group flex cursor-pointer items-center gap-2 rounded-lg border px-2.5 py-2 ${
               active
                 ? "border-brand bg-brand-soft text-brand-deep"
                 : "border-edge bg-surface text-ink-dim hover:border-ink-faint/60 hover:text-ink"
@@ -59,7 +59,7 @@ export default function ChatHistoryList() {
                 e.stopPropagation();
                 deleteSession(session.id);
               }}
-              className="shrink-0 rounded-md p-1 text-ink-faint opacity-0 transition-opacity hover:bg-danger-soft hover:text-danger group-hover:opacity-100"
+              className="press-icon shrink-0 rounded-md p-1 text-ink-faint opacity-0 hover:bg-danger-soft hover:text-danger group-hover:opacity-100"
             >
               <Trash2 className="h-3.5 w-3.5" />
             </button>

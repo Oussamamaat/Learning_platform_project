@@ -57,11 +57,14 @@ const QUICK_PROMPTS: Record<Domain, Record<Language, string[]>> = {
   },
 };
 
+const UPLOAD_ACCEPT = ".txt,.md,.pdf,.docx,.pptx,.xlsx,.csv,.png,.jpg,.jpeg,.tiff,.tif";
+
 export default function InputArea() {
-  const { sendMessage, isSending, isModelSwapping, activeDomain, activeLanguage, toastInfo } =
+  const { sendMessage, isSending, isModelSwapping, activeDomain, activeLanguage, viewMode, uploadFiles } =
     useApp();
   const [text, setText] = useState("");
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const canSend = text.trim().length > 0 && !isSending && !isModelSwapping;
 
@@ -98,26 +101,38 @@ export default function InputArea() {
               type="button"
               disabled={isSending || isModelSwapping}
               onClick={() => void sendMessage(prompt)}
-              className="shrink-0 rounded-full border border-edge bg-surface px-3 py-1.5 text-[11.5px] text-ink-dim transition-colors hover:border-brand hover:bg-brand-soft hover:text-brand-deep disabled:opacity-50"
+              className="press shrink-0 rounded-full border border-edge bg-surface px-3 py-1.5 text-[11.5px] text-ink-dim hover:border-brand hover:bg-brand-soft hover:text-brand-deep disabled:opacity-50"
             >
               {prompt}
             </button>
           ))}
         </div>
 
-        <div className="flex items-end gap-2 rounded-2xl border border-edge bg-surface px-2.5 py-2 transition-colors focus-within:border-brand">
-          <button
-            type="button"
-            onClick={() =>
-              toastInfo(
-                "File attachment is a UI mock — wiring real uploads to the ingestion pipeline is out of scope.",
-              )
-            }
-            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl text-ink-faint transition-colors hover:bg-surface-3 hover:text-ink"
-            aria-label="Attach file (mock)"
-          >
-            <Paperclip className="h-4.5 w-4.5" />
-          </button>
+        <div className="flex items-end gap-2 rounded-2xl border border-edge bg-surface px-2.5 py-2 transition-colors duration-150 ease-spring focus-within:border-brand">
+          {viewMode === "tenant" && (
+            <>
+              <button
+                type="button"
+                onClick={() => fileInputRef.current?.click()}
+                className="press-icon flex h-9 w-9 shrink-0 items-center justify-center rounded-xl text-ink-faint hover:bg-surface-3 hover:text-ink"
+                aria-label="Upload a document to this tenant's knowledge base"
+              >
+                <Paperclip className="h-4.5 w-4.5" />
+              </button>
+              <input
+                ref={fileInputRef}
+                type="file"
+                multiple
+                accept={UPLOAD_ACCEPT}
+                className="hidden"
+                onChange={(e) => {
+                  const files = Array.from(e.target.files ?? []);
+                  if (files.length) void uploadFiles(files);
+                  e.target.value = "";
+                }}
+              />
+            </>
+          )}
           <textarea
             ref={textareaRef}
             value={text}
@@ -136,7 +151,7 @@ export default function InputArea() {
             type="button"
             onClick={handleSend}
             disabled={!canSend}
-            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-brand text-white transition-colors hover:bg-brand-dark active:scale-95 disabled:cursor-not-allowed disabled:bg-brand/40"
+            className="press-icon flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-brand text-white hover:bg-brand-dark disabled:cursor-not-allowed disabled:bg-brand/40"
             aria-label="Send message"
           >
             {isSending || isModelSwapping ? (

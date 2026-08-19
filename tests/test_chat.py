@@ -32,7 +32,7 @@ def test_cross_language_detection():
 
 
 def _empty_context(*args, **kwargs):
-    return "", []
+    return "", [], False
 
 
 def _fails_if_called(*args, **kwargs):
@@ -119,7 +119,7 @@ def test_nonempty_context_still_calls_the_model():
             return False
 
     def fake_context(*args, **kwargs):
-        return "Selon Article 8, le port du casque est obligatoire.", ["doc1.pdf"]
+        return "Selon Article 8, le port du casque est obligatoire.", ["doc1.pdf"], False
 
     # chat.py now calls generate_llm_response -> _call_ollama_chat, which
     # POSTs /api/chat and reads message.content, not the flat `response`
@@ -132,6 +132,68 @@ def test_nonempty_context_still_calls_the_model():
     with patch("app.routers.chat._retrieve_context", side_effect=fake_context), \
          patch("app.services.llm.urllib.request.urlopen", return_value=fake_ollama):
         response = chat(ChatRequest(message="Que dit le document ?", domain=Domain.INDUSTRIAL))
+        assert "Article 8" in response.response
+        assert response.sources == ["doc1.pdf"]
+
+
+def test_out_of_corpus_query_refuses_even_when_context_is_nonempty():
+    """The out-of-domain refusal fix, isolated from the pre-existing
+    empty-context path: context here is deliberately NON-empty, so the only
+    thing that can trigger a refusal is domain_source == "no_match".
+
+    This is the exact hole the fix closes. Domain-scoped retrieval almost
+    always returns SOMETHING once a domain is chosen, so an off-topic
+    question ("how do I bake bread") used to route to the tenant default
+    domain, pull its nearest-but-irrelevant chunks, and get answered as if
+    grounded -- `if not context.strip()` never fired. The tier-2 vote is the
+    only signal that sees the whole corpus at once and can say "none of this
+    is about that"."""
+    def nonempty_context(*args, **kwargs):
+        return "Selon Article 8, le port du casque est obligatoire.", ["doc1.pdf"], False
+
+    with patch("app.routers.chat._retrieve_context", side_effect=nonempty_context), \
+         patch("app.routers.chat.resolve_domain", return_value=("industrial", "no_match")), \
+         patch("app.services.llm.urllib.request.urlopen", side_effect=_fails_if_called):
+        # No explicit domain -> resolve_domain runs (an explicit domain would
+        # short-circuit to "page_context" and never consult the vote).
+        response = chat(ChatRequest(message="How do I bake sourdough bread?"))
+        assert response.domain_source == "no_match"
+        assert response.sources == []
+        assert response.tokens_used == 0
+        assert response.response  # a real refusal, not an empty string
+
+
+def test_in_corpus_query_with_nonempty_context_is_unaffected_by_the_ood_gate():
+    """Guards the other direction: a normally-routed query ("retrieval")
+    must still reach the model. The OOD gate must not become a blanket
+    refusal for every auto-routed turn."""
+    import json
+
+    class FakeResponse:
+        def __init__(self, body):
+            self._body = body
+
+        def read(self):
+            return json.dumps(self._body).encode("utf-8")
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+    def nonempty_context(*args, **kwargs):
+        return "Selon Article 8, le port du casque est obligatoire.", ["doc1.pdf"], False
+
+    fake_ollama = FakeResponse(
+        {"message": {"role": "assistant", "content": "Le port du casque est obligatoire (Article 8)."}}
+    )
+
+    with patch("app.routers.chat._retrieve_context", side_effect=nonempty_context), \
+         patch("app.routers.chat.resolve_domain", return_value=("industrial", "retrieval")), \
+         patch("app.services.llm.urllib.request.urlopen", return_value=fake_ollama):
+        response = chat(ChatRequest(message="Que dit le document sur le casque ?"))
+        assert response.domain_source == "retrieval"
         assert "Article 8" in response.response
         assert response.sources == ["doc1.pdf"]
 
@@ -173,7 +235,7 @@ def test_request_payload_is_well_formed_chat_messages():
             return False
 
     def fake_context(*args, **kwargs):
-        return "Selon Article 8, le port du casque est obligatoire.", ["doc1.pdf"]
+        return "Selon Article 8, le port du casque est obligatoire.", ["doc1.pdf"], False
 
     def fake_urlopen(req, timeout=None):
         captured["payload"] = json.loads(req.data.decode("utf-8"))
@@ -212,11 +274,12 @@ def test_pgvector_default_calls_build_rag_context_not_disk():
                return_value=("pgvector context", ["doc.md"])) as brc, \
          patch("app.routers.chat.build_domain_context") as bdc:
         mock_settings.return_value.retrieval_backend = "pgvector"
-        context, sources = _retrieve_context(
+        context, sources, degraded = _retrieve_context(
             "query", domain="industrial", top_k=4, ui_lang="fr", tenant_id="company_abc"
         )
     assert context == "pgvector context"
     assert sources == ["doc.md"]
+    assert degraded is False
     brc.assert_called_once()
     bdc.assert_not_called()
 
@@ -227,10 +290,11 @@ def test_disk_backend_calls_build_domain_context_not_pgvector():
                return_value=("disk context", ["doc.md"])) as bdc, \
          patch("app.routers.chat.build_rag_context") as brc:
         mock_settings.return_value.retrieval_backend = "disk"
-        context, sources = _retrieve_context(
+        context, sources, degraded = _retrieve_context(
             "query", domain="industrial", top_k=4, ui_lang="fr", tenant_id="company_abc"
         )
     assert context == "disk context"
+    assert degraded is False
     bdc.assert_called_once()
     brc.assert_not_called()
 
@@ -239,17 +303,21 @@ def test_pgvector_failure_falls_back_to_disk_corpus():
     """A Postgres hiccup must degrade chat to the disk corpus, not crash
     the request -- the same fail-open contract app/services/history.py
     already keeps for conversation memory, now extended to retrieval since
-    pgvector is the default and needs Postgres reachable to work at all."""
+    pgvector is the default and needs Postgres reachable to work at all.
+    degraded must be True here specifically -- this is the one case
+    ChatResponse.degraded exists to surface, since the disk backend it
+    falls back to knows nothing about tenant uploads."""
     with patch("app.routers.chat.get_settings") as mock_settings, \
          patch("app.routers.chat.build_rag_context", side_effect=RuntimeError("connection refused")), \
          patch("app.routers.chat.build_domain_context",
                return_value=("fallback context", ["doc.md"])) as bdc:
         mock_settings.return_value.retrieval_backend = "pgvector"
-        context, sources = _retrieve_context(
+        context, sources, degraded = _retrieve_context(
             "query", domain="industrial", top_k=4, ui_lang="fr", tenant_id="company_abc"
         )
     assert context == "fallback context"
     assert sources == ["doc.md"]
+    assert degraded is True
     bdc.assert_called_once()
 
 
@@ -281,7 +349,7 @@ def test_in_message_instruction_diverges_query_lang_from_response_lang():
     (query_lang) while answering in Darija (response_lang) -- the split
     app.services.routing.resolve_language exists for."""
     with patch("app.routers.chat._retrieve_context",
-               return_value=("Selon Article 8, le casque est obligatoire.", ["doc1.pdf"])) as rc, \
+               return_value=("Selon Article 8, le casque est obligatoire.", ["doc1.pdf"], False)) as rc, \
          patch("app.services.llm.urllib.request.urlopen") as mock_urlopen:
         import json
 
@@ -315,9 +383,81 @@ def test_pgvector_empty_but_valid_result_is_not_overridden_by_fallback():
          patch("app.routers.chat.build_rag_context", return_value=("", [])), \
          patch("app.routers.chat.build_domain_context") as bdc:
         mock_settings.return_value.retrieval_backend = "pgvector"
-        context, sources = _retrieve_context(
+        context, sources, degraded = _retrieve_context(
             "query", domain="industrial", top_k=4, ui_lang="fr", tenant_id="company_abc"
         )
     assert context == ""
     assert sources == []
-    bdc.assert_not_called()
+    assert degraded is False
+
+
+# --- Tenant uploads: active_source_ids + degraded (2026-08-13) ------------
+
+def test_chat_response_degraded_flag_reaches_the_client():
+    """End-to-end through the real chat() endpoint: a pgvector exception
+    (falling back to disk) must surface as ChatResponse.degraded=True, not
+    just internally to _retrieve_context -- the UI needs this to warn that
+    uploaded sources are temporarily unreachable."""
+    import json
+
+    class FakeResponse:
+        def __init__(self, body):
+            self._body = body
+        def read(self):
+            return json.dumps(self._body).encode("utf-8")
+        def __enter__(self):
+            return self
+        def __exit__(self, *exc):
+            return False
+
+    with patch("app.routers.chat.get_settings") as mock_settings, \
+         patch("app.routers.chat.build_rag_context", side_effect=RuntimeError("connection refused")), \
+         patch("app.routers.chat.build_domain_context", return_value=("fallback context", ["doc.md"])), \
+         patch("app.services.llm.urllib.request.urlopen",
+               return_value=FakeResponse({"message": {"role": "assistant", "content": "Reponse."}})):
+        mock_settings.return_value.retrieval_backend = "pgvector"
+        response = chat(ChatRequest(message="test", domain=Domain.INDUSTRIAL))
+    assert response.degraded is True
+
+
+def test_chat_response_not_degraded_on_happy_path():
+    with patch("app.routers.chat._retrieve_context",
+               return_value=("Selon Article 8, le casque est obligatoire.", ["doc1.pdf"], False)), \
+         patch("app.services.llm.urllib.request.urlopen") as mock_urlopen:
+        import json
+
+        class FakeResponse:
+            def __init__(self, body):
+                self._body = body
+            def read(self):
+                return json.dumps(self._body).encode("utf-8")
+            def __enter__(self):
+                return self
+            def __exit__(self, *exc):
+                return False
+
+        mock_urlopen.return_value = FakeResponse(
+            {"message": {"role": "assistant", "content": "Le casque est obligatoire (Article 8)."}}
+        )
+        response = chat(ChatRequest(message="Que dit le document ?", domain=Domain.INDUSTRIAL))
+    assert response.degraded is False
+
+
+def test_active_source_ids_from_request_reaches_retrieve_context():
+    """ChatRequest.active_source_ids must reach _retrieve_context's
+    source_ids kwarg -- threaded through source_service.active_source_ids
+    (mocked here to isolate this test from real Postgres state) and
+    _resolve_turn_context."""
+    with patch("app.routers.chat.source_service.active_source_ids",
+               return_value=["src-1", "src-2"]) as asi, \
+         patch("app.routers.chat._retrieve_context",
+               return_value=("ctx", ["doc.md"], False)) as rc:
+        chat(ChatRequest(
+            message="Que dit le document uploade ?", domain=Domain.INDUSTRIAL,
+            active_source_ids=["src-1", "src-2", "src-unrelated"],
+        ))
+    # The client-supplied list is passed through as a NARROWING hint --
+    # active_source_ids itself (mocked here) owns the actual intersection
+    # logic, tested directly in tests/test_sources.py.
+    asi.assert_called_once_with("company_abc", requested=["src-1", "src-2", "src-unrelated"])
+    assert rc.call_args.kwargs["source_ids"] == ["src-1", "src-2"]

@@ -39,7 +39,7 @@ def build_domain_context(
     query: str,
     domain: str,
     top_k: int = 4,
-    max_context_length: int = 2000,
+    max_context_length: int = 6000,
     ui_lang: Optional[str] = None,
 ) -> tuple[str, list[str]]:
     """Same (context, sources) contract as

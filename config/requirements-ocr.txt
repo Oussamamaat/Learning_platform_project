@@ -1,0 +1,19 @@
+# OCR stage -- NOT installed by default and NOT part of config/requirements.txt.
+# app/services/ocr.py degrades to raising OcrUnavailableError when these
+# are absent (settings.ocr_engine="none"), which is the laptop/testing
+# configuration and the shipped default. Install only when actually
+# enabling OCR, and only into a dedicated environment -- see below.
+#
+# Usage: pip install -r config/requirements-ocr.txt (tesseract only), or
+# see app/services/ocr.py's module docstring for PaddleOCR-VL's separate
+# install (it needs its own paddlepaddle-gpu runtime, kept in its own venv
+# -- .ocr_venv in this repo -- to avoid conflicting with .gguf_venv's
+# torch/CUDA build). baidu/Unlimited-OCR similarly needs its own
+# torch==2.10.0/CUDA 12.9 pin, incompatible with .gguf_venv's
+# torch 2.11.0+cu128 -- also install in its own environment if enabled.
+
+# CPU baseline engine (settings.ocr_engine="tesseract") -- the honest floor
+# every GPU engine is measured against in scripts/verify_ocr_arabic.py.
+# Also needs a system Tesseract binary (`tesseract-ocr` package) plus the
+# `ara` and `fra` traineddata files -- not installable via pip alone.
+pytesseract==0.3.13

@@ -3,6 +3,9 @@ Tests for the Stage-2 ingestion fixes: heading-aware chunking, per-file
 language detection, and path-based domain detection. Extended 2026-08-11
 with ingest_directory's domain resolution (--domain flag, tenant-default
 fallback, never-NULL) -- see the "Automatic Domain Routing" plan, section 3.
+Extended 2026-08-13 with multi-format parsing (.pdf/.docx/.pptx/.xlsx/.csv)
+and the OCR seam (app.services.ocr) -- see the "Multi-format ingestion +
+Sources panel" plan, Phase 2.
 """
 from pathlib import Path
 from unittest.mock import patch
@@ -10,13 +13,16 @@ from unittest.mock import patch
 import pytest
 
 from app.services.ingestion import (
+    XLSX_MAX_ROWS,
     chunk_document,
     detect_document_domain,
     detect_document_language,
     ingest_directory,
     parse_document_to_markdown,
     split_by_headings,
+    strip_markdown,
 )
+from app.services.ocr import OcrUnavailableError
 
 
 # --- split_by_headings -------------------------------------------------
@@ -77,6 +83,24 @@ def test_long_section_is_still_split_with_heading_reprefixed():
         assert "Art. 99" in c["content"], "every split piece must keep the heading"
 
 
+def test_heading_guarantee_holds_at_the_2026_08_13_default_chunk_size():
+    """CHUNK_SIZE moved 400 -> 2000 chars alongside the bge-m3 embedding
+    swap (matched to its 8192-token window, vs. the old model's actual
+    128-token max_seq_length). The heading-inline citation guarantee must
+    survive that change unmodified -- re-asserted explicitly at a
+    realistically long, multi-section document rather than relying on the
+    other tests' shorter fixtures happening to stay under the new size."""
+    from app.services.ingestion import CHUNK_SIZE
+
+    assert CHUNK_SIZE == 2000
+    long_body = " ".join(["mot"] * 1000)  # ~4000 chars, comfortably over 2000
+    text = f"## Obligations du travailleur (Art. 283)\n\n{long_body}"
+    chunks = chunk_document(text)
+    assert len(chunks) > 1
+    for c in chunks:
+        assert "Art. 283" in c["content"]
+
+
 def test_empty_document_returns_no_chunks():
     assert chunk_document("") == []
 
@@ -124,7 +148,32 @@ def test_returns_none_for_path_not_matching_convention():
     assert detect_document_domain(file_path, source_dir) is None
 
 
-# --- parse_document_to_markdown: OCR pluggable-but-disabled --------------
+# --- strip_markdown: HTML table cell boundaries ---------------------------
+
+def test_strip_markdown_separates_html_table_cells():
+    """Measured on a real scanned page: PaddleOCR-VL returns tables as HTML,
+    and the generic `<[^>]+>` strip deleted the tags with no replacement --
+    welding adjacent cells into one nonsense token
+    ("<td>الترخيص</td><td>450 متر</td>" -> "الترخيص450 متر"), which then got
+    embedded and retrieved in that state. Markdown tables never had this
+    problem; only the HTML path did, which is the path OCR'd tables use."""
+    out = strip_markdown("<table border=1><tr><td>الترخيص</td><td>450 متر</td></tr></table>")
+    assert "الترخيص 450 متر" in out
+    assert "الترخيص450" not in out
+
+
+def test_strip_markdown_treats_br_and_block_ends_as_line_breaks():
+    assert strip_markdown("ligne1<br>ligne2") == "ligne1\nligne2"
+    assert strip_markdown("<p>un</p><p>deux</p>").split() == ["un", "deux"]
+
+
+def test_strip_markdown_leaves_markdown_tables_and_headings_intact():
+    """The HTML fix must not disturb the existing markdown paths."""
+    assert strip_markdown("| Col A | Col B |").split() == ["Col", "A", "Col", "B"]
+    assert strip_markdown("# Titre\n\n**gras** ici") == "Titre\n\ngras ici"
+
+
+# --- parse_document_to_markdown: passthrough + dispatch -------------------
 
 def test_md_passes_through_unchanged(tmp_path):
     f = tmp_path / "doc.md"
@@ -138,21 +187,320 @@ def test_txt_passes_through_unchanged(tmp_path):
     assert parse_document_to_markdown(f) == "plain text content"
 
 
-def test_pdf_raises_clear_not_implemented_error(tmp_path):
-    """Must fail loudly and specifically -- not silently, and not with an
-    opaque UnicodeDecodeError from trying to read binary bytes as text --
-    until the OCR spike's Arabic-script fidelity is actually verified."""
-    f = tmp_path / "doc.pdf"
-    f.write_bytes(b"%PDF-1.4 fake binary content")
-    with pytest.raises(NotImplementedError, match="OCR"):
-        parse_document_to_markdown(f)
-
-
 def test_unsupported_extension_raises_value_error(tmp_path):
-    f = tmp_path / "doc.docx"
-    f.write_bytes(b"not really a docx")
+    f = tmp_path / "doc.rtf"
+    f.write_bytes(b"not a supported format")
     with pytest.raises(ValueError, match="unsupported"):
         parse_document_to_markdown(f)
+
+
+@pytest.mark.parametrize("suffix,modern", [(".doc", ".docx"), (".ppt", ".pptx"), (".xls", ".xlsx")])
+def test_legacy_binary_office_formats_rejected_with_actionable_message(tmp_path, suffix, modern):
+    """Must fail loudly and specifically -- no parser here reads the old
+    OLE container format, and silently misreading one as text would be
+    worse than a clear conversion instruction."""
+    f = tmp_path / f"doc{suffix}"
+    f.write_bytes(b"fake legacy binary content")
+    with pytest.raises(ValueError) as exc_info:
+        parse_document_to_markdown(f)
+    assert "not supported" in str(exc_info.value)
+    assert modern in str(exc_info.value)
+
+
+# --- parse_document_to_markdown: .pdf, text-layer vs. OCR fallback --------
+
+class _FakeDict(dict):
+    """Stands in for pypdf's DictionaryObject/IndirectObject: real pypdf
+    objects need a .get_object() to resolve to the actual dict; a plain
+    dict doesn't have one."""
+
+    def get_object(self):
+        return self
+
+
+class _FakeBox:
+    def __init__(self, width, height):
+        self.width = width
+        self.height = height
+
+
+def test_pdf_text_layer_parses_without_invoking_ocr(tmp_path, monkeypatch):
+    """A page with a real text layer, a font resource, and no full-page
+    image must classify NATIVE and use the embedded text directly.
+    Implicitly proves OCR was never invoked: the default ocr_engine is
+    "none", so if this were misclassified as needing OCR, it would raise
+    OcrUnavailableError instead of returning cleanly."""
+    class _FakePage:
+        def __init__(self):
+            self.mediabox = _FakeBox(612, 792)  # US Letter, in points
+
+        def extract_text(self):
+            return "Chaque travailleur doit prendre soin de sa securite. " * 3
+
+        def get(self, key):
+            if key == "/Resources":
+                return _FakeDict({"/Font": _FakeDict({"/F1": _FakeDict({})})})
+            return None
+
+    class _FakeReader:
+        def __init__(self, path):
+            self.pages = [_FakePage()]
+
+    monkeypatch.setattr("pypdf.PdfReader", _FakeReader)
+
+    f = tmp_path / "doc.pdf"
+    f.write_bytes(b"%PDF-1.4 fake binary content")
+    md = parse_document_to_markdown(f)
+    assert "## Page 1" in md
+    assert "Chaque travailleur" in md
+
+
+def test_pdf_scanned_page_with_ocr_disabled_raises_actionable_error(tmp_path, monkeypatch):
+    """A page app.services.pdf_classify classifies OCR_REQUIRED must raise
+    OcrUnavailableError when ocr_engine="none" -- an actionable message
+    (convert the file, or enable OCR), not a silent empty result and not an
+    opaque NotImplementedError. The classification itself (which real pages
+    hit OCR_REQUIRED) is covered by tests/test_pdf_classify.py; this test
+    only proves the wiring from that decision to a loud, actionable
+    document failure.
+
+    ocr_engine is pinned to "none" here rather than inherited from the
+    settings default: this test asserts the DISABLED-OCR behaviour, so
+    reading the ambient default made it silently depend on what that
+    default happened to be (it broke the moment the default became
+    "paddleocr", and would have tried to run a real GPU OCR subprocess
+    inside a unit test)."""
+    from pypdf import PdfWriter
+    from app.services.ocr import NullOcrEngine
+    from app.services.pdf_classify import PageDecision, PageSignals, PageStrategy
+
+    monkeypatch.setattr("app.services.ocr.get_ocr_engine", lambda: NullOcrEngine())
+
+    writer = PdfWriter()
+    writer.add_blank_page(width=200, height=200)
+    f = tmp_path / "scanned.pdf"
+    with open(f, "wb") as fh:
+        writer.write(fh)
+
+    forced_signals = PageSignals(
+        char_count=0, page_area_in2=7.7, char_density=0.0, font_count=0,
+        image_count=1, has_full_page_raster=True, full_raster_dpi=150,
+        bad_char_ratio=0.0,
+    )
+    monkeypatch.setattr(
+        "app.services.pdf_classify.classify_page",
+        lambda page, text=None: PageDecision(PageStrategy.OCR_REQUIRED, forced_signals, "forced for test"),
+    )
+
+    with pytest.raises(OcrUnavailableError, match="OCR is not enabled"):
+        parse_document_to_markdown(f)
+
+
+def test_pdf_mixed_document_skips_only_the_ocr_required_pages(tmp_path, monkeypatch):
+    """The benchmark finding this test pins: an 80-page real document
+    measured 66 NATIVE pages and 4 OCR_REQUIRED ones. Under the old
+    behaviour a single OCR_REQUIRED page raised past the whole document,
+    discarding the 66 good pages over the 4 bad ones. With ocr_engine="none"
+    this must now: (1) NOT raise, (2) keep every NATIVE page's text, (3)
+    report exactly the OCR_REQUIRED page(s) via `unprocessed_pages`.
+
+    ocr_engine is pinned to "none" (same reason as the test above): the
+    behaviour under test is what happens when a page needs OCR and CANNOT
+    get it, so inheriting the ambient default would make this silently
+    depend on the deployment's engine setting -- and once that default
+    became "paddleocr", it ran a real GPU OCR subprocess and skipped
+    nothing, which is a different scenario entirely."""
+    from pypdf import PdfWriter
+    from app.services.ocr import NullOcrEngine
+    from app.services.pdf_classify import PageDecision, PageSignals, PageStrategy
+
+    monkeypatch.setattr("app.services.ocr.get_ocr_engine", lambda: NullOcrEngine())
+
+    class _FakePage:
+        def __init__(self, marker):
+            self.marker = marker
+            self.mediabox = _FakeBox(612, 792)
+
+        def extract_text(self):
+            return "" if self.marker == "scan" else f"Native content for {self.marker}"
+
+        def get(self, key):
+            return None
+
+    class _FakeReader:
+        def __init__(self, path):
+            self.pages = [_FakePage("native"), _FakePage("scan"), _FakePage("native2")]
+
+    monkeypatch.setattr("pypdf.PdfReader", _FakeReader)
+
+    forced_signals = PageSignals(
+        char_count=0, page_area_in2=7.7, char_density=0.0, font_count=0,
+        image_count=1, has_full_page_raster=True, full_raster_dpi=150,
+        bad_char_ratio=0.0,
+    )
+
+    def _fake_classify(page, text=None):
+        if page.marker == "scan":
+            return PageDecision(PageStrategy.OCR_REQUIRED, forced_signals, "forced for test")
+        return PageDecision(PageStrategy.NATIVE, forced_signals, "native for test")
+
+    monkeypatch.setattr("app.services.pdf_classify.classify_page", _fake_classify)
+
+    f = tmp_path / "mixed.pdf"
+    writer = PdfWriter()
+    for _ in range(3):
+        writer.add_blank_page(width=200, height=200)
+    with open(f, "wb") as fh:
+        writer.write(fh)
+
+    unprocessed: list = []
+    md = parse_document_to_markdown(f, unprocessed_pages=unprocessed)
+
+    assert "Native content for native" in md
+    assert "Native content for native2" in md
+    assert len(unprocessed) == 1
+    assert unprocessed[0]["page"] == 2
+    assert unprocessed[0]["reason"] == "ocr_required"
+    # `detail` is the OCR call's OWN failure message (subprocess error,
+    # timeout, missing engine) -- distinct from `decision.reason` (why the
+    # page was classified OCR_REQUIRED). Asserting only that it exists and
+    # is non-empty, not its exact wording, which belongs to
+    # app.services.ocr.NullOcrEngine and can change independently.
+    assert unprocessed[0]["detail"]
+
+
+def test_pdf_presentation_form_text_normalized_to_standard_arabic(tmp_path, monkeypatch):
+    """Measured on a real 80-page administrative guide: a PDF's table text
+    can extract as Unicode Presentation Forms B glyphs (U+FE70-FEFF)
+    instead of standard Arabic letters. The presentation-form spelling of a
+    word ending in teh marbuta contains no teh-marbuta codepoint at all --
+    citations.py's `المادة\\s+(\\d+)` fails outright against it, before any
+    ة/ه OCR-confusion question even applies. parse_document_to_markdown must
+    normalize this at the single choke point every parser's output passes
+    through, so it never reaches storage/embedding in the corrupted form."""
+    from pypdf import PdfWriter
+    from app.services.pdf_classify import PageDecision, PageSignals, PageStrategy
+
+    # "نسخة" (copy/version) in Presentation Forms B -- byte-distinct from,
+    # but the same word as, the standard-Arabic spelling used in assertions
+    # below. Isolated codepoints (initial/medial/final/isolated forms), not
+    # a ligature -- exactly what a PDF's per-glyph text layer emits.
+    presentation_form = "ﻧﺴﺨﺔ"
+
+    class _FakePage:
+        mediabox = _FakeBox(612, 792)
+
+        def extract_text(self):
+            return presentation_form
+
+        def get(self, key):
+            return None
+
+    class _FakeReader:
+        def __init__(self, path):
+            self.pages = [_FakePage()]
+
+    monkeypatch.setattr("pypdf.PdfReader", _FakeReader)
+    forced_signals = PageSignals(
+        char_count=4, page_area_in2=93.5, char_density=1.0, font_count=1,
+        image_count=0, has_full_page_raster=False, full_raster_dpi=None,
+        bad_char_ratio=0.0,
+    )
+    monkeypatch.setattr(
+        "app.services.pdf_classify.classify_page",
+        lambda page, text=None: PageDecision(PageStrategy.NATIVE, forced_signals, "native for test"),
+    )
+
+    f = tmp_path / "table.pdf"
+    writer = PdfWriter()
+    writer.add_blank_page(width=200, height=200)
+    with open(f, "wb") as fh:
+        writer.write(fh)
+
+    assert "ة" not in presentation_form  # the failure mode this test pins
+    md = parse_document_to_markdown(f)
+    assert "نسخة" in md
+    assert presentation_form not in md
+
+
+# --- parse_document_to_markdown: .docx/.pptx/.xlsx/.csv -------------------
+
+def test_docx_headings_become_markdown_headings(tmp_path):
+    """Word's own heading styles must map to real `#`/`##` markdown
+    headings, not flat prose -- otherwise split_by_headings can't see the
+    document's structure and the citation-preservation guarantee
+    (chunk_document's docstring) doesn't extend to uploaded Word docs."""
+    import docx
+
+    d = docx.Document()
+    d.add_heading("Obligations du travailleur (Art. 283)", level=2)
+    d.add_paragraph("Chaque travailleur doit prendre soin de sa securite.")
+    f = tmp_path / "doc.docx"
+    d.save(str(f))
+
+    md = parse_document_to_markdown(f)
+    assert "## Obligations du travailleur (Art. 283)" in md
+    sections = split_by_headings(md)
+    assert any("Art. 283" in heading for heading, _ in sections)
+
+
+def test_pptx_slide_title_becomes_heading_and_notes_included(tmp_path):
+    import pptx
+
+    p = pptx.Presentation()
+    slide = p.slides.add_slide(p.slide_layouts[1])
+    slide.shapes.title.text = "Equipements de protection (Art. 99)"
+    slide.placeholders[1].text = "Casque, gants, lunettes."
+    slide.notes_slide.notes_text_frame.text = "Verifier la conformite CE."
+    f = tmp_path / "doc.pptx"
+    p.save(str(f))
+
+    md = parse_document_to_markdown(f)
+    assert "## Equipements de protection (Art. 99)" in md
+    assert "Casque, gants, lunettes." in md
+    assert "Verifier la conformite CE." in md
+
+
+def test_xlsx_sheet_name_becomes_heading(tmp_path):
+    import openpyxl
+
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Inventaire EPI"
+    ws.append(["Article", "Norme"])
+    ws.append(["Casque", "EN 397"])
+    f = tmp_path / "doc.xlsx"
+    wb.save(str(f))
+
+    md = parse_document_to_markdown(f)
+    assert "## Inventaire EPI" in md
+    assert "EN 397" in md
+
+
+def test_xlsx_truncation_is_announced_not_silent(tmp_path, monkeypatch):
+    """A sheet longer than the cap must say so explicitly -- silent
+    truncation is unacceptable in a citation-grounded system."""
+    monkeypatch.setattr("app.services.ingestion.XLSX_MAX_ROWS", 2)
+    import openpyxl
+
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    for i in range(5):
+        ws.append([f"row{i}"])
+    f = tmp_path / "big.xlsx"
+    wb.save(str(f))
+
+    md = parse_document_to_markdown(f)
+    assert "omitted" in md
+    assert "row0" in md and "row4" not in md
+
+
+def test_csv_delimiter_sniffed_and_rendered(tmp_path):
+    f = tmp_path / "doc.csv"
+    f.write_text("Article;Norme\nCasque;EN 397\n", encoding="utf-8")
+    md = parse_document_to_markdown(f)
+    assert "EN 397" in md
+    assert "| Casque | EN 397 |" in md
 
 
 # --- ingest_directory: domain resolution, never NULL ----------------------

@@ -30,6 +30,86 @@ The same function runs in two places, which keeps training and serving aligned:
 """
 
 import re
+import unicodedata
+
+# ---------------------------------------------------------------------------
+# Arabic orthographic normalization
+# ---------------------------------------------------------------------------
+#
+# Two tiers, with different safety properties -- do not conflate them:
+#
+#   Tier A (lossless, meaning-preserving): NFKC + stripping tatweel/bidi
+#   marks. This belongs at ingest time, on text that gets STORED and
+#   embedded (app.services.ingestion), because it fixes a real corruption:
+#   a PDF's table text can extract as Unicode Presentation Forms B
+#   (U+FE70-FEFF) glyph codepoints instead of standard Arabic letters --
+#   measured on a real 80-page administrative guide, where a presentation-
+#   form "اﻟﺒﻄﺎﻗﺔ" contains no plain teh marbuta at all, so `المادة\s+(\d+)`
+#   fails to match it outright. NFKC is a no-op on already-standard text, so
+#   applying it defensively here (fold_arabic includes it) is never harmful.
+#
+#   Tier B (lossy, COMPARISON-ONLY): folding letters that are genuinely
+#   different characters but functionally interchangeable for reference
+#   matching -- teh marbuta/heh (a measured OCR failure mode: PaddleOCR
+#   misreads ة as ه), alef variants (a dropped hamza is a common OCR/typing
+#   simplification, and legal ordinals like "المادة الأولى" need it), and
+#   ya/hamza-ya, waw/hamza-waw. This must NEVER be applied to text that gets
+#   stored, embedded, or shown to a user -- only to a comparison key. Not
+#   folded: letters that are never OCR/typing-confusable and would create
+#   false matches if folded (ح/ه، د/ذ، ر/ز، ت/ث، س/ش) -- e.g. folding د/ذ
+#   would make "المادة" ground against a fabricated "الماذة".
+_AR_FOLD = str.maketrans({
+    'إ': 'ا', 'أ': 'ا', 'آ': 'ا', 'ٱ': 'ا',
+    'ى': 'ي', 'ئ': 'ي', 'ؤ': 'و',
+    'ة': 'ه',  # directional only -- never fold ه back to ة.
+    **{d: str(i) for i, d in enumerate('٠١٢٣٤٥٦٧٨٩')},  # Arabic-Indic
+    **{d: str(i) for i, d in enumerate('۰۱۲۳۴۵۶۷۸۹')},  # Extended Arabic-Indic
+})
+# Tatweel (٠640), harakat/sukun/shadda + superscript alef (٠64B-٠655, ٠670),
+# and bidi control marks -- all layout/decoration, never meaning.
+_AR_STRIP = re.compile(r'[\u0640\u064B-\u0655\u0670\u200B-\u200F\u061C]')
+
+
+def normalize_arabic_text(text: str) -> str:
+    """Tier A ONLY: NFKC + stripping tatweel/harakat/bidi marks. Lossless
+    and meaning-preserving -- "ﻧﺴﺨﺔ" (Presentation Forms B) and "نسخة"
+    (standard Arabic) are the same word in different codepoints, and this
+    makes them identical. Safe to apply to text that gets STORED, chunked,
+    and embedded (app.services.ingestion calls this on extracted page text
+    before either happens) -- unlike fold_arabic below, this never merges
+    two orthographically distinct characters into one.
+    """
+    return _AR_STRIP.sub('', unicodedata.normalize('NFKC', text or ''))
+
+
+def fold_arabic(text: str) -> str:
+    """Tier A (normalize_arabic_text) + Tier B: additionally collapse
+    orthographic variants that carry no meaning for reference matching.
+
+    COMPARISON ONLY. The output of this function must never be stored,
+    embedded, or emitted -- see the module-level note above. Every call site
+    in this file uses it to build a lookup KEY or to compare two strings,
+    never to build `canonical`/output text.
+    """
+    return normalize_arabic_text(text).translate(_AR_FOLD)
+
+
+# Regex source for each letter this module folds, so a pattern can match any
+# variant fold_arabic collapses without folding the SOURCE text itself (that
+# would corrupt `canonical`, built from the source's own spelling -- see
+# extract_citations). An optional diacritic/tatweel run between every
+# character tolerates OCR output that interleaves them mid-word.
+_AR_CLASSES = {'ا': '[اإأآٱ]', 'ه': '[هة]', 'ة': '[ةه]', 'ي': '[يىئ]', 'و': '[وؤ]'}
+_AR_DIACRITIC_RUN = r'[\u0640\u064B-\u0655\u0670]*'
+
+
+def arabic_variant_pattern(literal: str) -> str:
+    """Regex source matching `literal` under every variant fold_arabic
+    folds, tolerating interleaved diacritics/tatweel between characters."""
+    return _AR_DIACRITIC_RUN.join(
+        _AR_CLASSES.get(c, re.escape(c)) for c in literal
+    ) + _AR_DIACRITIC_RUN
+
 
 # ---------------------------------------------------------------------------
 # Citable reference patterns
@@ -41,12 +121,18 @@ import re
 # A None gloss means the reference is already Latin script and searchable as
 # written — "Loi N° 42-25" needs no transliteration, and adding one would
 # teach the model to arabize a term Moroccan professionals say in French.
+#
+# Heads are wrapped in arabic_variant_pattern(...) so an OCR'd or hand-typed variant (teh
+# marbuta/heh, a dropped hamza) still matches -- extract_citations only ever
+# reads the NUMBER out of the source (see its docstring), so a corrupted
+# head still yields a correct `canonical`, built from the template below,
+# never from the matched text.
 
 ARABIC_REFERENCES = [
-    (re.compile(r'المادة\s+(\d+)'), 'المادة {n}', 'l-madda {n}'),
-    (re.compile(r'الفصل\s+(\d+)'), 'الفصل {n}', 'l-fasl {n}'),
-    (re.compile(r'الباب\s+(\d+)'), 'الباب {n}', 'l-bab {n}'),
-    (re.compile(r'الفقرة\s+(\d+)'), 'الفقرة {n}', 'l-fiqra {n}'),
+    (re.compile(arabic_variant_pattern('المادة') + r'\s+(\d+)'), 'المادة {n}', 'l-madda {n}'),
+    (re.compile(arabic_variant_pattern('الفصل') + r'\s+(\d+)'), 'الفصل {n}', 'l-fasl {n}'),
+    (re.compile(arabic_variant_pattern('الباب') + r'\s+(\d+)'), 'الباب {n}', 'l-bab {n}'),
+    (re.compile(arabic_variant_pattern('الفقرة') + r'\s+(\d+)'), 'الفقرة {n}', 'l-fiqra {n}'),
     # القسم/الملحق/صفحة added alongside generate_training_data.py's
     # _REFERENCE_SHAPES widening — that gate's fabrication check already
     # covered these shapes, but extract_citations() (used for the "must cite
@@ -54,14 +140,21 @@ ARABIC_REFERENCES = [
     # not, so a context whose only citable material was a section/annex/page
     # reference was invisible to that gate. صفحة confirmed live in
     # dataset_export_v3 ("صفحة 107", "صفحة 17").
-    (re.compile(r'القسم\s+(\d+)'), 'القسم {n}', 'l-9ism {n}'),
-    (re.compile(r'الملحق\s+(\d+)'), 'الملحق {n}', 'l-mulhaq {n}'),
-    (re.compile(r'صفحة\s+(\d+)'), 'صفحة {n}', 'safha {n}'),
+    (re.compile(arabic_variant_pattern('القسم') + r'\s+(\d+)'), 'القسم {n}', 'l-9ism {n}'),
+    (re.compile(arabic_variant_pattern('الملحق') + r'\s+(\d+)'), 'الملحق {n}', 'l-mulhaq {n}'),
+    (re.compile(arabic_variant_pattern('صفحة') + r'\s+(\d+)'), 'صفحة {n}', 'safha {n}'),
+    # المرسوم (decree) and القرار (decision): added after measuring a real
+    # 80-page administrative guide, where they outnumbered المادة itself
+    # (7 and 13 occurrences vs. 3) and were completely invisible to
+    # extraction/grounding before this -- a bigger real-world gap than any
+    # OCR-accuracy fold above.
+    (re.compile(arabic_variant_pattern('المرسوم') + r'\s+(?:رقم\s+)?([\d\-.]+)'), 'المرسوم {n}', 'l-marsoum {n}'),
+    (re.compile(arabic_variant_pattern('القرار') + r'\s+(?:رقم\s+)?([\d\-.]+)'), 'القرار {n}', 'l-9arar {n}'),
     # The law's own number is the document's primary reference and the one a
     # learner is most likely to search for. Its gloss is the French form
     # rather than a transliteration: a Moroccan professional says
     # "Loi N° 27.06", never a phonetic rendering of القانون.
-    (re.compile(r'القانون\s+رقم\s+(\d+[\-.]\d+)'),
+    (re.compile(arabic_variant_pattern('القانون') + r'\s+' + arabic_variant_pattern('رقم') + r'\s+(\d+[\-.]\d+)'),
      'القانون رقم {n}', 'Loi N° {n}'),
 ]
 
@@ -137,8 +230,15 @@ def extract_citations(source: str) -> dict:
             number = match.group(1)
             # Law numbers are keyed on their normalised form so 27.06 and
             # 27-06 resolve to the same entry; the canonical text keeps the
-            # spelling the source actually used.
-            key_number = _law_key(number) if head in _LAW_HEADS else number
+            # spelling the source actually used. Same precedent extends to
+            # digit script: \d in Python's re already matches Arabic-Indic
+            # digits (Unicode category Nd), so "المادة ٥" was extracting
+            # under a DIFFERENT key than "المادة 5" for the same reference --
+            # fold_arabic's digit translation (part of Tier B, comparison
+            # only) collapses that at the key, same as _law_key's separator
+            # fold. `canonical`/`arabizi` below still use the raw `number`,
+            # so the source's own digit script survives into output.
+            key_number = fold_arabic(_law_key(number) if head in _LAW_HEADS else number)
             found[(head, key_number)] = {
                 "canonical": canonical_tpl.format(n=number),
                 "arabizi": arabizi_tpl.format(n=number) if arabizi_tpl else None,
@@ -184,8 +284,14 @@ def inject_citations(text: str, citations: dict, target_script: str = "arabizi")
         # Read from the string being substituted, not the original `text`:
         # an earlier pass may already have rewritten it, and match offsets
         # index that rewritten string.
-        already_paired = match.string[:match.start()].rstrip().endswith(
-            entry["canonical"] + " ("
+        #
+        # Both sides go through fold_arabic: a model that self-glossed with a
+        # minor spelling variant ("الماده 1 (l-madda 1)" instead of
+        # "المادة 1 (...") would otherwise fail this exact-string check and
+        # get double-wrapped into "الماده 1 (المادة 1 (l-madda 1))" instead
+        # of being recognised as already paired.
+        already_paired = fold_arabic(match.string[:match.start()].rstrip()).endswith(
+            fold_arabic(entry["canonical"] + " (")
         )
         if already_paired:
             already_cited.add((head, number))
@@ -223,7 +329,14 @@ def inject_citations(text: str, citations: dict, target_script: str = "arabizi")
             if not entry["arabizi"]:
                 continue
             canonical = entry["canonical"]
-            pattern = re.compile(re.escape(canonical) + r'(?!\d)(?!\s*\()')
+            # arabic_variant_pattern(), not re.escape(): `text` may itself contain a spelling
+            # variant of the canonical form (a self-gloss the model wrote
+            # with e.g. ة/ه confusion) -- an exact-escape match would miss
+            # it and never backfill the gloss at all. The lookahead guard
+            # against a following digit/paren still holds: arabic_variant_pattern() only
+            # widens per-character equivalence classes, it does not change
+            # what comes after the matched word.
+            pattern = re.compile(arabic_variant_pattern(canonical) + r'(?!\d)(?!\s*\()')
             result = pattern.sub(
                 f'{canonical} ({entry["arabizi"]})', result, count=1
             )
@@ -261,7 +374,11 @@ def inject_citations(text: str, citations: dict, target_script: str = "arabizi")
 
 def detect_target_script(text: str) -> str:
     """Infer which script a reader of this text expects, from the text itself."""
-    arabic = sum(1 for c in text if 'ء' <= c <= 'ي')
+    # Upper bound 'ۿ' (U+06FF), not 'ي' (U+064A) -- matches
+    # generate_training_data.py:1120's range, so Arabic-Indic digits
+    # (٠-٩) and extended Arabic letters count as Arabic script here too,
+    # not just the core alphabet.
+    arabic = sum(1 for c in text if 'ء' <= c <= 'ۿ')
     latin = sum(1 for c in text if c.isascii() and c.isalpha())
     if arabic > latin:
         return "arabic"

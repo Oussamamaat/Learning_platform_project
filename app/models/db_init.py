@@ -56,8 +56,39 @@ def init_db():
         #   ALTER TABLE chat_sessions ADD COLUMN IF NOT EXISTS response_lang_override VARCHAR(10);
         #   ALTER TABLE chat_sessions ADD COLUMN IF NOT EXISTS override_query_lang VARCHAR(10);
         #
-        # A fresh database never hits this -- create_all builds the full
-        # current model shape correctly the first time.
+        # Same again for the 2026-08-13 tenant-upload feature
+        # (source_file_id / pinned_corpus_version) and the bge-m3 embedding
+        # migration (documents.embedding's width, 384 -> 1024) -- but
+        # unlike the additive cases above, a pgvector column's dimension
+        # cannot be ALTERed in place with rows present, so that migration
+        # is NOT a hand-run ALTER TABLE; see scripts/migrate_to_bge_m3.py
+        # (archives the legacy domain=NULL rows, truncates, alters the
+        # column, then re-ingests). The additive columns from that same
+        # change (documents.source_file_id, chat_sessions.
+        # pinned_corpus_version, the new source_files table) ride along in
+        # that same script rather than needing their own hand-run ALTERs.
+        #
+        # Same again for video_jobs.title (added 2026-08-18 when the partner
+        # video-generation payload was locked -- see
+        # docs/PARTNER_VIDEO_ONBOARDING.md "Locked payload"):
+        #
+        #   ALTER TABLE video_jobs ADD COLUMN IF NOT EXISTS title VARCHAR(300);
+        #
+        # Same again for source_files.unprocessed_pages (added 2026-08-18 when
+        # a document with a mix of native and OCR_REQUIRED pages stopped
+        # failing the whole upload -- app.services.ingestion._parse_pdf now
+        # skips just the unreadable pages and app.services.ingest_jobs.
+        # process_source_file records which ones). The CHECK constraint also
+        # gained the 'partial' status value, which Postgres's ALTER TABLE
+        # ... DROP CONSTRAINT / ADD CONSTRAINT does not do implicitly:
+        #
+        #   ALTER TABLE source_files ADD COLUMN IF NOT EXISTS unprocessed_pages JSON;
+        #   ALTER TABLE source_files DROP CONSTRAINT IF EXISTS ck_source_files_status;
+        #   ALTER TABLE source_files ADD CONSTRAINT ck_source_files_status
+        #       CHECK (status IN ('pending','processing','ready','partial','error'));
+        #
+        # A fresh database never hits any of this -- create_all builds the
+        # full current model shape correctly the first time.
 
         # Deliberately NOT creating an ANN index (HNSW/ivfflat) on
         # documents.embedding. At the current corpus size (~200 chunks) a

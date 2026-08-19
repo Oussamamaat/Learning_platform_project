@@ -10,7 +10,17 @@ export type ResponseLang = "fr" | "darija";
 // app.services.routing.resolve_domain's three tiers, plus "pinned" when a
 // chat turn reused session continuity instead of a fresh tier 1/2/3
 // decision (chat only; quiz has no session so never returns "pinned").
-export type DomainSource = "page_context" | "retrieval" | "tenant_default" | "pinned";
+//
+// "no_match" means the tier-2 vote ran and nothing cleared the routing
+// threshold: the query is out of corpus, and the accompanying response is a
+// deterministic refusal. Distinct from "tenant_default", which means routing
+// could form no opinion at all (disk backend, or the vote's search failed).
+export type DomainSource =
+  | "page_context"
+  | "retrieval"
+  | "no_match"
+  | "tenant_default"
+  | "pinned";
 
 export interface ChatRequest {
   message: string;
@@ -22,6 +32,12 @@ export interface ChatRequest {
   // a course-module page) or wants to force a specific response language.
   domain?: Domain;
   language?: Language;
+  // Which of the tenant's uploaded sources may ground this turn -- a
+  // NARROWING hint only (app.services.sources.active_source_ids
+  // intersects this against server-side ready/partial+enabled state, never
+  // widens it). Omitted means every currently-enabled uploaded source is
+  // eligible; the global corpus is never affected by this field.
+  active_source_ids?: string[];
 }
 
 export interface ChatResponse {
@@ -34,6 +50,11 @@ export interface ChatResponse {
   language: ResponseLang; // the response language actually used
   prior_questions: string[]; // Socratic questions already asked outside the replay window
   cross_language: boolean; // true when grounded sources are in a different script than the reply
+  // True when pgvector retrieval failed and this answer fell back to the
+  // disk backend, which knows nothing about tenant uploads -- the answer
+  // is still grounded in the built-in corpus, but any uploaded sources are
+  // silently absent from it until Postgres recovers.
+  degraded: boolean;
 }
 
 export interface QuizRequest {
@@ -67,4 +88,48 @@ export interface QuizResponse {
 
 export interface ApiErrorPayload {
   error?: { code?: string; message?: string };
+}
+
+export type SourceStatus = "pending" | "processing" | "ready" | "partial" | "error";
+
+export interface UnprocessedPage {
+  page: number;
+  reason: string;
+  // Why the OCR attempt itself failed (subprocess error, timeout, missing
+  // engine) -- distinct from `reason`, which is why the page was classified
+  // as needing OCR in the first place. Optional: only OCR_REQUIRED skips
+  // populate it.
+  detail?: string;
+}
+
+export interface SourceFile {
+  id: string;
+  filename: string;
+  status: SourceStatus;
+  error_message?: string;
+  enabled: boolean;
+  domain?: Domain | string;
+  language?: string;
+  chunk_count: number;
+  page_count?: number;
+  // How the file was parsed -- pdf_text | pdf_ocr | pdf_mixed | docx |
+  // pptx | xlsx | csv | text | image_ocr -- an audit trail for "was this
+  // text OCR'd".
+  parser?: string;
+  ocr_engine?: string;
+  // Set when status="partial": pages skipped rather than failing the whole
+  // document over (e.g. a scanned page with no OCR engine configured) --
+  // the other pages' chunks are already stored and retrievable.
+  unprocessed_pages?: UnprocessedPage[];
+  size_bytes: number;
+  created_at: string; // ISO datetime
+  // Set when this upload's sha256 matched an existing ready source -- the
+  // returned row IS that existing source, not a new one.
+  duplicate_of?: string;
+}
+
+export interface SourceListResponse {
+  sources: SourceFile[];
+  ready_count: number;
+  total_chunks: number;
 }

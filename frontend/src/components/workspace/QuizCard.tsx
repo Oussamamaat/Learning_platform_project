@@ -69,7 +69,7 @@ export default function QuizCard({ quiz }: { quiz: QuizResponse }) {
                     type="button"
                     disabled={answered}
                     onClick={() => setAnswers((prev) => ({ ...prev, [qi]: oi }))}
-                    className={`flex items-start gap-2 rounded-lg border px-3 py-2 text-left text-[12.5px] leading-snug transition-colors ${style}`}
+                    className={`press flex items-start gap-2 rounded-lg border px-3 py-2 text-left text-[12.5px] leading-snug ${style}`}
                   >
                     <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-md border border-current/30 font-mono text-[10px] font-semibold">
                       {answered && isCorrect ? (

@@ -14,8 +14,12 @@ import {
   newMessageId,
   useChatSessions,
 } from "../hooks/useChatSessions";
+import { useSources } from "../hooks/useSources";
 import { useToast } from "../hooks/useToast";
 import type { ToastItem } from "../hooks/useToast";
+
+export type ViewMode = "tenant" | "employee";
+const VIEW_MODE_STORAGE_KEY = "atlas_tutor.view.v1";
 
 export const MODEL_NAME = "IBLOG_TUTOR:latest";
 
@@ -91,6 +95,16 @@ interface AppContextValue {
   toastInfo: (message: string) => void;
   toasts: ToastItem[];
   dismissToast: (id: number) => void;
+  // Tenant document uploads (Sources panel) + the tenant/employee view
+  // toggle -- purely a client-side presentation split (no auth in this
+  // codebase), see TopBar.tsx.
+  viewMode: ViewMode;
+  setViewMode: (mode: ViewMode) => void;
+  sources: ReturnType<typeof useSources>["sources"];
+  uploadFiles: ReturnType<typeof useSources>["uploadFiles"];
+  toggleSource: ReturnType<typeof useSources>["toggleSource"];
+  removeSource: ReturnType<typeof useSources>["removeSource"];
+  degraded: boolean;
 }
 
 const AppContext = createContext<AppContextValue | null>(null);
@@ -103,11 +117,31 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [health, setHealth] = useState<HealthState>({ status: "checking", lastChecked: null });
   const [quizModalOpen, setQuizModalOpen] = useState(false);
   const [isSending, setIsSending] = useState(false);
+  const [viewMode, setViewModeState] = useState<ViewMode>(() => {
+    try {
+      const stored = window.localStorage.getItem(VIEW_MODE_STORAGE_KEY);
+      return stored === "employee" ? "employee" : "tenant";
+    } catch {
+      return "tenant";
+    }
+  });
+
+  const setViewMode = useCallback((mode: ViewMode) => {
+    setViewModeState(mode);
+    try {
+      window.localStorage.setItem(VIEW_MODE_STORAGE_KEY, mode);
+    } catch {
+      // Storage unavailable -- the toggle still works for this session.
+    }
+  }, []);
 
   const { toasts, dismiss: dismissToast, toastError, toastSuccess, push: toastInfo } = useToast();
 
   const chat = useChatSessions();
   const { activeSessionId, ensureActiveSession, addMessage, updateMessage } = chat;
+
+  const src = useSources();
+  const { activeSourceIds, setDegraded } = src;
 
   const swapTimerRef = useRef<number | null>(null);
 
@@ -171,8 +205,17 @@ export function AppProvider({ children }: { children: ReactNode }) {
         // domain/language omitted -- the server resolves both
         // automatically (app.services.routing); no user-facing selector
         // sets them anymore. ChatResponse.domain/domain_source/language
-        // report back what was actually decided.
-        const reply = await sendChatMessage({ message: trimmed, session_id: sessionId });
+        // report back what was actually decided. active_source_ids is a
+        // narrowing hint only (app.services.sources.active_source_ids
+        // intersects it against server-side ready+enabled state) -- an
+        // empty array here means every currently-enabled upload is
+        // eligible, not "none", which is why it's omitted rather than
+        // sent as [] when there are no uploads yet.
+        const reply = await sendChatMessage({
+          message: trimmed,
+          session_id: sessionId,
+          active_source_ids: activeSourceIds.length > 0 ? activeSourceIds : undefined,
+        });
         updateMessage(sessionId, assistantId, {
           content: reply.response,
           sources: reply.sources,
@@ -183,6 +226,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         setActiveDomain(reply.domain);
         setActiveLanguage(responseLangToLanguage(reply.language));
         setLastDomainSource(reply.domain_source);
+        setDegraded(reply.degraded);
         // A successful reply proves the resident model is already warm --
         // no need to keep the swap-loading state around for its full
         // timeout once real evidence says the swap (if any) is done.
@@ -206,8 +250,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
     },
     [
       activeLanguage,
+      activeSourceIds,
       addMessage,
       ensureActiveSession,
+      setDegraded,
       toastError,
       updateMessage,
     ],
@@ -300,6 +346,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
       toastInfo,
       toasts,
       dismissToast,
+      viewMode,
+      setViewMode,
+      sources: src.sources,
+      uploadFiles: src.uploadFiles,
+      toggleSource: src.toggleSource,
+      removeSource: src.removeSource,
+      degraded: src.degraded,
     }),
     [
       activeDomain,
@@ -323,6 +376,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
       toastInfo,
       toasts,
       dismissToast,
+      viewMode,
+      setViewMode,
+      src.sources,
+      src.uploadFiles,
+      src.toggleSource,
+      src.removeSource,
+      src.degraded,
     ],
   );
 

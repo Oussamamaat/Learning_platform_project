@@ -34,6 +34,98 @@ class Settings(BaseSettings):
     # Delete this flag after the demo rather than keeping it around.
     retrieval_backend: str = "pgvector"
 
+    # Embedding model. Swapped 2026-08-13 from paraphrase-multilingual-
+    # MiniLM-L12-v2 (384-dim) to bge-m3 (1024-dim) -- the MiniLM model's
+    # own sentence_bert_config.json caps it at max_seq_length=128 tokens,
+    # which is what the old 400-char CHUNK_SIZE was actually sized against,
+    # not an arbitrary default. Real uploaded PDFs/slides need more room
+    # than that. embedding_dim MUST match documents.embedding's declared
+    # vector() width -- app.services.ingestion.load_embedding_model asserts
+    # this at load time so a mismatch fails loudly at boot, not silently
+    # mid-ingest. Changing either value requires running
+    # scripts/migrate_to_bge_m3.py (or its equivalent for a future swap),
+    # never just editing this file. app.services.generate_training_data's
+    # DEDUP_MODEL is a SEPARATE, deliberately-unrelated MiniLM usage
+    # (dataset dedup, tuned to that model's score distribution) -- do not
+    # point it at this setting.
+    embedding_model: str = "BAAI/bge-m3"
+    embedding_dim: int = 1024
+
+    # Cosine-similarity floor for a retrieved chunk to be usable
+    # (app.services.search / app.services.retrieval) and for a chunk to
+    # count toward app.services.routing's domain vote, respectively.
+    # Re-swept 2026-08-13 for bge-m3 (single-process sweep over
+    # tests/data/retrieval_eval.jsonl, pgvector backend, language-affinity
+    # on): recall@4 stays a PERFECT 1.000 all the way through threshold
+    # 0.4, where empty_context_rate_ood (out-of-domain refusal) jumps from
+    # 0.2 to 0.8 -- the best point on the curve, since it's the last one
+    # with zero recall cost. Above 0.4, recall starts falling (0.8 at 0.5,
+    # 0.51 at 0.6) faster than refusal improves (0.8 -> 1.0). This is a
+    # much cleaner separation than the old MiniLM value it replaces (0.15,
+    # where recall was already trading off against refusal from a much
+    # lower starting threshold -- see docs/architecture/data-and-
+    # retrieval.md's historical table). Kept as two separate settings
+    # because they answer two different questions ("is this chunk usable"
+    # vs. "does this chunk get a vote in domain routing"), even though the
+    # sweep landed them at the same value again.
+    similarity_threshold: float = 0.4
+    domain_vote_threshold: float = 0.4
+
+    # OCR: "none" | "tesseract" | "paddleocr" | "unlimited_ocr".
+    #
+    # "paddleocr" since 2026-08-18: scripts/verify_ocr_arabic.py now passes
+    # all four gates against a LIVE PaddleOCR-VL run (fidelity 0.945, all 5
+    # المادة markers in ascending order, not reversed, digit integrity OK).
+    # The gate previously failed only because PaddleOCR reads teh marbuta
+    # (ة) as heh (ه) -- visible in the live output as "المسطره" for
+    # "المسطرة" -- which the Arabic orthographic normalization added to
+    # app/services/citations.py (fold_arabic / arabic_variant_pattern) now
+    # absorbs. No engine change was needed; the defect was never the
+    # blocker, the missing normalization was.
+    #
+    # Requires .ocr_venv (see app.services.ocr.PaddleOcrEngine, which shells
+    # out to scripts/ocr_paddleocr_worker.py under settings.ocr_venv_python
+    # rather than importing paddleocr into this process). If that venv is
+    # absent, OCR raises OcrUnavailableError with an actionable message and
+    # -- since 2026-08-18 -- a PDF's other pages still ingest, with the
+    # unreadable ones recorded in source_files.unprocessed_pages and the row
+    # marked status='partial' rather than failing the whole document.
+    #
+    # Measured on this laptop (RTX 4060 8GB): ~80s for one page cold,
+    # including model load. The same page took ~17 MINUTES before
+    # paddlepaddle-gpu replaced a mistakenly-installed CPU-only
+    # paddlepaddle wheel -- if OCR is ever inexplicably slow again, check
+    # `paddle.device.is_compiled_with_cuda()` in .ocr_venv first.
+    ocr_engine: str = "paddleocr"
+    # GPU OCR engines load their model per-job and free it afterward by
+    # default (del model; torch.cuda.empty_cache()) so they never have to
+    # co-reside with the resident tutor model on an 8GB card. Set True only
+    # on a deploy box with enough VRAM to keep both resident, to skip the
+    # per-job reload cost. Not honored by PaddleOcrEngine's subprocess
+    # bridge (see ocr_venv_python) -- each call is a fresh subprocess, so
+    # there is no in-process pipeline object to keep resident; the pipeline
+    # still reloads every call regardless of this setting for that engine.
+    ocr_keep_resident: bool = False
+    # Path to the DEDICATED venv's interpreter (paddlepaddle/paddleocr pin
+    # CUDA/torch versions that conflict with this app's own torch pin -- see
+    # app/services/ocr.py's PaddleOcrEngine docstring) that
+    # scripts/ocr_paddleocr_worker.py actually runs under. PaddleOcrEngine
+    # invokes that script via subprocess with this interpreter rather than
+    # importing paddleocr into this process. Only read when
+    # ocr_engine="paddleocr".
+    ocr_venv_python: str = "./.ocr_venv/Scripts/python.exe"
+
+    # Tenant document uploads (app/routers/ingest.py).
+    upload_dir: str = "./data/uploads"
+    max_upload_bytes: int = 25 * 1024 * 1024
+    max_upload_files_per_request: int = 20
+    # Kill-switch for any public/unattended deployment: there is no auth in
+    # this codebase (get_tenant_id/get_user_id both ignore client input by
+    # design -- ADR 0001), so an upload+delete API reachable by anyone who
+    # can reach the port can otherwise wipe the tenant's corpus. Gates
+    # POST/PATCH/DELETE on the ingest router with a 403; GET is unaffected.
+    uploads_read_only: bool = False
+
     model_config = {
         "env_file": ".env",
         "env_file_encoding": "utf-8",

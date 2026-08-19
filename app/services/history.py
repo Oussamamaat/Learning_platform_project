@@ -260,10 +260,19 @@ def pin_context(
     context: str,
     sources: list,
     fingerprint: str,
+    corpus_version: Optional[str] = None,
 ) -> None:
     """Store the retrieved context for the current segment so a follow-up
     turn can reuse it without re-retrieving (app/services/retrieval.py,
     Stage 3). Fail-open, same contract as append_exchange.
+
+    `corpus_version` (app.services.sources.corpus_version, computed at the
+    moment this pin is written) is the pin-invalidation signal
+    app.routers.chat._resolve_turn_context compares against on later
+    turns -- a mismatch means a tenant source was uploaded/toggled/deleted
+    since. Default None for any caller that hasn't threaded it through
+    (there are none left, but keeps this function callable the same way
+    tests may have exercised it before uploads existed).
     """
     try:
         with Session(_get_engine()) as db:
@@ -284,6 +293,7 @@ def pin_context(
             session.pinned_context = context
             session.pinned_sources = sources
             session.pinned_fingerprint = fingerprint
+            session.pinned_corpus_version = corpus_version
             db.commit()
     except Exception:
         logger.exception("history.pin_context failed for session_id=%s", session_id)
@@ -368,6 +378,7 @@ def get_pinned(session_id: str) -> Optional[dict]:
                 "segment_id": session.segment_id,
                 "domain": session.domain,
                 "language": session.language,
+                "corpus_version": session.pinned_corpus_version,
             }
     except Exception:
         logger.exception("history.get_pinned failed for session_id=%s", session_id)

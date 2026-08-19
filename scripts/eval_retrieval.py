@@ -177,7 +177,7 @@ def main():
     )
     parser.add_argument(
         "--threshold", type=float, default=None,
-        help="pgvector backend only: override the similarity cutoff (default 0.4, unbenchmarked).",
+        help="pgvector backend only: override the similarity cutoff (default settings.similarity_threshold).",
     )
     parser.add_argument(
         "--auto-domain", action="store_true",

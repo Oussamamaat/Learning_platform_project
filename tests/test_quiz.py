@@ -156,6 +156,22 @@ def test_omitted_domain_autoroutes_and_reports_it():
     assert response.domain_source == "retrieval"
 
 
+def test_out_of_corpus_topic_refuses_even_when_context_is_nonempty():
+    """Quiz's half of the out-of-domain refusal fix. Context is deliberately
+    NON-empty, so the only possible trigger is domain_source == "no_match"
+    -- without it, an off-topic quiz topic routes to the tenant default
+    domain, pulls its nearest-but-irrelevant chunks, and generates questions
+    "grounded" in unrelated material."""
+    with patch("app.routers.quiz.resolve_domain", return_value=("industrial", "no_match")), \
+         patch("app.routers.quiz.build_rag_context", side_effect=_context), \
+         patch("app.services.quiz.urllib.request.urlopen", side_effect=_fails_if_called):
+        response = generate_quiz(QuizRequest(topic="sourdough bread baking"))
+    assert response.domain_source == "no_match"
+    assert response.questions == []
+    assert response.total_questions == 0
+    assert response.message  # a real refusal, not an empty string
+
+
 def test_response_language_field_reflects_resolution():
     with patch("app.routers.quiz.build_rag_context", side_effect=_context), \
          patch("app.services.quiz.urllib.request.urlopen",

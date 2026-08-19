@@ -22,7 +22,13 @@ import urllib.error
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from concurrent.futures import TimeoutError as FuturesTimeoutError
 
-from app.services.citations import extract_citations, inject_citations, ARABIC_REFERENCES
+from app.services.citations import (
+    ARABIC_REFERENCES,
+    arabic_variant_pattern,
+    extract_citations,
+    fold_arabic,
+    inject_citations,
+)
 from pathlib import Path
 from typing import Iterable, Optional
 
@@ -40,6 +46,13 @@ DEFAULT_TEMPERATURE = 0.7
 DEFAULT_MAX_TOKENS = 2048
 DEFAULT_BATCH_SIZE = 10
 DEFAULT_EVAL_SPLIT = 0.1
+# Deliberately still MiniLM even after app.config.Settings.embedding_model
+# moved to bge-m3 (2026-08-13, RAG serving path) -- this is a SEPARATE
+# dataset-dedup similarity threshold in a frozen data-gen pipeline, tuned
+# to MiniLM's own cosine-score distribution (see the dedup threshold near
+# this constant's usage below). Do not point this at settings.
+# embedding_model; that would silently change dedup behaviour on the next
+# generation run for no benefit to this constant's actual job.
 DEDUP_MODEL = "paraphrase-multilingual-MiniLM-L12-v2"
 
 # Weights are absolute row counts for the 3,000-row target (LOCKEDIN_PLAN §3.1).
@@ -3249,13 +3262,29 @@ def row_cites(row: dict, citations: dict) -> bool:
 # 190 times in target completions against 20 occurrences in the corpus, so
 # this was the single highest-frequency citation style with zero fabrication
 # protection -- a fabricated "SEC-07" passed every check.
+# Arabic heads/ordinals below go through arabic_variant_pattern() rather
+# than appearing as bare literals -- these shapes are matched against the
+# MODEL's own generated text (assistant_text), and row_has_ungrounded_
+# reference's fold_arabic'd key/haystack comparison already tolerates a
+# ة/ه or dropped-hamza spelling variant in the CONTEXT; under-widening the
+# shapes used to extract CANDIDATES from the model's text would mean a
+# variant-spelled fabrication is never even considered a candidate to
+# check in the first place. Same equivalence classes as citations.py,
+# applied here for consistency between the two gates.
 _STRUCTURAL_REFERENCE_SHAPES = (
     r"\b[A-Z]{2,4}-\d{2,3}\b"                      # SEC-01, MED-04, LOG-03
     r"|(?:Section|Chapitre|Chapter|Annexe|Annex)\s*\d+"
-    r"|(?:القسم|الباب|الملحق)\s+(?:\d+|الأول|الثاني|الثالث|الرابع|الخامس"
-    r"|السادس|السابع|الثامن|التاسع|العاشر)"
+    r"|(?:" + arabic_variant_pattern("القسم") + "|" + arabic_variant_pattern("الباب")
+    + "|" + arabic_variant_pattern("الملحق") + r")\s+(?:\d+|"
+    + "|".join(arabic_variant_pattern(w) for w in (
+        "الأول", "الثاني", "الثالث", "الرابع", "الخامس",
+        "السادس", "السابع", "الثامن", "التاسع", "العاشر",
+    )) + ")"
     r"|(?:Paragraphe|Paragraph)\s+[A-Z0-9]\b"
-    r"|الفقرة\s+(?:\d+|الأولى|الثانية|الثالثة|الرابعة|الخامسة)"
+    r"|" + arabic_variant_pattern("الفقرة") + r"\s+(?:\d+|"
+    + "|".join(arabic_variant_pattern(w) for w in (
+        "الأولى", "الثانية", "الثالثة", "الرابعة", "الخامسة",
+    )) + ")"
 )
 
 _REFERENCE_SHAPES = re.compile(
@@ -3263,7 +3292,8 @@ _REFERENCE_SHAPES = re.compile(
     r"[Ll]oi\s+N?[°o]?\s*[\d]+[\-.][\d]+"          # Loi N° 42-25 / Loi 27.06
     r"|[Ll]oi\s+n?°?\s*\d{2,}"                     # Loi 65-99 short form
     r"|ISO\s*\d{4,5}"                              # ISO 45001
-    r"|(?:ال)?قانون\s+(?:رقم\s*)?[\d]+[\-.][\d]+"  # Arabic law form, with or
+    r"|(?:ال)?" + arabic_variant_pattern("قانون") + r"\s+(?:رقم\s*)?[\d]+[\-.][\d]+"
+                                                    # Arabic law form, with or
                                                     # without the ال prefix and the
                                                     # optional رقم. The stricter
                                                     # earlier pattern required رقم
@@ -3271,8 +3301,10 @@ _REFERENCE_SHAPES = re.compile(
                                                     # which the v1 model fabricates
                                                     # confidently and repeatedly.
     r"|Code\s+du\s+Travail"
-    r"|مدونة\s+الشغل"                              # Code du Travail, Arabic form
-    r"|المادة\s*\d+"                               # Article N, Arabic form — the
+    r"|" + arabic_variant_pattern("مدونة") + r"\s+" + arabic_variant_pattern("الشغل") +
+                                                    # Code du Travail, Arabic form
+    r"|" + arabic_variant_pattern("المادة") + r"\s*\d+"
+                                                    # Article N, Arabic form — the
                                                     # most common citation shape in
                                                     # the corpus, and the one that
                                                     # slipped through undetected:
@@ -3285,7 +3317,7 @@ _REFERENCE_SHAPES = re.compile(
                                                     # instead of every shape the
                                                     # corpus actually uses.
     r"|Article\s*\d+"                              # Article N, French/English form
-    r"|(?:ال)?قانون(?:\s+\S+){1,3}\s+رقم\s*[\d]+[\-.][\d]+"
+    r"|(?:ال)?" + arabic_variant_pattern("قانون") + r"(?:\s+\S+){1,3}\s+رقم\s*[\d]+[\-.][\d]+"
                                                     # "قانون العقود رقم 59-06" — the
                                                     # law's SUBJECT sits between
                                                     # قانون and رقم, so the tighter
@@ -3300,9 +3332,11 @@ _REFERENCE_SHAPES = re.compile(
                                                     # scientific laws ("قانون كوهلر")
                                                     # do not match.
     r"|\bEN\s*\d{3,5}"                             # EN 166 / EN 1679, European norms
-    r"|الفصل\s*\d+"                                 # Article N, alternate Arabic form
+    r"|" + arabic_variant_pattern("الفصل") + r"\s*\d+"
+                                                    # Article N, alternate Arabic form
     r"|D[ée]cret\s+n?°?\s*[\d\-.]+"
-    r"|صفحة\s*\d+"                                  # Page N, Arabic form — confirmed
+    r"|" + arabic_variant_pattern("صفحة") + r"\s*\d+"
+                                                    # Page N, Arabic form — confirmed
                                                     # live in dataset_export_v3
                                                     # ("صفحة 107", "صفحة 17"); was
                                                     # entirely absent from this
@@ -3372,14 +3406,23 @@ def row_has_ungrounded_reference(row: dict, context: str) -> list:
         except (json.JSONDecodeError, AttributeError, TypeError):
             pass  # malformed JSON is a different gate's problem; scan as-is
     normalized_context = re.sub(r"\s+", " ", context)
+    # Folded once, outside the loop -- it was being recomputed on every
+    # single match before, pure waste since it never depends on `match`.
+    # fold_arabic (not just the digits+letters strip below) so an OCR'd
+    # context reading "الماده" grounds a model reference correctly spelled
+    # "المادة" -- without it, harakat alone would already defeat the
+    # [^\w؀-ۿ] strip (harakat sit inside that Arabic block, so a naive
+    # strip keeps them, and "المادةُ" != "المادة").
+    haystack = fold_arabic(re.sub(r"[^\w؀-ۿ]", "", normalized_context)).lower()
     missing = []
     for match in _REFERENCE_SHAPES.finditer(assistant_text):
         ref = re.sub(r"\s+", " ", match.group(0)).strip()
         # Compare on digits+letters only: "Loi N° 42-25" and "loi n 42-25"
         # are the same reference written two ways, and a spacing difference
-        # must not read as a fabrication.
-        key = re.sub(r"[^\w؀-ۿ]", "", ref).lower()
-        haystack = re.sub(r"[^\w؀-ۿ]", "", normalized_context).lower()
+        # must not read as a fabrication. `ref` itself is NOT folded --
+        # offenders must report what the model actually wrote, not a
+        # normalized stand-in.
+        key = fold_arabic(re.sub(r"[^\w؀-ۿ]", "", ref)).lower()
         if key and key not in haystack:
             missing.append(ref)
     return missing

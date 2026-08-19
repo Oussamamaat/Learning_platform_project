@@ -1,3 +1,4 @@
+from datetime import datetime
 from pydantic import BaseModel, Field
 from enum import Enum
 from typing import Optional
@@ -39,6 +40,19 @@ class ChatRequest(BaseModel):
             "override) -- see ChatResponse.language."
         ),
     )
+    active_source_ids: Optional[list[str]] = Field(
+        None,
+        description=(
+            "Which of the tenant's uploaded sources (app/routers/ingest.py) "
+            "may ground this turn's answer. A NARROWING hint only, like "
+            "tenant_id -- app.services.sources.active_source_ids intersects "
+            "this against server-side (status='ready' AND enabled) state, "
+            "never widens it, so a stale client can't resurrect a source the "
+            "tenant just disabled. The tenant's always-on global corpus is "
+            "never affected by this field. Omitted means every currently-"
+            "enabled uploaded source is eligible."
+        ),
+    )
 
 
 class ChatResponse(BaseModel):
@@ -52,8 +66,12 @@ class ChatResponse(BaseModel):
         description=(
             "How `domain` was resolved: 'page_context' (caller supplied it), "
             "'retrieval' (auto-routed by a similarity-weighted vote over "
-            "unfiltered top chunks), or 'tenant_default' (nothing cleared "
-            "the routing threshold)."
+            "unfiltered top chunks), 'pinned' (reused this session's existing "
+            "segment), 'no_match' (the vote ran and NOTHING cleared the "
+            "threshold -- the query is out of corpus, and this response is a "
+            "deterministic refusal), or 'tenant_default' (routing could form "
+            "no opinion at all: disk backend, or the vote's own search "
+            "failed)."
         ),
     )
     language: str = Field(
@@ -75,6 +93,17 @@ class ChatResponse(BaseModel):
             "(ADR 0002 decision 5) and fell back across the language line -- the answer "
             "is still grounded and in the requested language, but the UI should surface "
             "that the underlying sources are in a different script."
+        ),
+    )
+    degraded: bool = Field(
+        False,
+        description=(
+            "True when pgvector retrieval raised and this answer fell back to the "
+            "disk backend (app/routers/chat.py's _retrieve_context) -- which knows "
+            "nothing about tenant uploads. The answer is still grounded in the "
+            "built-in corpus, but any uploaded sources are silently absent from it "
+            "until Postgres recovers; the UI should say so rather than let a "
+            "confident, cited-looking answer imply otherwise."
         ),
     )
 
@@ -136,6 +165,104 @@ class QuizResponse(BaseModel):
     )
     domain: str = Field(..., description="The domain this quiz was actually grounded in")
     domain_source: str = Field(
-        ..., description="How `domain` was resolved: 'page_context' | 'retrieval' | 'tenant_default'"
+        ...,
+        description=(
+            "How `domain` was resolved: 'page_context' | 'retrieval' | "
+            "'no_match' (vote cleared nothing -- out of corpus, and this "
+            "response is a refusal) | 'tenant_default'"
+        ),
     )
     language: str = Field(..., description="The quiz language actually used: 'fr' or 'darija'.")
+
+
+class SourceStatus(str, Enum):
+    PENDING = "pending"
+    PROCESSING = "processing"
+    READY = "ready"
+    PARTIAL = "partial"
+    ERROR = "error"
+
+
+class SourceFileOut(BaseModel):
+    """One tenant-uploaded document, mirroring app.models.database.SourceFile
+    -- see app/routers/ingest.py."""
+
+    id: str
+    filename: str
+    status: SourceStatus
+    error_message: Optional[str] = None
+    enabled: bool
+    domain: Optional[str] = None
+    language: Optional[str] = None
+    chunk_count: int = 0
+    page_count: Optional[int] = None
+    parser: Optional[str] = Field(
+        None,
+        description="How the file was parsed: pdf_text | pdf_ocr | pdf_mixed | docx | pptx | "
+        "xlsx | csv | text | image_ocr -- an audit trail for 'was this text OCR'd'.",
+    )
+    ocr_engine: Optional[str] = None
+    unprocessed_pages: Optional[list[dict]] = Field(
+        None,
+        description="Set when status='partial': pages skipped rather than failing the "
+        "whole document, e.g. [{'page': 4, 'reason': 'ocr_required'}].",
+    )
+    size_bytes: int = 0
+    created_at: datetime
+    duplicate_of: Optional[str] = Field(
+        None,
+        description="Set when this upload's sha256 matched an existing ready source -- "
+        "the returned row IS that existing source, not a new one.",
+    )
+
+
+class SourceListResponse(BaseModel):
+    sources: list[SourceFileOut]
+    ready_count: int
+    total_chunks: int
+
+
+class SourceToggleRequest(BaseModel):
+    enabled: bool
+
+
+class VideoJobStatus(str, Enum):
+    PENDING = "pending"
+    PROCESSING = "processing"
+    READY = "ready"
+    ERROR = "error"
+
+
+class VideoGenerateRequest(BaseModel):
+    """Input contract: what our app sends to request a video."""
+
+    text: str = Field(..., min_length=1, max_length=8000, description="Explanation/content to turn into video")
+    title: Optional[str] = Field(
+        None,
+        max_length=300,
+        description="Short topic label for the video's opening frame, in the same language as text",
+    )
+    language: Language = Field(..., description="fr | en | ar-MA")
+    session_id: Optional[str] = Field(None, description="Chat/quiz session this was triggered from, if any")
+    tenant_id: Optional[str] = Field(None, description="Company/tenant identifier")
+
+
+class VideoJobUpdateRequest(BaseModel):
+    """Output contract: what the video worker PATCHes back as it progresses."""
+
+    status: VideoJobStatus
+    video_url: Optional[str] = Field(None, description="Required when status='ready'")
+    error_message: Optional[str] = Field(None, description="Required when status='error'")
+
+
+class VideoJobOut(BaseModel):
+    id: str
+    tenant_id: str
+    session_id: Optional[str] = None
+    input_text: str
+    title: Optional[str] = None
+    language: str
+    status: VideoJobStatus
+    video_url: Optional[str] = None
+    error_message: Optional[str] = None
+    created_at: datetime

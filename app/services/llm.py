@@ -139,6 +139,72 @@ DOMAIN_LABELS_AR = {
     "blockchain": "البلوكتشين وتنظيم الأصول الرقمية",
 }
 
+# Explanatory (non-Socratic) prompts for one-shot video generation. A video
+# viewer has no way to answer a question posed to them, so these swap the
+# Socratic instruction for a direct, standalone explanation -- everything
+# else (French-technical-terms-in-Latin-letters, verbatim legal citations,
+# ground-strictly-in-context, and the French-even-when-context-is-Arabic
+# line) is kept, unchanged, from SYSTEM_PROMPT_TEMPLATE / _FR. Deliberately
+# separate constants, not edits to those: SYSTEM_PROMPT_TEMPLATE and
+# SYSTEM_PROMPT_TEMPLATE_FR are held byte-identical to their
+# generate_training_data.py twins by
+# test_french_system_prompt_template_matches_serving
+# (tests/test_generation_gates.py); these must never merge into them.
+EXPLANATORY_PROMPT_TEMPLATE = (
+    "You are an expert bilingual enterprise tutor specializing in {domain}.\n"
+    "Answer in Moroccan Darija written in Arabic script, with a direct, "
+    "standalone explanation -- do not ask the learner any question. This "
+    "explanation will be turned into a video with no way for the viewer to "
+    "respond, so it must fully explain the topic on its own.\n"
+    "The user may write to you in Arabizi (Latin letters and numerals); "
+    "understand it, but always answer in Arabic script.\n"
+    "Keep technical vocabulary in French, written in Latin letters, exactly as a "
+    "Moroccan professional says it (les EPI, la procedure, la conformite, "
+    "la maintenance). Never translate a French technical term into Arabic.\n"
+    "Keep legal references verbatim, exactly as the context writes them: copy the "
+    "reference character-for-character, never paraphrased or transliterated.\n"
+    "When you cite an article or a term from the context, quote it exactly as it "
+    "appears in the source document, so the learner can find it there.\n"
+    "Ground all answers strictly in the provided context.\n"
+    "If the context is insufficient, politely refuse and suggest what the user should study.\n"
+    "Never invent facts. Only use information from the context below.\n\n"
+    "CONTEXTE :\n"
+    "{context}"
+)
+
+EXPLANATORY_PROMPT_TEMPLATE_FR = (
+    "Tu es un tuteur d'entreprise expert, specialise en {domain}.\n"
+    "Reponds en francais, avec une explication directe et autonome -- ne pose "
+    "aucune question a l'apprenant. Cette explication sera transformee en video, "
+    "sans aucun moyen pour le spectateur de repondre : elle doit donc expliquer "
+    "le sujet integralement par elle-meme.\n"
+    "Le contexte ci-dessous peut etre redige en arabe : traduis-le et explique "
+    "en francais. Reponds en francais meme si le contexte est en arabe. "
+    "N'utilise pas l'ecriture arabe, sauf pour citer une reference legale mot "
+    "pour mot.\n"
+    "Cite les references legales telles quelles, mot pour mot, exactement comme "
+    "elles apparaissent dans le document source.\n"
+    "Fonde toutes tes reponses strictement sur le contexte fourni.\n"
+    "Si le contexte est insuffisant, refuse poliment et indique ce que "
+    "l'utilisateur devrait etudier. Formule aussi ton refus en francais : "
+    "meme quand tu refuses, tu reponds en francais, jamais en darija.\n"
+    "N'invente jamais de faits. Utilise uniquement les informations du contexte "
+    "ci-dessous.\n\n"
+    "CONTEXTE :\n"
+    "{context}"
+)
+
+
+def build_explanatory_prompt(domain: str, context: str, language: str = "darija") -> str:
+    """Non-Socratic counterpart to _build_system_prompt, for one-shot video
+    generation where there is no viewer turn to ask a question into."""
+    if language == "fr":
+        domain_label = DOMAIN_LABELS_FR.get(domain, DOMAIN_LABELS.get(domain, domain))
+        return EXPLANATORY_PROMPT_TEMPLATE_FR.format(domain=domain_label, context=context)
+    domain_label = DOMAIN_LABELS.get(domain, domain)
+    return EXPLANATORY_PROMPT_TEMPLATE.format(domain=domain_label, context=context)
+
+
 # Deterministic refusal templates -- fired by the chat route when retrieval
 # returns no usable context, BEFORE the model is ever called. This exists
 # because the fine-tuned model's own refusals are welded to tenant #1's
@@ -404,7 +470,16 @@ def _call_ollama_generate(
         "prompt": prompt,
         "system": system,
         "stream": False,
-        "options": {"temperature": 0.2},
+        # num_ctx explicit per-request, overriding each Modelfile's default
+        # of 4096 -- Ollama truncates from the FRONT of the prompt when the
+        # context window is exceeded, i.e. it silently eats the system
+        # block holding the retrieved RAG context first. Raised alongside
+        # the 2026-08-13 chunk-size increase (app/services/ingestion.py's
+        # CHUNK_SIZE, now ~2000 chars) and max_context_length (app/services/
+        # retrieval.py, now 6000 chars/~1500 tokens) -- 4096 total left too
+        # little headroom for that context plus conversation history plus
+        # the response itself.
+        "options": {"temperature": 0.2, "num_ctx": 8192},
     }
     if format_schema is not None:
         payload["format"] = format_schema
@@ -461,7 +536,16 @@ def _call_ollama_chat(
         "model": model,
         "messages": messages,
         "stream": False,
-        "options": {"temperature": 0.2},
+        # num_ctx explicit per-request, overriding each Modelfile's default
+        # of 4096 -- Ollama truncates from the FRONT of the prompt when the
+        # context window is exceeded, i.e. it silently eats the system
+        # block holding the retrieved RAG context first. Raised alongside
+        # the 2026-08-13 chunk-size increase (app/services/ingestion.py's
+        # CHUNK_SIZE, now ~2000 chars) and max_context_length (app/services/
+        # retrieval.py, now 6000 chars/~1500 tokens) -- 4096 total left too
+        # little headroom for that context plus conversation history plus
+        # the response itself.
+        "options": {"temperature": 0.2, "num_ctx": 8192},
     }
     if format_schema is not None:
         payload["format"] = format_schema
