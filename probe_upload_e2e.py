@@ -61,15 +61,20 @@ def _upload_file(filename: str, content: bytes) -> UploadFile:
 
 
 def wait_until_ready(source_id: str) -> None:
+    # 'partial' counts as retrievable exactly like 'ready'
+    # (app.services.sources.active_source_ids' docstring) -- a document
+    # with some OCR-skipped pages is a legitimate terminal state, not a
+    # failure to keep polling past. Only 'pending'/'processing' should
+    # keep this loop spinning.
     start = time.monotonic()
     while time.monotonic() - start < POLL_TIMEOUT_S:
         row = ingest_router.get_source(source_id)
-        if row.status == "ready":
+        if row.status in ("ready", "partial"):
             return
         if row.status == "error":
             raise RuntimeError(f"source {source_id} failed: {row.error_message}")
         time.sleep(1)
-    raise TimeoutError(f"source {source_id} did not reach 'ready' within {POLL_TIMEOUT_S}s")
+    raise TimeoutError(f"source {source_id} did not reach 'ready'/'partial' within {POLL_TIMEOUT_S}s")
 
 
 def main():

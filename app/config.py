@@ -83,37 +83,51 @@ class Settings(BaseSettings):
     # absorbs. No engine change was needed; the defect was never the
     # blocker, the missing normalization was.
     #
-    # Requires .ocr_venv (see app.services.ocr.PaddleOcrEngine, which shells
-    # out to scripts/ocr_paddleocr_worker.py under settings.ocr_venv_python
+    # Requires .ocr_venv (see app.services.ocr.PaddleOcrEngine, which talks
+    # to scripts/ocr_worker_resident.py -- a persistent subprocess under
+    # settings.ocr_venv_python, started once and reused for every page --
     # rather than importing paddleocr into this process). If that venv is
     # absent, OCR raises OcrUnavailableError with an actionable message and
     # -- since 2026-08-18 -- a PDF's other pages still ingest, with the
     # unreadable ones recorded in source_files.unprocessed_pages and the row
     # marked status='partial' rather than failing the whole document.
     #
-    # Measured on this laptop (RTX 4060 8GB): ~80s for one page cold,
-    # including model load. The same page took ~17 MINUTES before
+    # Measured on this laptop (RTX 4060 8GB) under the OLD per-page-
+    # subprocess design (scripts/ocr_paddleocr_worker.py, retired once the
+    # resident worker replaced it): ~80-200s for one page cold, including
+    # model load EVERY call. The same page took ~17 MINUTES before
     # paddlepaddle-gpu replaced a mistakenly-installed CPU-only
     # paddlepaddle wheel -- if OCR is ever inexplicably slow again, check
     # `paddle.device.is_compiled_with_cuda()` in .ocr_venv first.
     ocr_engine: str = "paddleocr"
-    # GPU OCR engines load their model per-job and free it afterward by
-    # default (del model; torch.cuda.empty_cache()) so they never have to
-    # co-reside with the resident tutor model on an 8GB card. Set True only
-    # on a deploy box with enough VRAM to keep both resident, to skip the
-    # per-job reload cost. Not honored by PaddleOcrEngine's subprocess
-    # bridge (see ocr_venv_python) -- each call is a fresh subprocess, so
-    # there is no in-process pipeline object to keep resident; the pipeline
-    # still reloads every call regardless of this setting for that engine.
+    # Only consulted by UnlimitedOcrEngine's in-process model (load-per-job,
+    # free-after by default: del model; torch.cuda.empty_cache() -- so it
+    # never has to co-reside with the resident tutor model on an 8GB card).
+    # Set True only on a deploy box with enough VRAM to keep it resident too.
+    # PaddleOcrEngine does NOT read this: its worker subprocess
+    # (scripts/ocr_worker_resident.py) is unconditionally kept resident for
+    # this app process's whole lifetime once started -- that subprocess's
+    # own VRAM use, not this app process's, is what must fit alongside the
+    # tutor model; see PaddleOcrEngine's docstring.
     ocr_keep_resident: bool = False
     # Path to the DEDICATED venv's interpreter (paddlepaddle/paddleocr pin
     # CUDA/torch versions that conflict with this app's own torch pin -- see
     # app/services/ocr.py's PaddleOcrEngine docstring) that
-    # scripts/ocr_paddleocr_worker.py actually runs under. PaddleOcrEngine
-    # invokes that script via subprocess with this interpreter rather than
-    # importing paddleocr into this process. Only read when
-    # ocr_engine="paddleocr".
+    # scripts/ocr_worker_resident.py actually runs under, as a persistent
+    # subprocess started once and reused for every page. PaddleOcrEngine
+    # launches that script via this interpreter rather than importing
+    # paddleocr into this process. Only read when ocr_engine="paddleocr".
     ocr_venv_python: str = "./.ocr_venv/Scripts/python.exe"
+    # Which pipeline app.services.ocr.PaddleOcrEngine's resident worker
+    # (scripts/ocr_worker_resident.py) runs: "vl" (PaddleOCR-VL, the 3B
+    # vision-language pipeline -- highest fidelity, slowest, the only one
+    # with a proven ground-truth recovery on this corpus as of the
+    # scripts/ocr_bakeoff.py run this default was set from), "structure"
+    # (PPStructureV3, layout+table recognition -- lighter), or "classic"
+    # (PaddleOCR/PP-OCRv5 -- lightest, no table/layout structure at all).
+    # See scripts/ocr_bakeoff.py's docstring for the measured wall-clock
+    # and ground-truth-token-survival numbers each was chosen from.
+    ocr_paddle_engine: str = "vl"
 
     # Tenant document uploads (app/routers/ingest.py).
     upload_dir: str = "./data/uploads"

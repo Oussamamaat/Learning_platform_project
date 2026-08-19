@@ -1,0 +1,186 @@
+{
+  "tenant": "company_efg",
+  "corpus": [
+    {
+      "source": "arabic_test.pdf",
+      "chunks": 41,
+      "chars": 63855
+    },
+    {
+      "source": "french_test.pdf",
+      "chunks": 68,
+      "chars": 100491
+    }
+  ],
+  "tier1_stored_pass": 10,
+  "tier1_stored_total": 10,
+  "stored_pass": 13,
+  "stored_total": 13,
+  "retrieved_pass": 4,
+  "retrieved_total": 4,
+  "stored_results": [
+    {
+      "label": "p51 DPF constant 1.5765",
+      "needle": "1.5765",
+      "tier": 1,
+      "doc": "arabic_test.pdf",
+      "hits": 1,
+      "stored": true,
+      "why": "page was classified EMPTY and dropped entirely pre-fix"
+    },
+    {
+      "label": "p51 DPF exponent 0.158",
+      "needle": "0.158",
+      "tier": 1,
+      "doc": "arabic_test.pdf",
+      "hits": 1,
+      "stored": true,
+      "why": "same page"
+    },
+    {
+      "label": "p51 seconds/day 86400",
+      "needle": "86400",
+      "tier": 1,
+      "doc": "arabic_test.pdf",
+      "hits": 2,
+      "stored": true,
+      "why": "same page"
+    },
+    {
+      "label": "p15 CAD layer حدود القسيمة",
+      "needle": "حدود القسيمة",
+      "tier": 1,
+      "doc": "arabic_test.pdf",
+      "hits": 3,
+      "stored": true,
+      "why": "table lost pre-fix (page kept as sparse NATIVE)"
+    },
+    {
+      "label": "p15 CAD layer التقسيمات",
+      "needle": "التقسيمات",
+      "tier": 1,
+      "doc": "arabic_test.pdf",
+      "hits": 1,
+      "stored": true,
+      "why": "same table"
+    },
+    {
+      "label": "p15 CAD layer نص التقسيمات",
+      "needle": "نص التقسيمات",
+      "tier": 1,
+      "doc": "arabic_test.pdf",
+      "hits": 1,
+      "stored": true,
+      "why": "same table"
+    },
+    {
+      "label": "p15 datum 1970",
+      "needle": "1970",
+      "tier": 1,
+      "doc": "arabic_test.pdf",
+      "hits": 1,
+      "stored": true,
+      "why": "geodetic datum, native layer"
+    },
+    {
+      "label": "p15 scale factor 0.999600",
+      "needle": "0.999600",
+      "tier": 1,
+      "doc": "arabic_test.pdf",
+      "hits": 1,
+      "stored": true,
+      "why": "native-only value -- proves native+OCR MERGE, not replace"
+    },
+    {
+      "label": "TC-06 substation threshold 12,000",
+      "needle": "12,000",
+      "tier": 2,
+      "doc": "arabic_test.pdf",
+      "hits": 1,
+      "stored": true,
+      "why": "was stored pre-fix but never retrieved"
+    },
+    {
+      "label": "TC-05 reclamation line خط الدفان",
+      "needle": "خط الدفان",
+      "tier": 2,
+      "doc": "arabic_test.pdf",
+      "hits": 2,
+      "stored": true,
+      "why": "waterfront setback"
+    },
+    {
+      "label": "TC-07 telecom zone BB1",
+      "needle": "BB1",
+      "tier": 2,
+      "doc": "arabic_test.pdf",
+      "hits": 4,
+      "stored": true,
+      "why": "tower exclusion zone list, p80"
+    },
+    {
+      "label": "FR safety component rule",
+      "needle": "composant de sécurité",
+      "tier": 1,
+      "doc": "french_test.pdf",
+      "hits": 6,
+      "stored": true,
+      "why": "p13 rule used by the tutoring eval"
+    },
+    {
+      "label": "FR CE marking",
+      "needle": "marquage CE",
+      "tier": 1,
+      "doc": "french_test.pdf",
+      "hits": 9,
+      "stored": true,
+      "why": "p12/p13"
+    }
+  ],
+  "retrieval_results": [
+    {
+      "test": "TC-06",
+      "question": "ما هو الحد الأدنى لمجموع الأحمال الكهربائية الذي يوجب توفير محطة كهرباء رئيسية؟",
+      "needle": "12,000",
+      "ui_lang": "darija",
+      "retrieved": true,
+      "sources": [
+        "arabic_test.pdf"
+      ],
+      "context_chars": 6024
+    },
+    {
+      "test": "TC-02",
+      "question": "ما هي الطبقات المطلوبة في ملف CAD لطلب تقسيم الأراضي؟",
+      "needle": "التقسيمات",
+      "ui_lang": "darija",
+      "retrieved": true,
+      "sources": [
+        "arabic_test.pdf"
+      ],
+      "context_chars": 6024
+    },
+    {
+      "test": "TC-04",
+      "question": "كيف يتم حساب عامل التصميم في وقت الذروة؟",
+      "needle": "1.5765",
+      "ui_lang": "darija",
+      "retrieved": true,
+      "sources": [
+        "arabic_test.pdf"
+      ],
+      "context_chars": 6024
+    },
+    {
+      "test": "FR-p13",
+      "question": "Dans quel cas le remplacement d'un composant de securite est-il une modification ?",
+      "needle": "composant de sécurité",
+      "ui_lang": "fr",
+      "retrieved": true,
+      "sources": [
+        "french_test.pdf"
+      ],
+      "context_chars": 5988
+    }
+  ]
+}

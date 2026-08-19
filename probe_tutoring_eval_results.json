@@ -1,0 +1,323 @@
+[
+  {
+    "label": "arabic_test.pdf / French (cross-lingual)",
+    "document_hint": "arabic_test.pdf",
+    "requested_language": "fr",
+    "session_id": "eval-c2dda3e82656",
+    "turns": [
+      {
+        "turn": 1,
+        "learner_message": "Quelle est la surface maximale constructible sur le front de mer, et quelle distance de retrait faut-il respecter par rapport a la ligne de remblai ?",
+        "response": "Selon l'article 35 du document fourni, il y a une zone tampon obligatoire d'au moins 40 mètres entre la ligne de remblai et les constructions. La surface maximale constructible sur le front de mer n'est pas spécifiée dans ce document.  Pourriez-vous me dire si vous avez compris cette information ?",
+        "sources": [
+          "arabic_test.pdf"
+        ],
+        "domain": "industrial",
+        "domain_source": "retrieval",
+        "language_reported": "fr",
+        "cross_language": false,
+        "degraded": false,
+        "elapsed_seconds": 24.7,
+        "scores": {
+          "language_ok": true,
+          "arabic_chars": 0,
+          "latin_chars": 233,
+          "explains_before_asking": true,
+          "question_count": 1,
+          "ends_with_exactly_one_question": true,
+          "char_count": 298,
+          "nonempty": true
+        }
+      },
+      {
+        "turn": 2,
+        "learner_message": "Donc si je comprends bien, la limite est de 50% de la surface totale qui peut etre construite ?",
+        "response": "Non, la limite n'est pas fixée à 50%. L'article 35 stipule qu'il faut respecter une distance de retrait d'au moins 40 mètres par rapport à la ligne de remblai.  En plus de cela, il y a des règles spécifiques pour les zones frontalières avec le littoral qui peuvent limiter encore plus la construction.",
+        "sources": [
+          "arabic_test.pdf"
+        ],
+        "domain": "industrial",
+        "domain_source": "pinned",
+        "language_reported": "fr",
+        "cross_language": false,
+        "degraded": false,
+        "elapsed_seconds": 18.2,
+        "scores": {
+          "language_ok": true,
+          "arabic_chars": 0,
+          "latin_chars": 225,
+          "explains_before_asking": true,
+          "question_count": 0,
+          "ends_with_exactly_one_question": false,
+          "char_count": 301,
+          "nonempty": true,
+          "reaction": {
+            "turn2_word_count": 26,
+            "new_content_word_ratio": 0.81,
+            "note": "Lexical-overlap proxy only. Read the transcript to judge whether the tutor actually corrected the learner's wrong answer in turn 2, vs. silently agreeing with it -- no automated check here does that."
+          }
+        }
+      },
+      {
+        "turn": 3,
+        "learner_message": "Et concernant la hauteur maximale des batiments dans cette zone, quelle est la regle ?",
+        "response": "La hauteur maximale n'est pas spécifiée dans l'article 35.  Il faudrait consulter d'autres articles ou documents pour obtenir ces informations. Par exemple, le document mentionne que les règles spécifiques peuvent limiter encore plus la construction en bord de mer.",
+        "sources": [
+          "arabic_test.pdf"
+        ],
+        "domain": "industrial",
+        "domain_source": "retrieval",
+        "language_reported": "fr",
+        "cross_language": false,
+        "degraded": false,
+        "elapsed_seconds": 20.6,
+        "scores": {
+          "language_ok": true,
+          "arabic_chars": 0,
+          "latin_chars": 213,
+          "explains_before_asking": true,
+          "question_count": 0,
+          "ends_with_exactly_one_question": false,
+          "char_count": 265,
+          "nonempty": true
+        }
+      }
+    ]
+  },
+  {
+    "label": "french_test.pdf / French",
+    "document_hint": "french_test.pdf",
+    "requested_language": "fr",
+    "session_id": "eval-8efb1702ac47",
+    "turns": [
+      {
+        "turn": 1,
+        "learner_message": "Selon ce guide, dans quel cas le remplacement d'un composant de securite est-il considere comme une modification de la machine ?",
+        "response": "Le remplacement d'un composant de sécurité est considéré comme une modification lorsque : \n - son remplacement est réalisé par un composant ayant des performances différentes du composant initial (caractéristiques techniques du produit et fonction de sécurité) ; \n - le composant de sécurité est remplacé par un composant d’un autre type.",
+        "sources": [
+          "french_test.pdf"
+        ],
+        "domain": "industrial",
+        "domain_source": "retrieval",
+        "language_reported": "fr",
+        "cross_language": false,
+        "degraded": false,
+        "elapsed_seconds": 143.9,
+        "scores": {
+          "language_ok": true,
+          "arabic_chars": 0,
+          "latin_chars": 263,
+          "explains_before_asking": true,
+          "question_count": 0,
+          "ends_with_exactly_one_question": false,
+          "char_count": 338,
+          "nonempty": true
+        }
+      },
+      {
+        "turn": 2,
+        "learner_message": "Donc remplacer n'importe quelle piece, meme a l'identique, compte toujours comme une modification ?",
+        "response": "Non, pas forcément. Le guide précise que le remplacement d'un élément dans une machine ou un ensemble de machines ne constitue une modification que si les caractéristiques ou références du nouvel élément diffèrent de ceux indiqués dans la notice d'instructions ou dans la documentation du fabricant.  Par exemple, changer un bloc de freinage par un bloc ayant des caractéristiques différentes qui réduit le temps de freinage serait considéré comme une modification.",
+        "sources": [
+          "french_test.pdf"
+        ],
+        "domain": "industrial",
+        "domain_source": "pinned",
+        "language_reported": "fr",
+        "cross_language": false,
+        "degraded": false,
+        "elapsed_seconds": 44.0,
+        "scores": {
+          "language_ok": true,
+          "arabic_chars": 0,
+          "latin_chars": 371,
+          "explains_before_asking": true,
+          "question_count": 0,
+          "ends_with_exactly_one_question": false,
+          "char_count": 465,
+          "nonempty": true,
+          "reaction": {
+            "turn2_word_count": 32,
+            "new_content_word_ratio": 0.78,
+            "note": "Lexical-overlap proxy only. Read the transcript to judge whether the tutor actually corrected the learner's wrong answer in turn 2, vs. silently agreeing with it -- no automated check here does that."
+          }
+        }
+      },
+      {
+        "turn": 3,
+        "message": "Et le simple deplacement d'un composant de securite, sans le remplacer, est-ce aussi considere comme une modification ?",
+        "error": "ReadTimeout: HTTPConnectionPool(host='127.0.0.1', port=8000): Read timed out. (read timeout=180)"
+      }
+    ]
+  },
+  {
+    "label": "arabic_test.pdf / Darija",
+    "document_hint": "arabic_test.pdf",
+    "requested_language": "ar-MA",
+    "session_id": "eval-9988e56c797c",
+    "turns": [
+      {
+        "turn": 1,
+        "learner_message": "شحال كيبان الحمل الكهربائي اللي كيوجب توفير محطة رئيسية؟",
+        "response": "حسب الجدول رقم 8، إلى كان مجموع الأحمال الكهربائية أكثر من 12,000 KVA، خاصك توفر محطة كهرباء رئيسية. واش عندك شي سؤال آخر على هاد الموضوع؟",
+        "sources": [
+          "arabic_test.pdf"
+        ],
+        "domain": "industrial",
+        "domain_source": "retrieval",
+        "language_reported": "darija",
+        "cross_language": true,
+        "degraded": false,
+        "elapsed_seconds": 79.4,
+        "scores": {
+          "language_ok": true,
+          "arabic_chars": 102,
+          "latin_chars": 3,
+          "explains_before_asking": true,
+          "question_count": 1,
+          "ends_with_exactly_one_question": true,
+          "char_count": 138,
+          "nonempty": true
+        }
+      },
+      {
+        "turn": 2,
+        "learner_message": "يعني إلا وصل الحمل ديال البناية ل 10000 كيلوفولط أمبير خاصنا نديرو محطة رئيسية؟",
+        "response": "لا، حسب الجدول رقم 8، إلى كان مجموع الأحمال الكهربائية أكثر من 12,000 KVA، خاصك توفر محطة كهرباء رئيسية. واش عندك شي سؤال آخر على هاد الموضوع؟",
+        "sources": [
+          "arabic_test.pdf"
+        ],
+        "domain": "industrial",
+        "domain_source": "retrieval",
+        "language_reported": "darija",
+        "cross_language": true,
+        "degraded": false,
+        "elapsed_seconds": 24.3,
+        "scores": {
+          "language_ok": true,
+          "arabic_chars": 105,
+          "latin_chars": 3,
+          "explains_before_asking": true,
+          "question_count": 1,
+          "ends_with_exactly_one_question": true,
+          "char_count": 142,
+          "nonempty": true,
+          "reaction": {
+            "turn2_word_count": 14,
+            "new_content_word_ratio": 0.0,
+            "note": "Lexical-overlap proxy only. Read the transcript to judge whether the tutor actually corrected the learner's wrong answer in turn 2, vs. silently agreeing with it -- no automated check here does that."
+          }
+        }
+      },
+      {
+        "turn": 3,
+        "learner_message": "وشحال كتكون المساحة اللي خاصها برج الاتصالات؟",
+        "response": "حسب الجدول رقم 9، إلى كان مجموع الأحمال الكهربائية أكثر من 12,000 KVA، خاصك توفر محطة كهرباء رئيسية. واش عندك شي سؤال آخر على هاد الموضوع؟",
+        "sources": [
+          "arabic_test.pdf"
+        ],
+        "domain": "industrial",
+        "domain_source": "retrieval",
+        "language_reported": "darija",
+        "cross_language": true,
+        "degraded": false,
+        "elapsed_seconds": 22.4,
+        "scores": {
+          "language_ok": true,
+          "arabic_chars": 102,
+          "latin_chars": 3,
+          "explains_before_asking": true,
+          "question_count": 1,
+          "ends_with_exactly_one_question": true,
+          "char_count": 138,
+          "nonempty": true
+        }
+      }
+    ]
+  },
+  {
+    "label": "french_test.pdf / Darija (cross-lingual)",
+    "document_hint": "french_test.pdf",
+    "requested_language": "ar-MA",
+    "session_id": "eval-13d9424a7c66",
+    "turns": [
+      {
+        "turn": 1,
+        "learner_message": "شنو كيقول هاد الدليل على تبديل مكون السلامة ديال الآلة، فأي حالة كيتعتبر تعديل؟",
+        "response": "حسب دليل التعديلات فالصفحة 13، إلا كان المكون الجديد عندو خصائص مختلفة ولا نوع مختلف على القديم، راه كيتعتبر تعديل. مثلا، تبديل قفل ثنائي بواحد غير مرئي هو تعديل. واش فهمتي هادشي؟",
+        "sources": [
+          "french_test.pdf"
+        ],
+        "domain": "industrial",
+        "domain_source": "retrieval",
+        "language_reported": "darija",
+        "cross_language": true,
+        "degraded": false,
+        "elapsed_seconds": 23.4,
+        "scores": {
+          "language_ok": true,
+          "arabic_chars": 144,
+          "latin_chars": 0,
+          "explains_before_asking": true,
+          "question_count": 1,
+          "ends_with_exactly_one_question": true,
+          "char_count": 179,
+          "nonempty": true
+        }
+      },
+      {
+        "turn": 2,
+        "learner_message": "يعني كيفما بدلتي شي جزء، حتى إلا كان نفسو بالضبط، كيتعتبر دايما تعديل؟",
+        "response": "لا، ماشي كل تبديل ديال جزء كيولي تعديل. حسب الدليل فالصفحة 13، التبديل غير كيتعتبر تعديل إلا كان المكون الجديد عندو خصائص مختلفة ولا نوع مختلف على القديم. واش فهمتي هادشي؟",
+        "sources": [
+          "french_test.pdf"
+        ],
+        "domain": "industrial",
+        "domain_source": "retrieval",
+        "language_reported": "darija",
+        "cross_language": true,
+        "degraded": false,
+        "elapsed_seconds": 17.0,
+        "scores": {
+          "language_ok": true,
+          "arabic_chars": 137,
+          "latin_chars": 0,
+          "explains_before_asking": true,
+          "question_count": 1,
+          "ends_with_exactly_one_question": true,
+          "char_count": 171,
+          "nonempty": true,
+          "reaction": {
+            "turn2_word_count": 18,
+            "new_content_word_ratio": 0.33,
+            "note": "Lexical-overlap proxy only. Read the transcript to judge whether the tutor actually corrected the learner's wrong answer in turn 2, vs. silently agreeing with it -- no automated check here does that."
+          }
+        }
+      },
+      {
+        "turn": 3,
+        "learner_message": "وإلا غير بدلتي بلاصة المكون ديال السلامة من غير ما تبدلوه، واش هادشي كيتعتبر تعديل؟",
+        "response": "آه، حسب الدليل فالصفحة 13، تغيير مكان مكون السلامة حتى هو كيتعتبر تعديل. مثلا، تحريك قفل ثنائي لجهة أخرى ديال الآلة كيولي تعديل. واش فهمتي هادشي؟",
+        "sources": [
+          "french_test.pdf"
+        ],
+        "domain": "industrial",
+        "domain_source": "retrieval",
+        "language_reported": "darija",
+        "cross_language": true,
+        "degraded": false,
+        "elapsed_seconds": 20.5,
+        "scores": {
+          "language_ok": true,
+          "arabic_chars": 116,
+          "latin_chars": 0,
+          "explains_before_asking": true,
+          "question_count": 1,
+          "ends_with_exactly_one_question": true,
+          "char_count": 145,
+          "nonempty": true
+        }
+      }
+    ]
+  }
+]

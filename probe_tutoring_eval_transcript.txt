@@ -1,0 +1,90 @@
+==============================================================================
+TRACK: arabic_test.pdf / French (cross-lingual)  (session=eval-c2dda3e82656)
+==============================================================================
+
+--- Turn 1 (24.7s) ---
+LEARNER: Quelle est la surface maximale constructible sur le front de mer, et quelle distance de retrait faut-il respecter par rapport a la ligne de remblai ?
+TUTOR:   Selon l'article 35 du document fourni, il y a une zone tampon obligatoire d'au moins 40 mètres entre la ligne de remblai et les constructions. La surface maximale constructible sur le front de mer n'est pas spécifiée dans ce document.  Pourriez-vous me dire si vous avez compris cette information ?
+[sources=['arabic_test.pdf'] domain=industrial/retrieval lang=fr cross_lang=False degraded=False]
+[score: lang_ok=True explains_first=True q_count=1 ends_with_1_q=True]
+
+--- Turn 2 (18.2s) ---
+LEARNER: Donc si je comprends bien, la limite est de 50% de la surface totale qui peut etre construite ?
+TUTOR:   Non, la limite n'est pas fixée à 50%. L'article 35 stipule qu'il faut respecter une distance de retrait d'au moins 40 mètres par rapport à la ligne de remblai.  En plus de cela, il y a des règles spécifiques pour les zones frontalières avec le littoral qui peuvent limiter encore plus la construction.
+[sources=['arabic_test.pdf'] domain=industrial/pinned lang=fr cross_lang=False degraded=False]
+[score: lang_ok=True explains_first=True q_count=0 ends_with_1_q=False]
+[reaction proxy: {'turn2_word_count': 26, 'new_content_word_ratio': 0.81, 'note': "Lexical-overlap proxy only. Read the transcript to judge whether the tutor actually corrected the learner's wrong answer in turn 2, vs. silently agreeing with it -- no automated check here does that."}]
+
+--- Turn 3 (20.6s) ---
+LEARNER: Et concernant la hauteur maximale des batiments dans cette zone, quelle est la regle ?
+TUTOR:   La hauteur maximale n'est pas spécifiée dans l'article 35.  Il faudrait consulter d'autres articles ou documents pour obtenir ces informations. Par exemple, le document mentionne que les règles spécifiques peuvent limiter encore plus la construction en bord de mer.
+[sources=['arabic_test.pdf'] domain=industrial/retrieval lang=fr cross_lang=False degraded=False]
+[score: lang_ok=True explains_first=True q_count=0 ends_with_1_q=False]
+
+==============================================================================
+TRACK: french_test.pdf / French  (session=eval-8efb1702ac47)
+==============================================================================
+
+--- Turn 1 (143.9s) ---
+LEARNER: Selon ce guide, dans quel cas le remplacement d'un composant de securite est-il considere comme une modification de la machine ?
+TUTOR:   Le remplacement d'un composant de sécurité est considéré comme une modification lorsque : 
+ - son remplacement est réalisé par un composant ayant des performances différentes du composant initial (caractéristiques techniques du produit et fonction de sécurité) ; 
+ - le composant de sécurité est remplacé par un composant d’un autre type.
+[sources=['french_test.pdf'] domain=industrial/retrieval lang=fr cross_lang=False degraded=False]
+[score: lang_ok=True explains_first=True q_count=0 ends_with_1_q=False]
+
+--- Turn 2 (44.0s) ---
+LEARNER: Donc remplacer n'importe quelle piece, meme a l'identique, compte toujours comme une modification ?
+TUTOR:   Non, pas forcément. Le guide précise que le remplacement d'un élément dans une machine ou un ensemble de machines ne constitue une modification que si les caractéristiques ou références du nouvel élément diffèrent de ceux indiqués dans la notice d'instructions ou dans la documentation du fabricant.  Par exemple, changer un bloc de freinage par un bloc ayant des caractéristiques différentes qui réduit le temps de freinage serait considéré comme une modification.
+[sources=['french_test.pdf'] domain=industrial/pinned lang=fr cross_lang=False degraded=False]
+[score: lang_ok=True explains_first=True q_count=0 ends_with_1_q=False]
+[reaction proxy: {'turn2_word_count': 32, 'new_content_word_ratio': 0.78, 'note': "Lexical-overlap proxy only. Read the transcript to judge whether the tutor actually corrected the learner's wrong answer in turn 2, vs. silently agreeing with it -- no automated check here does that."}]
+
+--- Turn 3: ERROR ---
+ReadTimeout: HTTPConnectionPool(host='127.0.0.1', port=8000): Read timed out. (read timeout=180)
+
+==============================================================================
+TRACK: arabic_test.pdf / Darija  (session=eval-9988e56c797c)
+==============================================================================
+
+--- Turn 1 (79.4s) ---
+LEARNER: شحال كيبان الحمل الكهربائي اللي كيوجب توفير محطة رئيسية؟
+TUTOR:   حسب الجدول رقم 8، إلى كان مجموع الأحمال الكهربائية أكثر من 12,000 KVA، خاصك توفر محطة كهرباء رئيسية. واش عندك شي سؤال آخر على هاد الموضوع؟
+[sources=['arabic_test.pdf'] domain=industrial/retrieval lang=darija cross_lang=True degraded=False]
+[score: lang_ok=True explains_first=True q_count=1 ends_with_1_q=True]
+
+--- Turn 2 (24.3s) ---
+LEARNER: يعني إلا وصل الحمل ديال البناية ل 10000 كيلوفولط أمبير خاصنا نديرو محطة رئيسية؟
+TUTOR:   لا، حسب الجدول رقم 8، إلى كان مجموع الأحمال الكهربائية أكثر من 12,000 KVA، خاصك توفر محطة كهرباء رئيسية. واش عندك شي سؤال آخر على هاد الموضوع؟
+[sources=['arabic_test.pdf'] domain=industrial/retrieval lang=darija cross_lang=True degraded=False]
+[score: lang_ok=True explains_first=True q_count=1 ends_with_1_q=True]
+[reaction proxy: {'turn2_word_count': 14, 'new_content_word_ratio': 0.0, 'note': "Lexical-overlap proxy only. Read the transcript to judge whether the tutor actually corrected the learner's wrong answer in turn 2, vs. silently agreeing with it -- no automated check here does that."}]
+
+--- Turn 3 (22.4s) ---
+LEARNER: وشحال كتكون المساحة اللي خاصها برج الاتصالات؟
+TUTOR:   حسب الجدول رقم 9، إلى كان مجموع الأحمال الكهربائية أكثر من 12,000 KVA، خاصك توفر محطة كهرباء رئيسية. واش عندك شي سؤال آخر على هاد الموضوع؟
+[sources=['arabic_test.pdf'] domain=industrial/retrieval lang=darija cross_lang=True degraded=False]
+[score: lang_ok=True explains_first=True q_count=1 ends_with_1_q=True]
+
+==============================================================================
+TRACK: french_test.pdf / Darija (cross-lingual)  (session=eval-13d9424a7c66)
+==============================================================================
+
+--- Turn 1 (23.4s) ---
+LEARNER: شنو كيقول هاد الدليل على تبديل مكون السلامة ديال الآلة، فأي حالة كيتعتبر تعديل؟
+TUTOR:   حسب دليل التعديلات فالصفحة 13، إلا كان المكون الجديد عندو خصائص مختلفة ولا نوع مختلف على القديم، راه كيتعتبر تعديل. مثلا، تبديل قفل ثنائي بواحد غير مرئي هو تعديل. واش فهمتي هادشي؟
+[sources=['french_test.pdf'] domain=industrial/retrieval lang=darija cross_lang=True degraded=False]
+[score: lang_ok=True explains_first=True q_count=1 ends_with_1_q=True]
+
+--- Turn 2 (17.0s) ---
+LEARNER: يعني كيفما بدلتي شي جزء، حتى إلا كان نفسو بالضبط، كيتعتبر دايما تعديل؟
+TUTOR:   لا، ماشي كل تبديل ديال جزء كيولي تعديل. حسب الدليل فالصفحة 13، التبديل غير كيتعتبر تعديل إلا كان المكون الجديد عندو خصائص مختلفة ولا نوع مختلف على القديم. واش فهمتي هادشي؟
+[sources=['french_test.pdf'] domain=industrial/retrieval lang=darija cross_lang=True degraded=False]
+[score: lang_ok=True explains_first=True q_count=1 ends_with_1_q=True]
+[reaction proxy: {'turn2_word_count': 18, 'new_content_word_ratio': 0.33, 'note': "Lexical-overlap proxy only. Read the transcript to judge whether the tutor actually corrected the learner's wrong answer in turn 2, vs. silently agreeing with it -- no automated check here does that."}]
+
+--- Turn 3 (20.5s) ---
+LEARNER: وإلا غير بدلتي بلاصة المكون ديال السلامة من غير ما تبدلوه، واش هادشي كيتعتبر تعديل؟
+TUTOR:   آه، حسب الدليل فالصفحة 13، تغيير مكان مكون السلامة حتى هو كيتعتبر تعديل. مثلا، تحريك قفل ثنائي لجهة أخرى ديال الآلة كيولي تعديل. واش فهمتي هادشي؟
+[sources=['french_test.pdf'] domain=industrial/retrieval lang=darija cross_lang=True degraded=False]
+[score: lang_ok=True explains_first=True q_count=1 ends_with_1_q=True]

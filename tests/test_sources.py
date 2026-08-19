@@ -209,7 +209,7 @@ def test_reap_orphaned_processing_marks_pending_and_processing_as_error(sqlite_s
     ready_id = _make_source(sqlite_session, status="ready")
     error_id = _make_source(sqlite_session, status="error")
 
-    count = sources.reap_orphaned_processing()
+    count = sources.reap_orphaned_processing("t1")
     assert count == 2
 
     session = sqlite_session()
@@ -224,7 +224,7 @@ def test_reap_orphaned_processing_marks_pending_and_processing_as_error(sqlite_s
 
 def test_reap_orphaned_processing_sets_actionable_error_message(sqlite_session):
     pending_id = _make_source(sqlite_session, status="pending")
-    sources.reap_orphaned_processing()
+    sources.reap_orphaned_processing("t1")
 
     session = sqlite_session()
     try:
@@ -236,11 +236,33 @@ def test_reap_orphaned_processing_sets_actionable_error_message(sqlite_session):
 
 def test_reap_orphaned_processing_returns_zero_on_clean_start(sqlite_session):
     _make_source(sqlite_session, status="ready")
-    assert sources.reap_orphaned_processing() == 0
+    assert sources.reap_orphaned_processing("t1") == 0
 
 
 def test_reap_orphaned_processing_fails_open_on_db_error(monkeypatch):
     def _raise():
         raise RuntimeError("connection refused")
     monkeypatch.setattr(sources, "_get_session", _raise)
-    assert sources.reap_orphaned_processing() == 0
+    assert sources.reap_orphaned_processing("t1") == 0
+
+
+def test_reap_orphaned_processing_does_not_touch_other_tenants(sqlite_session):
+    """The bug this scoping fixes: restarting the backend to serve one
+    tenant (e.g. switching DEFAULT_TENANT_ID from company_abc to
+    company_efg) must not error out an unrelated tenant's in-flight
+    uploads -- this process cannot see or fix them for the rest of its
+    lifetime (app.config.get_tenant_id is a process-lifetime constant)."""
+    own_pending_id = _make_source(sqlite_session, tenant_id="t1", status="pending")
+    other_pending_id = _make_source(sqlite_session, tenant_id="t2", status="pending")
+    other_processing_id = _make_source(sqlite_session, tenant_id="t2", status="processing")
+
+    count = sources.reap_orphaned_processing("t1")
+    assert count == 1
+
+    session = sqlite_session()
+    try:
+        assert session.get(SourceFile, uuid.UUID(own_pending_id)).status == "error"
+        assert session.get(SourceFile, uuid.UUID(other_pending_id)).status == "pending"
+        assert session.get(SourceFile, uuid.UUID(other_processing_id)).status == "processing"
+    finally:
+        session.close()

@@ -494,3 +494,65 @@ full multi-minute model load per diagnosis: the script now writes raw OCR output
 without re-running the model), and reconfigures stdout/stderr to UTF-8 (a Windows console
 is cp1252 and raised `UnicodeEncodeError` on any Arabic diagnostic, killing the run
 *after* the model load).
+
+### Ingestion repair: the 12 silently-dropped pages (2026-08-19)
+
+An 80-page Arabic regulatory PDF (`arabic_test.pdf`, Bahraini urban-planning manual)
+ingested as **28 chunks / 45,549 chars** and reported `status="ready"`. A tenant benchmark
+then scored the tutor as hallucinating and non-Socratic. Both conclusions were wrong about
+the cause: **12 of 80 pages had never entered the corpus at all**, and the upload reported
+complete success.
+
+**Root cause — inset raster images, not vector art.** Measured, after an initial
+"vector-drawn content" hypothesis was checked and disproved (page 15 has only 4 path
+operators; the genuinely-blank `profil_sst_maroc_fr.pdf` p138 has 36). The lost content is
+embedded *images*: p15's CAD-layer table is a 2884×850 (2.45 MP) strip, p51's formula table
+is 1120×1007 (1.13 MP). `_full_page_raster` rejects them because their aspect ratio doesn't
+match the page's within `RASTER_ASPECT_TOLERANCE` — and since **every** OCR branch in
+`classify_page` was gated on `has_full_page_raster`, such a page could only ever become
+`NATIVE` (sparse caption text kept, table lost) or `EMPTY` (dropped entirely, and *not*
+recorded in `unprocessed_pages`, hence the silent `ready`).
+
+**Two signals added, both verified against all three pinned fixtures before adoption:**
+
+| Rule | Condition | Fixture impact |
+|---|---|---|
+| A | `char_density < DENSITY_EMPTY_MAX` **and** `image_count >= 1` → `OCR_REQUIRED` | fires only on `profil` p136 and `guide_rh` p27 — both *already* `OCR_REQUIRED`. Zero change. `profil` p138 (0 images) correctly stays `EMPTY`. |
+| B | `max_image_megapixels >= 1.0` → `OCR_PREFERRED` (native ∪ OCR **merge**) | flips **zero** `NATIVE` pages, even though `guide_rh`/`profil` contain 2.18/2.64 MP images (on already-OCR pages). `avis_cese` maxes at 0.15 MP. |
+
+Merge, not replace, is load-bearing and was verified: `0.999600` exists **only** in p15's
+native text layer; the CAD table exists **only** in its OCR output. Trusting either alone
+loses real content.
+
+**A second, independent bug found during the fix.** `ingest_jobs.process_source_file`
+parsed the document once (for language/domain), then `ingest_file` parsed it **again from
+scratch** — so every OCR page ran twice per upload. Worse than the wasted time: the two
+parses hit *different* transient OCR failures, so `unprocessed_pages` (from parse #1)
+reported pages 2,3 failing while the chunks actually stored (parse #2) were missing 1,
+51–54, 62. Reported state and real state disagreed. `ingest_file` now accepts pre-parsed
+`text`.
+
+**Measured, before → after** (`company_efg`, RTX 4060 8GB, `ocr_paddle_engine="vl"`):
+
+| | before | after |
+|---|---|---|
+| chunks / chars | 28 / 45,549 | **41 / 63,855** |
+| pages present | 68 of 80 (51–54, 62 absent) | **74 of 80** |
+| `unprocessed_pages` vs. reality | disagreed (7 reported, 12 actually missing) | **agree** (6 reported, 6 missing) |
+| ground truth stored | p51 formulas absent, p15 table absent | **13/13** (Tier-1 hand-verified 10/10) |
+| ground truth retrieved | TC-04 unanswerable | **4/4** |
+
+**Triage is the efficiency win, not engine speed.** The classifier routes only **25 of 80**
+pages to OCR (69% skip it), and `french_test.pdf` needs **zero** — it ingests in seconds.
+Warm PaddleOCR-VL measures **~2 min/page** on this laptop, so `arabic_test.pdf` takes ~55
+min; that is a one-time background cost (uploads are async, `Pending→Ready`) and the reason
+a cheaper engine was not adopted is fidelity, not preference: in a three-engine bake-off,
+classic PP-OCRv5 scored **0/5** on p51's formula constants (4.6 s/page) against VL's full
+recovery. `PPStructureV3` remains unmeasured — its cold-start model download exceeded 10
+minutes and crashed twice; `scripts/ocr_bakeoff.py` is committed to finish that comparison
+later.
+
+**Still open.** One page (p2) times out at the 300 s per-page ceiling under sustained GPU
+load; it is now correctly *reported* rather than silently dropped. And
+`reap_orphaned_processing` had no `tenant_id` predicate — every backend restart errored out
+**every other tenant's** in-flight uploads; now scoped, with a regression test.

@@ -118,6 +118,12 @@ def process_source_file(
         language = detect_document_language(text_content)
         domain = _resolve_upload_domain(text_content, tenant_id)
 
+        # text=text_content: this file was ALREADY parsed above to get
+        # language/domain -- pass that result through instead of letting
+        # ingest_file parse it again from scratch. For a PDF needing OCR,
+        # skipping the second parse is what keeps every OCR'd page from
+        # running through the resident worker (app.services.ocr) twice
+        # per upload; see ingest_file's `text` parameter docstring.
         result = ingest_file(
             file_path=stored_path,
             tenant_id=tenant_id,
@@ -126,6 +132,7 @@ def process_source_file(
             domain=domain,
             source_file_id=source_file_id,
             source_name=filename,
+            text=text_content,
         )
 
         # 'partial' when some pages were skipped rather than failing the

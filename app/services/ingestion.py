@@ -240,9 +240,17 @@ def _parse_pdf(file_path: Path, unprocessed_pages: Optional[list] = None) -> str
                        OCR (a blank page must not fail an otherwise fully
                        readable document).
       OCR_PREFERRED -- embedded text exists but is degraded (e.g. a diagram
-                       whose layout the raw text order loses); OCR improves
-                       it, but OcrUnavailableError falls back to the native
-                       text here rather than failing the document.
+                       whose layout the raw text order loses, or a table
+                       carried by an embedded image the text layer never
+                       had -- see pdf_classify's LARGE_IMAGE_MIN_MEGAPIXELS).
+                       Native text and OCR output are MERGED, not one
+                       replacing the other: measured on a real page, a
+                       numeric constant existed ONLY in the native layer
+                       while a table existed ONLY in the OCR output, so
+                       trusting either alone loses real content. If OCR
+                       returns nothing (empty/whitespace) or raises
+                       OcrUnavailableError, the native text is kept as-is
+                       rather than destroyed.
       OCR_REQUIRED  -- embedded text is unusable; if OCR is unavailable,
                        this ONE page is skipped (recorded into
                        `unprocessed_pages`, if given, as {"page", "reason"})
@@ -257,6 +265,14 @@ def _parse_pdf(file_path: Path, unprocessed_pages: Optional[list] = None) -> str
                        OcrUnavailableError is re-raised so
                        app.services.ingest_jobs.process_source_file can
                        still fail loudly and actionably in that case.
+
+    Every page that ends up with NO text at all -- classified EMPTY, or a
+    successful-but-empty OCR call on an OCR_REQUIRED/OCR_PREFERRED page --
+    is recorded into `unprocessed_pages`. Silently dropping a page's
+    content while the document overall reports success (status='ready')
+    is exactly the failure this exists to prevent: a 12-page loss inside
+    an 80-page document was once invisible because only the OCR_REQUIRED
+    failure path recorded anything.
 
     Emits `## Page N` headings so page numbers survive into chunks as a
     citation affordance.
@@ -275,6 +291,7 @@ def _parse_pdf(file_path: Path, unprocessed_pages: Optional[list] = None) -> str
     for page_num, page in enumerate(reader.pages, start=1):
         text = (page.extract_text() or "").strip()
         decision = classify_page(page, text=text)
+        page_recorded = False  # local_unprocessed already has an entry for this page
 
         if decision.strategy == PageStrategy.EMPTY:
             text = ""
@@ -298,21 +315,38 @@ def _parse_pdf(file_path: Path, unprocessed_pages: Optional[list] = None) -> str
                 local_unprocessed.append({
                     "page": page_num, "reason": "ocr_required", "detail": str(e),
                 })
+                page_recorded = True
                 last_error = e
                 text = ""
         elif decision.strategy == PageStrategy.OCR_PREFERRED:
+            native_text = text
             try:
-                text = _ocr_pdf_page(file_path, page_num - 1).strip()
+                ocr_text = _ocr_pdf_page(file_path, page_num - 1).strip()
+                # Merge, don't replace: verified necessary against a real
+                # page where a numeric constant existed ONLY in native_text
+                # and a table existed ONLY in ocr_text. An empty ocr_text
+                # (OCR ran, found nothing new) keeps native_text intact
+                # rather than overwriting a good extraction with nothing.
+                text = f"{native_text}\n\n{ocr_text}" if (native_text and ocr_text) else (ocr_text or native_text)
             except OcrUnavailableError:
                 logger.info(
                     "page=%d of %s: OCR preferred but unavailable (%s) -- "
                     "falling back to embedded text",
                     page_num, file_path.name, decision.reason,
                 )
+                text = native_text
         # else NATIVE: text is already the embedded extraction.
 
         if text:
             any_text = True
+        elif not page_recorded:
+            # Every page that ends up with literally nothing -- classified
+            # EMPTY, or a successful-but-empty OCR call above -- must be
+            # recorded, not just the OCR_REQUIRED-failure case above. This
+            # is what promotes source_files.status to 'partial' instead of
+            # a silent 'ready' with content quietly missing.
+            reason = "empty_page" if decision.strategy == PageStrategy.EMPTY else "no_text_extracted"
+            local_unprocessed.append({"page": page_num, "reason": reason})
 
         if decision.strategy != PageStrategy.NATIVE:
             logger.info(
@@ -322,15 +356,18 @@ def _parse_pdf(file_path: Path, unprocessed_pages: Optional[list] = None) -> str
 
         sections.append(f"## Page {page_num}\n\n{text}")
 
+    if unprocessed_pages is not None:
+        unprocessed_pages.extend(local_unprocessed)
+
     if not any_text and last_error is not None:
         # Every page that could have produced text failed identically --
         # this isn't a partial document, it's an entirely unreadable one.
         # Fail loudly rather than silently ingest something empty that
         # would look like a successful upload with nothing retrievable.
+        # `unprocessed_pages` is populated above, before this raise, so a
+        # caller inspecting it after catching this exception still sees
+        # every page that was attempted, not an empty list.
         raise last_error
-
-    if unprocessed_pages is not None:
-        unprocessed_pages.extend(local_unprocessed)
 
     return "\n\n".join(sections)
 
@@ -795,6 +832,7 @@ def ingest_file(
     embedding_model: Optional[SentenceTransformer] = None,
     source_file_id: Optional[str] = None,
     source_name: Optional[str] = None,
+    text: Optional[str] = None,
 ) -> dict:
     """Ingest a single file. `language` omitted -> auto-detected per file
     from its own content (detect_document_language), not a caller-wide
@@ -808,12 +846,28 @@ def ingest_file(
     that router), which would otherwise become the citation shown to
     users (e.g. "3393e3ef014f4e1faf7f014aac6705ab.md" instead of
     "politique_consignation_nord.md") -- caught live by probe_upload_e2e.py.
+
+    `text` omitted -> parsed from `file_path` here, as before. A caller
+    that already parsed the file (app.services.ingest_jobs.process_
+    source_file does exactly this, to get language/domain from the
+    content before calling this function) should pass that result through
+    instead of leaving this default -- otherwise the file is parsed AGAIN
+    from scratch, and for a PDF needing OCR that means every OCR'd page
+    runs through the resident worker TWICE per upload, doubling ingestion
+    time for no benefit (measured live: an 80-page document with 25 OCR
+    pages took ~53 minutes with the double-parse still in place). The two
+    independent parses could also each hit different transient OCR
+    failures (worker timeout/restart under sustained GPU load), so the
+    version actually chunked-and-stored could silently differ in which
+    pages succeeded from the version source_files.unprocessed_pages
+    reported to the user -- a correctness bug, not just a speed one.
     """
     path = Path(file_path)
     if not path.exists():
         raise FileNotFoundError(f"File not found: {file_path}")
 
-    text = parse_document_to_markdown(path)
+    if text is None:
+        text = parse_document_to_markdown(path)
     resolved_language = language or detect_document_language(text)
     return ingest_text(
         text=text,

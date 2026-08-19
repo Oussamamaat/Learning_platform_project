@@ -25,7 +25,8 @@ Three responsibilities:
 3. reap_orphaned_processing: startup-time honesty for the single-worker
    in-process ingest queue (app.services.ingest_queue) -- a server restart
    mid-job must not leave a source_files row spinning "Processing..."
-   forever.
+   forever. Scoped to the booting process's own tenant_id -- a restart
+   must never touch another tenant's in-flight rows.
 """
 import hashlib
 import logging
@@ -146,13 +147,22 @@ def corpus_version(tenant_id: str) -> Optional[str]:
     return hashlib.sha256(key.encode("utf-8")).hexdigest()
 
 
-def reap_orphaned_processing() -> int:
+def reap_orphaned_processing(tenant_id: str) -> int:
     """Called once at app startup (app/main.py). The single-worker
     in-process ingest queue (app.services.ingest_queue) keeps NO state
     outside Postgres, so a server restart mid-job leaves a source_files
     row stuck in 'pending'/'processing' forever unless something explicitly
     reaps it -- this is that explicit reap, run before any request can poll
     a stale-but-eternally-"Processing" row.
+
+    Scoped to `tenant_id` -- the only tenant this process will ever serve
+    (app.config.get_tenant_id is a process-lifetime constant, ADR 0001).
+    Before this scoping existed, restarting the backend under a DIFFERENT
+    tenant_id (e.g. to switch from company_abc to company_efg) would mark
+    every OTHER tenant's in-flight pending/processing rows as error too --
+    a single-worker restart for one tenant should never touch another
+    tenant's uploads, especially since nothing on this server can even see
+    or fix them for that tenant in this process's lifetime.
 
     Returns the number of rows reaped (0 on a clean start or a DB error --
     fail-open, since a boot-time DB hiccup here must not crash the app).
@@ -165,22 +175,25 @@ def reap_orphaned_processing() -> int:
                     "UPDATE source_files SET status = 'error', "
                     "error_message = 'Server restarted while this file was processing. "
                     "Delete and re-upload.', updated_at = :now "
-                    "WHERE status IN ('pending', 'processing')"
+                    "WHERE status IN ('pending', 'processing') AND tenant_id = :tenant_id"
                 ),
                 # Bound Python-side timestamp, not SQL now() -- now() is
                 # Postgres-specific and would silently no-op-fail (unknown
                 # function) against the SQLite engine tests/test_sources.py
                 # uses for portable coverage.
-                {"now": datetime.now(timezone.utc)},
+                {"now": datetime.now(timezone.utc), "tenant_id": tenant_id},
             )
             session.commit()
             count = result.rowcount
         finally:
             session.close()
     except Exception:
-        logger.exception("reap_orphaned_processing failed; leaving any stuck rows as-is")
+        logger.exception("reap_orphaned_processing failed for tenant=%s; leaving any stuck rows as-is", tenant_id)
         return 0
 
     if count:
-        logger.warning("reap_orphaned_processing: marked %d orphaned source_files row(s) as error", count)
+        logger.warning(
+            "reap_orphaned_processing: marked %d orphaned source_files row(s) as error for tenant=%s",
+            count, tenant_id,
+        )
     return count

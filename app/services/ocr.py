@@ -5,12 +5,14 @@ Swappable backend for turning a scanned/image page into markdown text, used
 by app.services.ingestion's PDF/image parsers when a page has no usable
 embedded text layer.
 
-Default is "none" (settings.ocr_engine): no OCR dependency is installed by
-default (see config/requirements-ocr.txt, deliberately excluded from
-config/requirements.txt), so a PDF/image needing OCR fails loudly with
-OcrUnavailableError instead of either silently ingesting nothing or
-attempting an unverified read. This keeps the laptop/testing environment
-installable and correct without an OCR stack.
+Default is "paddleocr" (settings.ocr_engine, app/config.py) as of
+2026-08-18, once scripts/verify_ocr_arabic.py started passing all four
+gates against a live PaddleOCR-VL run -- see that setting's comment for
+what changed. "none" is still what an environment WITHOUT .ocr_venv set up
+effectively gets: PaddleOcrEngine raises OcrUnavailableError with an
+actionable message rather than either silently ingesting nothing or
+attempting an unverified read, so a laptop/testing environment missing the
+OCR stack still fails loudly and specifically, not silently.
 
 Which engine, and why not the one originally named in ingestion.py's old
 docstring (baidu/Unlimited-OCR):
@@ -32,12 +34,14 @@ docstring (baidu/Unlimited-OCR):
 
 Neither engine's Arabic fidelity is assumed correct -- see
 scripts/verify_ocr_arabic.py, which must pass against a committed
-ground-truth image before any engine is enabled outside a test run. Until
-it does, ocr_engine stays "none" in every real deployment.
+ground-truth image before any engine is enabled outside a test run.
 """
+import json
 import logging
+import queue
+import threading
 from functools import lru_cache
-from typing import Protocol
+from typing import Optional, Protocol
 
 from app.config import get_settings
 
@@ -117,6 +121,125 @@ class TesseractEngine:
             ) from e
 
 
+class _ResidentOcrWorker:
+    """Manages ONE persistent .ocr_venv subprocess running
+    scripts/ocr_worker_resident.py, reused for every OCR call in this
+    process's lifetime instead of spawning (and cold-loading a 3B model
+    into) a fresh subprocess per page.
+
+    This is the fix for the dominant cost measured under the old design
+    (scripts/ocr_paddleocr_worker.py, one process per page): 193-200s
+    wall-clock per page, almost entirely PaddleOCR-VL's own model-load
+    time, repeated on every single page of every document. A 25-page OCR
+    workload that used to take ~85 minutes pays that load cost ONCE.
+
+    IPC is JSON-lines over stdin/stdout (see ocr_worker_resident.py's
+    docstring for the protocol) rather than pickling or a socket -- both
+    processes are local, short-lived-per-run, and the payload (a file path
+    in, a markdown string out) is small enough that a subprocess pipe adds
+    no measurable overhead next to the seconds-scale OCR call itself.
+
+    A background thread drains stdout into a queue so `_send` can honor a
+    per-call timeout via `queue.get(timeout=...)` -- Windows named pipes
+    don't support `select()`, so a blocking `readline()` with no thread
+    would have no way to time out a hung worker. A second background
+    thread drains stderr into the logger for the same reason (an
+    un-drained pipe can deadlock the child if it fills the OS pipe buffer)
+    and so the worker's own load/diagnostic lines are never lost.
+
+    Self-healing, not fault-tolerant: if the subprocess dies (crash, OOM,
+    timeout-triggered kill), `_ensure_alive` restarts it on the NEXT call.
+    A single ingestion run's worth of state is a page number and an image
+    path, both owned by the caller, so losing an in-flight subprocess
+    costs at most the one page that was mid-flight, not the whole run.
+    """
+
+    def __init__(self, venv_python: str, worker_script: str):
+        self._venv_python = venv_python
+        self._worker_script = worker_script
+        self._proc = None
+        self._lock = threading.Lock()
+        self._out_q: "queue.Queue[Optional[str]]" = queue.Queue()
+
+    def _drain_stdout(self, proc) -> None:
+        for line in proc.stdout:
+            self._out_q.put(line)
+        self._out_q.put(None)  # signals EOF / process exit to any waiting _send
+
+    def _drain_stderr(self, proc) -> None:
+        for line in proc.stderr:
+            logger.debug("ocr_worker_resident: %s", line.rstrip())
+
+    def _ensure_alive(self) -> None:
+        import subprocess
+
+        if self._proc is not None and self._proc.poll() is None:
+            return
+        self._out_q = queue.Queue()
+        self._proc = subprocess.Popen(
+            [self._venv_python, self._worker_script],
+            stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            text=True, encoding="utf-8", errors="replace", bufsize=1,
+        )
+        threading.Thread(target=self._drain_stdout, args=(self._proc,), daemon=True).start()
+        threading.Thread(target=self._drain_stderr, args=(self._proc,), daemon=True).start()
+
+    def _kill(self) -> None:
+        if self._proc is not None:
+            try:
+                self._proc.kill()
+            except Exception:
+                pass
+            self._proc = None
+
+    def ocr(self, image_path: str, *, engine: str, timeout: float) -> str:
+        with self._lock:
+            self._ensure_alive()
+            req = json.dumps({"cmd": "ocr", "id": "1", "image": image_path, "engine": engine})
+            try:
+                self._proc.stdin.write(req + "\n")
+                self._proc.stdin.flush()
+            except (BrokenPipeError, OSError) as e:
+                self._kill()
+                raise OcrUnavailableError(f"resident OCR worker's stdin pipe broke: {e}") from e
+
+            try:
+                line = self._out_q.get(timeout=timeout)
+            except queue.Empty:
+                self._kill()
+                raise OcrUnavailableError(
+                    f"resident OCR worker (engine={engine!r}) did not respond within {timeout}s "
+                    f"-- killed and will restart on the next call."
+                )
+            if line is None:
+                self._kill()
+                raise OcrUnavailableError(
+                    f"resident OCR worker process exited unexpectedly (engine={engine!r}); "
+                    f"see logger.debug ocr_worker_resident lines for its stderr."
+                )
+            resp = json.loads(line)
+            if not resp.get("ok"):
+                raise OcrUnavailableError(f"resident OCR worker (engine={engine!r}) error: {resp.get('error')}")
+            return resp.get("markdown", "")
+
+
+_resident_worker: Optional[_ResidentOcrWorker] = None
+_resident_worker_lock = threading.Lock()
+
+
+def _get_resident_worker(venv_python: str, worker_script: str) -> _ResidentOcrWorker:
+    """Process-lifetime singleton, not @lru_cache -- the subprocess it owns
+    must be reused across every OCR call regardless of which OcrEngine
+    instance triggers the first one (get_ocr_engine() itself is
+    lru_cache'd separately and could in principle be re-resolved)."""
+    global _resident_worker
+    if _resident_worker is None:
+        with _resident_worker_lock:
+            if _resident_worker is None:
+                _resident_worker = _ResidentOcrWorker(venv_python, worker_script)
+    return _resident_worker
+
+
 class PaddleOcrEngine:
     """settings.ocr_engine='paddleocr' -- the recommended production
     engine (see module docstring), gated by scripts/verify_ocr_arabic.py.
@@ -130,26 +253,28 @@ class PaddleOcrEngine:
         python -m pip install -U "paddleocr[doc-parser]"
 
     Because of that separation, this class never imports paddleocr itself --
-    it shells out to scripts/ocr_paddleocr_worker.py running under
-    settings.ocr_venv_python (that .ocr_venv interpreter), passing the page
-    image and reading back the markdown that script writes. Each call is a
-    fresh subprocess: settings.ocr_keep_resident, which lets the OTHER GPU
-    engine (UnlimitedOcrEngine) keep its model loaded between calls, has no
-    equivalent here -- there is no long-lived pipeline object in THIS
-    process to keep resident, only a worker process that starts and exits
-    per page. See the module-level note on GPU co-residency with the tutor
-    model in app/services/ingestion.py's PDF docstring history for why that
-    per-call reload cost is the accepted tradeoff rather than a resident
-    cross-process worker.
+    it talks to scripts/ocr_worker_resident.py, a persistent .ocr_venv
+    subprocess (via _ResidentOcrWorker/_get_resident_worker above) started
+    once and reused for every page, rather than the fresh
+    scripts/ocr_paddleocr_worker.py subprocess this class used to spawn
+    per call. settings.ocr_keep_resident is therefore now honored by this
+    class too (previously only UnlimitedOcrEngine did): the resident
+    worker's model stays loaded in ITS process for as long as this app
+    process runs, regardless of that setting, which only controls whether
+    UnlimitedOcrEngine additionally keeps ITS in-process model resident.
+
+    settings.ocr_paddle_engine selects which of the worker's three
+    pipelines handles each call ("vl" | "structure" | "classic") -- see
+    scripts/ocr_worker_resident.py's docstring and scripts/ocr_bakeoff.py
+    for what each trades off and how the default was chosen.
     """
 
     name = "paddleocr"
 
-    _WORKER_SCRIPT = "scripts/ocr_paddleocr_worker.py"
-    _TIMEOUT_SECONDS = 180
+    _WORKER_SCRIPT = "scripts/ocr_worker_resident.py"
+    _TIMEOUT_SECONDS = 300
 
     def image_to_markdown(self, image_bytes: bytes, *, lang_hint: str = "ar+fr") -> str:
-        import subprocess
         import tempfile
         import os
         from pathlib import Path
@@ -170,32 +295,11 @@ class PaddleOcrEngine:
         with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as f:
             f.write(image_bytes)
             image_path = f.name
-        out_fd, out_path = tempfile.mkstemp(suffix=".md")
-        os.close(out_fd)
         try:
-            result = subprocess.run(
-                [
-                    str(venv_python), str(worker_script),
-                    "--image", image_path, "--out", out_path, "--lang-hint", lang_hint,
-                ],
-                capture_output=True, text=True, encoding="utf-8", errors="replace",
-                timeout=self._TIMEOUT_SECONDS,
-            )
-            if result.returncode != 0:
-                raise OcrUnavailableError(
-                    f"PaddleOCR-VL subprocess (via {venv_python}) failed with exit "
-                    f"code {result.returncode}: {result.stderr.strip()[-2000:]}"
-                )
-            return Path(out_path).read_text(encoding="utf-8")
-        except subprocess.TimeoutExpired as e:
-            raise OcrUnavailableError(
-                f"PaddleOCR-VL subprocess did not finish within "
-                f"{self._TIMEOUT_SECONDS}s (via {venv_python})."
-            ) from e
+            worker = _get_resident_worker(str(venv_python), str(worker_script))
+            return worker.ocr(image_path, engine=settings.ocr_paddle_engine, timeout=self._TIMEOUT_SECONDS)
         finally:
             os.unlink(image_path)
-            if os.path.exists(out_path):
-                os.unlink(out_path)
 
 
 class UnlimitedOcrEngine:
@@ -254,10 +358,16 @@ _ENGINES = {
 
 @lru_cache(maxsize=1)
 def get_ocr_engine() -> OcrEngine:
-    """Cached singleton, keyed off settings.ocr_engine at first call. GPU
-    engines free their model per job internally (see PaddleOcrEngine/
-    UnlimitedOcrEngine), so caching the wrapper instance is cheap; it does
-    not pin GPU memory between calls unless ocr_keep_resident is set.
+    """Cached singleton, keyed off settings.ocr_engine at first call
+    (settings.ocr_engine is therefore effectively read-once per process --
+    changing it after the first call has no effect until the process
+    restarts). UnlimitedOcrEngine frees its in-process model per job by
+    default (see its docstring, ocr_keep_resident); PaddleOcrEngine keeps
+    NO model in this process at all -- its resident worker subprocess
+    (scripts/ocr_worker_resident.py, spawned once via
+    _get_resident_worker) is what stays loaded, unconditionally, for the
+    life of this app process. Either way, caching this wrapper instance
+    itself is cheap.
     """
     engine_name = get_settings().ocr_engine
     engine_cls = _ENGINES.get(engine_name)

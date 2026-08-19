@@ -2,7 +2,7 @@ import logging
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from app.config import get_settings
+from app.config import get_settings, get_tenant_id
 from app.routers import chat, audio, quiz, demo, ingest, video
 from app.errors import AppError
 from app.services.ingestion import load_embedding_model
@@ -72,8 +72,12 @@ async def _reap_orphaned_uploads() -> None:
     keeps no state outside Postgres -- a server restart mid-job would
     otherwise leave a source_files row stuck at 'processing' forever. Must
     run before any request can poll a stale-but-eternally-"Processing" row.
+
+    Scoped to this process's own tenant (get_tenant_id() is a process-
+    lifetime constant, ADR 0001) -- restarting to serve one tenant must
+    never mark another tenant's in-flight uploads as errored.
     """
-    reap_orphaned_processing()
+    reap_orphaned_processing(get_tenant_id())
 
 
 @app.get("/health", tags=["health"])
