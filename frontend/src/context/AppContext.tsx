@@ -221,6 +221,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
           sources: reply.sources,
           crossLanguage: reply.cross_language,
           priorQuestions: reply.prior_questions,
+          diagram: reply.diagram,
           pending: false,
         });
         setActiveDomain(reply.domain);

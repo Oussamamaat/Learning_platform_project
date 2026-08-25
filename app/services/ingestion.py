@@ -15,6 +15,7 @@ Usage:
 """
 
 import csv
+import html
 import io
 import logging
 import re
@@ -22,9 +23,12 @@ import uuid
 import json
 from functools import lru_cache
 from pathlib import Path
-from typing import Optional
+from typing import Callable, Optional
 
 import psycopg2
+import psycopg2.extensions
+import psycopg2.pool
+import threading
 from psycopg2.extras import execute_values
 from sentence_transformers import SentenceTransformer
 from langchain_text_splitters import RecursiveCharacterTextSplitter
@@ -51,7 +55,14 @@ DEFAULT_EMBEDDING_MODEL = get_settings().embedding_model
 # failure mode this caused.
 CHUNK_SIZE = 2000
 CHUNK_OVERLAP = 250
+# Kept as a module constant for the callers/tests that import it; the
+# EMBEDDING batch size now comes from settings.embedding_batch_size (see
+# embed_chunks, which halves and retries on CUDA OOM) because that one has
+# to be tunable per deployment. This value is the psycopg2 execute_values
+# page size -- how many rows go in one INSERT statement, a pure
+# network/parse-overhead knob with no GPU involvement.
 BATCH_SIZE = 64
+INSERT_PAGE_SIZE = 200
 
 # raw/shared/<domain>/text/*.md -> "securite_physique" is the folder name,
 # but "securite" is the Domain enum value used everywhere else in the app
@@ -113,16 +124,22 @@ def _parse_docx(file_path: Path) -> str:
         lines.append("")
         for row in table.rows:
             cells = [c.text.strip().replace("\n", " ") for c in row.cells]
-            lines.append("| " + " | ".join(cells) + " |")
+            lines.append(_render_row(cells))
 
     return "\n\n".join(lines)
 
 
 def _parse_pptx(file_path: Path) -> str:
     """`.pptx` -> markdown. Slide title -> `## `, other text-frame shapes
-    as body paragraphs, speaker notes appended as a blockquote (kept for
-    embedding -- notes often carry the actual explanatory content a slide's
-    bullet points only gesture at).
+    as body paragraphs, table shapes as markdown rows, speaker notes
+    appended as a blockquote (kept for embedding -- notes often carry the
+    actual explanatory content a slide's bullet points only gesture at).
+
+    Table shapes are a SEPARATE shape type from the text-frame shapes the
+    loop below already handled (`shape.has_table`, not `has_text_frame` --
+    python-pptx never sets both on the same shape), so a slide's table was
+    previously invisible to this parser entirely: silently dropped, no
+    error, no record, indistinguishable from a slide that never had one.
     """
     import pptx
 
@@ -132,6 +149,12 @@ def _parse_pptx(file_path: Path) -> str:
         title = None
         body_lines: list[str] = []
         for shape in slide.shapes:
+            if shape.has_table:
+                body_lines.append("")
+                for row in shape.table.rows:
+                    cells = [c.text.strip().replace("\n", " ") for c in row.cells]
+                    body_lines.append(_render_row(cells))
+                continue
             if not shape.has_text_frame:
                 continue
             text = shape.text_frame.text.strip()
@@ -225,7 +248,12 @@ def _parse_image(file_path: Path) -> str:
     return engine.image_to_markdown(file_path.read_bytes())
 
 
-def _parse_pdf(file_path: Path, unprocessed_pages: Optional[list] = None) -> str:
+def _parse_pdf(
+    file_path: Path,
+    unprocessed_pages: Optional[list] = None,
+    on_page_processed: Optional[Callable[[int, int], None]] = None,
+    page_stats: Optional[dict] = None,
+) -> str:
     """`.pdf` -> markdown. The text-vs-OCR decision is made PER PAGE, not
     per document: a digitally authored regulation with a scanned annex
     appended is the norm in this corpus's genre, and a document-level "does
@@ -276,6 +304,19 @@ def _parse_pdf(file_path: Path, unprocessed_pages: Optional[list] = None) -> str
 
     Emits `## Page N` headings so page numbers survive into chunks as a
     citation affordance.
+
+    `page_stats`, if given, is filled in with {"page_count", "ocr_pages"}
+    -- the counts this pass ALREADY computes while classifying each page.
+    app.services.ingest_jobs._infer_parser_metadata needs exactly those two
+    numbers to record the pdf_text/pdf_mixed/pdf_ocr audit trail, and used
+    to get them by re-opening the file and running extract_text() +
+    classify_page over every page a SECOND time, after ingestion had
+    finished. Its docstring called that "effectively zero cost", which is
+    true of classify_page but not of the extract_text() it feeds: text
+    extraction is the dominant per-page cost on a native PDF, so an
+    80-page document was paying for two full extraction passes. Handing
+    the numbers forward removes the second one, and removes the chance of
+    the two passes disagreeing.
     """
     from pypdf import PdfReader
 
@@ -283,10 +324,12 @@ def _parse_pdf(file_path: Path, unprocessed_pages: Optional[list] = None) -> str
     from app.services.pdf_classify import PageStrategy, classify_page
 
     reader = PdfReader(str(file_path))
+    total_pages = len(reader.pages)
     sections: list[str] = []
     local_unprocessed: list[dict] = []
     any_text = False
     last_error: Optional[OcrUnavailableError] = None
+    ocr_pages = 0
 
     for page_num, page in enumerate(reader.pages, start=1):
         text = (page.extract_text() or "").strip()
@@ -297,7 +340,9 @@ def _parse_pdf(file_path: Path, unprocessed_pages: Optional[list] = None) -> str
             text = ""
         elif decision.strategy == PageStrategy.OCR_REQUIRED:
             try:
-                text = _ocr_pdf_page(file_path, page_num - 1).strip()
+                # "heavy": this page has no usable native text at all, so
+                # there is nothing to fall back on if OCR under-reads it.
+                text = _ocr_pdf_page(file_path, page_num - 1, tier="heavy").strip()
             except OcrUnavailableError as e:
                 # `e` -- the OCR call's OWN failure reason (subprocess error,
                 # timeout, missing engine) -- not decision.reason (why this
@@ -321,7 +366,12 @@ def _parse_pdf(file_path: Path, unprocessed_pages: Optional[list] = None) -> str
         elif decision.strategy == PageStrategy.OCR_PREFERRED:
             native_text = text
             try:
-                ocr_text = _ocr_pdf_page(file_path, page_num - 1).strip()
+                # "light": native_text below is merged in regardless, so
+                # OCR here is only being asked for the embedded table or
+                # figure -- the case the light engine measurably handles
+                # (p15's CAD table, 4/5). It self-escalates to the heavy
+                # engine when its output looks numerically empty.
+                ocr_text = _ocr_pdf_page(file_path, page_num - 1, tier="light").strip()
                 # Merge, don't replace: verified necessary against a real
                 # page where a numeric constant existed ONLY in native_text
                 # and a table existed ONLY in ocr_text. An empty ocr_text
@@ -349,6 +399,7 @@ def _parse_pdf(file_path: Path, unprocessed_pages: Optional[list] = None) -> str
             local_unprocessed.append({"page": page_num, "reason": reason})
 
         if decision.strategy != PageStrategy.NATIVE:
+            ocr_pages += 1
             logger.info(
                 "page=%d of %s: %s -> %s",
                 page_num, file_path.name, decision.strategy.value, decision.reason,
@@ -356,8 +407,25 @@ def _parse_pdf(file_path: Path, unprocessed_pages: Optional[list] = None) -> str
 
         sections.append(f"## Page {page_num}\n\n{text}")
 
+        if on_page_processed is not None:
+            try:
+                on_page_processed(page_num, total_pages)
+            except Exception:
+                # A progress callback is a side channel, not part of the
+                # parse contract -- a bug in it (e.g. a DB hiccup writing
+                # pages_done) must never fail an otherwise-successful
+                # parse. Logged, not silently swallowed.
+                logger.exception(
+                    "on_page_processed callback failed for page=%d of %s (ignored)",
+                    page_num, file_path.name,
+                )
+
     if unprocessed_pages is not None:
         unprocessed_pages.extend(local_unprocessed)
+
+    if page_stats is not None:
+        page_stats["page_count"] = total_pages
+        page_stats["ocr_pages"] = ocr_pages
 
     if not any_text and last_error is not None:
         # Every page that could have produced text failed identically --
@@ -372,7 +440,64 @@ def _parse_pdf(file_path: Path, unprocessed_pages: Optional[list] = None) -> str
     return "\n\n".join(sections)
 
 
-def _ocr_pdf_page(file_path: Path, page_index: int) -> str:
+# A decimal (12.5) or an integer of 4+ digits (1970, 86400, 500000).
+# Calibrated against measured output, see _classic_ocr_looks_incomplete.
+_NUMERIC_EVIDENCE_RE = re.compile(r"\d+\.\d+|\d{4,}")
+
+
+def _classic_ocr_looks_incomplete(text: str) -> bool:
+    """Should this page's light-engine result be re-run on the heavy engine?
+
+    The light engine (PP-OCRv5) reads running text and table cells well but
+    measurably cannot read this corpus's formulas: on arabic_test.pdf p51 it
+    scored 0/4 on the DPF constants that PaddleOCR-VL recovers 4/4. Escalating
+    only the pages it likely failed keeps ~10x the speed on the rest.
+
+    The signal, chosen because it separates the two pages where the light
+    engine's real behaviour is known rather than because it sounds
+    plausible:
+
+        page                        decimals   >=4-digit ints   verdict
+        p51 (formulas, scored 0/4)      0             0         escalate
+        p15 (CAD table, scored 4/5)     0             1 (1970)  keep
+
+    So: no decimal AND no long integer => escalate. This corpus's tables and
+    formulas are numeric throughout (coordinates, thresholds, constants,
+    years, zone areas), so a page whose OCR yields neither is one the light
+    engine probably could not read.
+
+    Two deliberate properties:
+      - It errs TOWARD the heavy engine. A false escalation costs ~47s of
+        GPU time; a false negative silently loses a formula from a
+        regulatory document, which is the failure this whole change exists
+        to prevent.
+      - Empty/whitespace output escalates too, via the same rule.
+
+    Calibrated on n=2 pages. If a real tenant document is later found where
+    the light engine drops content this check misses, set
+    settings.ocr_two_tier=False rather than widening the heuristic blindly.
+    """
+    return not _NUMERIC_EVIDENCE_RE.search(text or "")
+
+
+def _ocr_pdf_page(file_path: Path, page_index: int, *, tier: str = "heavy") -> str:
+    """Render one page and OCR it. `tier` selects the engine:
+
+      "heavy" -- settings.ocr_paddle_engine. Used for OCR_REQUIRED pages,
+                 which have NO usable native text to fall back on, so a
+                 miss is unrecoverable.
+      "light" -- settings.ocr_light_engine, ~10x faster (measured 5.5s vs
+                 52.5s/page warm). Used for OCR_PREFERRED pages, whose
+                 native text _parse_pdf is already merging in, so OCR is
+                 only being asked for the embedded table/figure. Escalates
+                 to "heavy" when _classic_ocr_looks_incomplete flags the
+                 result.
+
+    Rendering (open + render + PNG encode) measures ~200ms against a
+    52,500ms OCR call, i.e. 0.4% -- so this deliberately keeps the simple
+    open-per-page form rather than caching the PdfDocument across pages.
+    Opening the document alone measured 1ms.
+    """
     import pypdfium2 as pdfium
 
     from app.services.ocr import get_ocr_engine
@@ -385,9 +510,27 @@ def _ocr_pdf_page(file_path: Path, page_index: int) -> str:
         pil_image = bitmap.to_pil()
         buf = io.BytesIO()
         pil_image.save(buf, format="PNG")
-        return get_ocr_engine().image_to_markdown(buf.getvalue())
+        image_bytes = buf.getvalue()
     finally:
         pdf.close()
+
+    engine = get_ocr_engine()
+    if tier != "light" or not get_settings().ocr_two_tier:
+        return engine.image_to_markdown(image_bytes, tier="heavy")
+
+    text = engine.image_to_markdown(image_bytes, tier="light")
+    if _classic_ocr_looks_incomplete(text):
+        # 1-based page number, matching _parse_pdf's own "page=%d" lines --
+        # this log sits directly between two of them, and reporting the
+        # 0-based index here made the same page look like two different
+        # pages when reading the log top to bottom.
+        logger.info(
+            "page=%d of %s: light OCR returned no numeric evidence "
+            "(%d chars) -- escalating to the heavy engine",
+            page_index + 1, file_path.name, len(text or ""),
+        )
+        return engine.image_to_markdown(image_bytes, tier="heavy")
+    return text
 
 
 _PARSERS = {
@@ -400,7 +543,12 @@ _PARSERS = {
 }
 
 
-def parse_document_to_markdown(file_path: Path, unprocessed_pages: Optional[list] = None) -> str:
+def parse_document_to_markdown(
+    file_path: Path,
+    unprocessed_pages: Optional[list] = None,
+    on_page_processed: Optional[Callable[[int, int], None]] = None,
+    page_stats: Optional[dict] = None,
+) -> str:
     """Document -> markdown: the ingestion pipeline's first stage. Every
     format is normalized to markdown WITH real `#`/`##` headings where the
     source format has structure (Word/PowerPoint styles, PDF page breaks) --
@@ -435,6 +583,24 @@ def parse_document_to_markdown(file_path: Path, unprocessed_pages: Optional[list
     so applying it unconditionally is never harmful -- see that function's
     docstring for why this is safe to store/embed, unlike the lossy,
     comparison-only fold_arabic in the same module.
+
+    `on_page_processed(page_num, total_pages)`, if given, is called once
+    per PDF page right after that page's own section is appended (i.e.
+    AFTER any OCR call for that page has already returned) -- this is what
+    app.services.ingest_jobs.process_source_file uses to keep
+    source_files.pages_done current DURING processing, so a poll while an
+    OCR-heavy document is still ingesting sees real progress instead of a
+    status stuck at 'processing' with no other signal for potentially
+    tens of minutes. PDF-only: every other format's whole-document parse
+    is fast enough (no OCR in the common case) that a live counter adds
+    more overhead than value; a caller that passes this for a non-PDF
+    upload gets it silently ignored, matching how `unprocessed_pages` is
+    already PDF-only.
+
+    `page_stats` is the same shape of out-param: a dict this fills with
+    {"page_count", "ocr_pages"} for a PDF, so the caller doesn't have to
+    re-parse the file to learn them (see _parse_pdf). PDF-only, silently
+    ignored for every other format.
     """
     suffix = file_path.suffix.lower()
     if suffix in LEGACY_BINARY_FORMATS:
@@ -443,7 +609,10 @@ def parse_document_to_markdown(file_path: Path, unprocessed_pages: Optional[list
             f"Re-save it as {LEGACY_BINARY_FORMATS[suffix]} and upload again."
         )
     if suffix == ".pdf":
-        raw = _parse_pdf(file_path, unprocessed_pages=unprocessed_pages)
+        raw = _parse_pdf(
+            file_path, unprocessed_pages=unprocessed_pages,
+            on_page_processed=on_page_processed, page_stats=page_stats,
+        )
     elif suffix in _IMAGE_EXTENSIONS:
         raw = _parse_image(file_path)
     else:
@@ -456,6 +625,29 @@ def parse_document_to_markdown(file_path: Path, unprocessed_pages: Optional[list
     return normalize_arabic_text(raw)
 
 
+# Real HTML tag names strip_markdown removes -- a WHITELIST, not the
+# wildcard `<[^>]+>` this replaced. That wildcard treated any `<...>` span
+# as a tag, which silently deleted regulatory content that happens to use
+# angle brackets as inequality signs: measured live,
+# "seuil <= 5 mg/m3 selon <NF EN 166>" collapsed to "seuil" -- one stray
+# `<` swallowed the rest of the sentence. Requiring a known tag name
+# immediately after `<`/`</` means "temperature < 40 C" and "<NF EN 166>"
+# are left untouched (neither "40" nor "NF" matches an alternative), while
+# real markup (PaddleOCR-VL's HTML tables, `_parse_pptx`'s notes) is still
+# removed.
+_HTML_TAG_NAMES = (
+    "table", "thead", "tbody", "tfoot", "tr", "td", "th",
+    "p", "div", "span", "br", "hr",
+    "h1", "h2", "h3", "h4", "h5", "h6",
+    "ul", "ol", "li",
+    "b", "i", "em", "strong", "u",
+    "a", "img",
+)
+_HTML_TAG_RE = re.compile(
+    r"</?(?:" + "|".join(_HTML_TAG_NAMES) + r")\b[^<>]*/?>", re.IGNORECASE
+)
+
+
 def strip_markdown(text: str) -> str:
     """Remove markdown formatting artifacts so embedding model processes clean content.
 
@@ -465,8 +657,8 @@ def strip_markdown(text: str) -> str:
     dependencies) -- change both together.
     """
     # Turn HTML structural boundaries into whitespace BEFORE stripping tags.
-    # The generic `<[^>]+>` strip below deletes tags with no replacement,
-    # which FUSES the text on either side: measured on a real scanned page,
+    # The generic strip below deletes tags with no replacement, which
+    # FUSES the text on either side: measured on a real scanned page,
     # PaddleOCR-VL returns tables as HTML, and
     # "<td>الترخيص</td><td>450 متر</td>" collapsed to "الترخيص450 متر" --
     # two unrelated cells welded into one nonsense token, embedded and
@@ -477,40 +669,227 @@ def strip_markdown(text: str) -> str:
     text = re.sub(
         r"</\s*(?:tr|p|div|li|h[1-6])\s*>|<\s*br\s*/?\s*>", "\n", text, flags=re.IGNORECASE
     )
-    # Remove HTML tags
-    text = re.sub(r"<[^>]+>", "", text)
+    # Remove real HTML tags only (see _HTML_TAG_RE) -- NOT every `<...>`
+    # span, which used to eat inequality/threshold text.
+    text = _HTML_TAG_RE.sub("", text)
     # Remove markdown headers (##, ###, etc.)
     text = re.sub(r"^#{1,6}\s+", "", text, flags=re.MULTILINE)
-    # Remove bold/italic markers
-    text = re.sub(r"\*{1,3}([^*]+)\*{1,3}", r"\1", text)
-    text = re.sub(r"_{1,3}([^_]+)_{1,3}", r"\1", text)
+    # Bold/italic -- guarded on both sides so this only fires on genuine
+    # markdown emphasis, not on document codes or arithmetic that happen
+    # to contain '*'/'_'. `(?<!\w)...(?!\w)` requires the delimiter run
+    # not be glued to a word character (so 'D_Ain_el_Abd_1970' and
+    # 'ISO_45001' are never touched -- every underscore in them sits
+    # between two letters/digits); `(?!\s)...(?<!\s)` requires no
+    # whitespace immediately inside the delimiters (so 'L * l * h' and
+    # '5 * 3 = 15', where every '*' is surrounded by spaces, are never
+    # touched). '**gras**' and '_italic_' still collapse to 'gras'/'italic'.
+    text = re.sub(r"(?<!\w)\*{1,3}(?!\s)([^*]+)(?<!\s)\*{1,3}(?!\w)", r"\1", text)
+    text = re.sub(r"(?<!\w)_{1,3}(?!\s)([^_]+)(?<!\s)_{1,3}(?!\w)", r"\1", text)
     # Remove inline code backticks
     text = re.sub(r"`([^`]+)`", r"\1", text)
-    # Remove blockquote markers
-    text = re.sub(r"^>\s?", "", text, flags=re.MULTILINE)
+    # Blockquote marker -- only when followed by a letter, not a digit.
+    # `_parse_pptx` deliberately emits "> <note text>" for speaker notes
+    # (always prose, starts with a letter); a line starting "> 40 C" is a
+    # threshold, not a blockquote, and the old unconditional strip
+    # inverted its meaning by deleting the '>'.
+    text = re.sub(r"^>\s+(?!\d)", "", text, flags=re.MULTILINE)
     # Remove horizontal rules
     text = re.sub(r"^[-*_]{3,}\s*$", "", text, flags=re.MULTILINE)
-    # Remove markdown table borders and alignment
-    text = re.sub(r"^\|[-:| ]+\|\s*$", "", text, flags=re.MULTILINE)
-    # Collapse remaining table rows into plain text
-    text = re.sub(r"\|\s*", " ", text)
-    # Remove link syntax, keep display text
-    text = re.sub(r"\[([^\]]+)\]\([^)]+\)", r"\1", text)
+    # Markdown alignment rows only -- require 3+ dashes per cell (the
+    # normal markdown convention: "---", ":---:"). A single-dash cell
+    # ("| - | - |") is this corpus's "neant/sans objet" convention for a
+    # real, empty-valued data row, not a table separator; the old 1+-dash
+    # pattern deleted that row entirely instead of collapsing it to text
+    # like every other row.
+    text = re.sub(r"^\|(?:\s*:?-{3,}:?\s*\|)+\s*$", "", text, flags=re.MULTILINE)
+    # Collapse UNESCAPED pipes into plain text. `_render_row` (below)
+    # escapes a literal pipe inside a cell as `\|` specifically so it
+    # survives this step instead of being mistaken for a cell boundary;
+    # the negative lookbehind honors that escaping, and the following
+    # line then turns `\|` back into a literal `|`.
+    text = re.sub(r"(?<!\\)\|\s*", " ", text)
+    text = text.replace("\\|", "|")
+    # Links -- keep BOTH the display text and the target. In this corpus
+    # the parenthetical is usually a legal/article reference, not a URL
+    # ("[modifie](Loi 65-99)"), and the old display-text-only rule
+    # silently deleted it.
+    text = re.sub(r"\[([^\]]+)\]\(([^)]+)\)", r"\1 (\2)", text)
     # Collapse multiple blank lines
     text = re.sub(r"\n{3,}", "\n\n", text)
+    # Decode HTML entities (&lt; &amp; &nbsp; ...) LAST, after every
+    # markup-handling step above, so a decoded entity can never be
+    # mistaken for new markup by an earlier rule.
+    text = html.unescape(text).replace("\xa0", " ")
     # Strip leading/trailing whitespace
     text = text.strip()
     return text
 
 
+# One psycopg2 pool per distinct database URL, for the RAW-SQL path
+# (app.services.search's vector query and insert_documents) -- the
+# SQLAlchemy side has its own shared pool in app.models.db.
+#
+# Why this exists: get_db_connection used to be a bare psycopg2.connect()
+# and every caller closed the connection when it was done, so the pgvector
+# path paid a full TCP connect + TLS/startup + auth round trip PER SEARCH.
+# A single chat turn issues two searches (the tier-2 domain vote in
+# app.services.routing.resolve_domain, then the domain-scoped retrieval in
+# app.routers.chat._retrieve_context), so that was two connection setups
+# on the critical path of every message, before a single vector was
+# compared. Reusing a pooled connection makes that cost once-per-process.
+_POOL_MIN_CONN = 1
+_POOL_MAX_CONN = 12
+_pools: dict = {}
+_pools_lock = threading.Lock()
+
+
+class _PooledConnection:
+    """psycopg2 connection wrapper whose .close() RETURNS the connection to
+    its pool instead of tearing it down.
+
+    Deliberately a wrapper rather than handing out the raw connection and
+    asking callers to remember putconn(): every existing call site here and
+    in app.services.search is written as `conn = get_db_connection(...)` /
+    `finally: conn.close()`, and silently changing what close() means for a
+    raw connection object would be far easier to get wrong. `.conn` is
+    exposed because insert_documents/search_similar_chunks already probe
+    for exactly that attribute (`conn.conn.cursor() if hasattr(conn, "conn")`)
+    to support this shape.
+
+    On close, an in-progress transaction is rolled back before the
+    connection goes back to the pool. Without that, one failed query
+    (e.g. a mid-migration UndefinedColumn) would poison the connection --
+    every later borrower would get `InFailedSqlTransaction` on a perfectly
+    valid statement, which is the classic way a "pooling made everything
+    break" incident starts.
+    """
+
+    __slots__ = ("conn", "_pool", "_closed")
+
+    def __init__(self, conn, pool):
+        self.conn = conn
+        self._pool = pool
+        self._closed = False
+
+    def cursor(self, *args, **kwargs):
+        return self.conn.cursor(*args, **kwargs)
+
+    def commit(self):
+        return self.conn.commit()
+
+    def rollback(self):
+        return self.conn.rollback()
+
+    def close(self):
+        if self._closed:
+            return
+        self._closed = True
+        broken = self.conn.closed != 0
+        if not broken:
+            try:
+                # psycopg2 exposes the server-side transaction state; an
+                # INTRANS/INERROR connection must not be handed to the next
+                # borrower mid-transaction.
+                if self.conn.get_transaction_status() != psycopg2.extensions.TRANSACTION_STATUS_IDLE:
+                    self.conn.rollback()
+            except Exception:
+                broken = True
+        try:
+            self._pool.putconn(self.conn, close=broken)
+        except Exception:
+            logger.exception("could not return a pooled connection; discarding it")
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        if exc_type is not None:
+            try:
+                self.conn.rollback()
+            except Exception:
+                pass
+        self.close()
+        return False
+
+
+def _get_pool(database_url: str):
+    pool = _pools.get(database_url)
+    if pool is None:
+        with _pools_lock:
+            pool = _pools.get(database_url)
+            if pool is None:
+                pool = psycopg2.pool.ThreadedConnectionPool(
+                    _POOL_MIN_CONN, _POOL_MAX_CONN, database_url,
+                    # Same fail-fast reasoning as app.models.db: a chat
+                    # request must not hang for the platform's default TCP
+                    # timeout when Postgres is unreachable -- the caller
+                    # (app.routers.chat._retrieve_context) is written to
+                    # degrade to the disk corpus on an exception, but only
+                    # if it actually gets one in reasonable time.
+                    connect_timeout=5,
+                )
+                _pools[database_url] = pool
+                logger.info("psycopg2 pool created (max=%d)", _POOL_MAX_CONN)
+    return pool
+
+
 def get_db_connection(database_url: str):
-    """Connect to PostgreSQL."""
-    return psycopg2.connect(database_url)
+    """Borrow a pooled PostgreSQL connection.
+
+    Returns a _PooledConnection: call .close() when done (every existing
+    call site already does, in a finally:) and the underlying connection
+    goes back to the pool rather than being discarded.
+
+    Falls back to a plain, unpooled psycopg2.connect() if the pool is
+    exhausted or cannot be created -- a saturated pool must degrade to the
+    old behaviour (slower) rather than fail a request outright.
+    """
+    try:
+        pool = _get_pool(database_url)
+        return _PooledConnection(pool.getconn(), pool)
+    except psycopg2.pool.PoolError:
+        logger.warning("psycopg2 pool exhausted; falling back to a direct connection")
+        return psycopg2.connect(database_url)
 
 
-@lru_cache(maxsize=4)
+def close_db_pools() -> None:
+    """Close every pooled connection. Called from app shutdown so a reload
+    doesn't leave Postgres backends behind."""
+    with _pools_lock:
+        for url, pool in _pools.items():
+            try:
+                pool.closeall()
+            except Exception:
+                logger.exception("could not close psycopg2 pool for %s", url.split("@")[-1])
+        _pools.clear()
+
+
+# maxsize=2, not 4: each entry is a fully materialized SentenceTransformer
+# (bge-m3 is ~2.2GB), so this cache's ceiling is measured in gigabytes of
+# resident memory, not in entries. Two covers the only case that legitimately
+# needs more than one in a process -- a migration script comparing the old
+# and new embedding models (scripts/migrate_to_bge_m3.py's rollback path).
+@lru_cache(maxsize=2)
+def _load_embedding_model_cached(model_name: str) -> SentenceTransformer:
+    return _load_embedding_model(model_name)
+
+
 def load_embedding_model(model_name: str = DEFAULT_EMBEDDING_MODEL) -> SentenceTransformer:
     """Load and cache the embedding model.
+
+    The cache lives on the private _load_embedding_model_cached, keyed on
+    an EXPLICIT model_name, rather than directly on this function. With
+    @lru_cache applied here, `load_embedding_model()` and
+    `load_embedding_model(DEFAULT_EMBEDDING_MODEL)` are two different cache
+    keys for the same model -- functools.lru_cache keys on the call
+    arguments as given, and does not know that the omitted argument has
+    that exact default. Both spellings are used in this codebase (app/main
+    .py's preload and app.services.retrieval call the first; embed_query
+    calls the second), so a process could hold TWO complete copies of a
+    2.2GB model and pay the multi-second load twice. Measured live while
+    benchmarking the query-embedding cache: the second load showed up as
+    an 8-second "cold" embed on a model the app had already preloaded at
+    startup.
 
     Was previously re-loading from disk on every call (docstring claimed
     caching that never existed) -- harmless for one-off ingestion scripts,
@@ -524,6 +903,10 @@ def load_embedding_model(model_name: str = DEFAULT_EMBEDDING_MODEL) -> SentenceT
     batch instead of a clear error at the first load. Loud at boot beats
     silent corruption mid-ingest.
     """
+    return _load_embedding_model_cached(model_name)
+
+
+def _load_embedding_model(model_name: str) -> SentenceTransformer:
     print(f"Loading embedding model: {model_name}")
     model = SentenceTransformer(model_name)
     actual_dim = model.get_sentence_embedding_dimension()
@@ -614,6 +997,13 @@ def chunk_document(
     `heading` on a packed chunk is its first section's heading (bookkeeping
     only -- every packed section's heading is already inline in `content`,
     which is what extract_citations and embedding actually see).
+
+    A section whose body strips down to nothing (a heading with no text
+    under it, or a body that is only a horizontal rule) still emits its
+    HEADING alone rather than being dropped outright -- 2026-08-23 fix:
+    the heading is exactly where an article/law reference lives, and the
+    old `continue`-on-empty-body path discarded it along with the
+    (legitimately absent) body.
     """
     sections = split_by_headings(text)
     chunks: list[dict] = []
@@ -635,9 +1025,25 @@ def chunk_document(
 
     for section_index, (heading, body) in enumerate(sections):
         clean_body = strip_markdown(body)
-        if not clean_body:
+        if not clean_body and not heading:
+            # Nothing at all in this section: split_by_headings' preamble
+            # branch already excludes an empty preamble, so this mainly
+            # guards a heading match with no title text after it (e.g.
+            # a stray "## " line) -- there is genuinely nothing to emit.
             continue
-        piece = f"{heading}\n\n{clean_body}" if heading else clean_body
+        if not clean_body:
+            # A real heading with an empty body -- e.g. two consecutive
+            # article headings with no text between them, or a body that
+            # strip_markdown legitimately reduces to nothing (a lone
+            # horizontal rule). This used to `continue` past the section
+            # entirely, which silently discarded the HEADING too --
+            # exactly where an article/law reference lives in this corpus
+            # (chunk_document's own docstring). Emit the heading alone so
+            # the reference still reaches embedding/citation extraction,
+            # even though there is no body to pack it with.
+            piece = heading
+        else:
+            piece = f"{heading}\n\n{clean_body}" if heading else clean_body
 
         if len(piece) > chunk_size:
             # Long enough to need its own split -- flush whatever is
@@ -694,13 +1100,128 @@ def detect_document_domain(file_path: Path, source_dir: Path) -> Optional[str]:
     return None
 
 
+def to_vector_literal(values) -> str:
+    """Format an embedding as the `[0.1,0.2,...]` text literal pgvector
+    parses.
+
+    Was `str(embedding)` on a Python list, which calls repr() on all 1024
+    floats and emits full 17-significant-digit round-trip precision plus a
+    space after every comma -- about 21KB per vector. Formatting at 7
+    significant digits instead is lossless for the float32 the model
+    actually produced (float32 carries ~7 decimal digits; the values were
+    upcast to float64 by .tolist() on the way here, adding digits that
+    were never real) and roughly halves both the string-building cost and
+    the bytes pushed to Postgres. That matters twice: once per query on
+    the search path, and once per CHUNK on the ingest path, where a
+    500-chunk document was building ~10MB of Python string.
+    """
+    return "[" + ",".join(f"{float(v):.7g}" for v in values) + "]"
+
+
+# Bounded so a long-running server can't accumulate query vectors without
+# limit: 512 entries x ~4KB of formatted literal is a few MB, and chat
+# queries repeat far more often than that ceiling within a session.
+_QUERY_EMBED_CACHE_SIZE = 512
+
+
+@lru_cache(maxsize=_QUERY_EMBED_CACHE_SIZE)
+def _embed_query_cached(query: str, model_name: str) -> str:
+    return to_vector_literal(load_embedding_model(model_name).encode([query])[0])
+
+
+def embed_query(query: str, *, model: Optional[SentenceTransformer] = None) -> str:
+    """Embed one QUERY and return it as a pgvector literal, memoized.
+
+    A single chat turn embeds the same text twice today: app.services.
+    routing.resolve_domain runs an unfiltered search to vote on the domain,
+    then app.routers.chat._retrieve_context runs the domain-scoped search
+    that actually produces the context. Both go through
+    search_similar_chunks with the same query string, so before this the
+    turn paid two full bge-m3 forward passes where one would do. The vote
+    is described in resolve_domain's docstring as "sub-ms at this corpus
+    size" -- true of the SQL, but the embedding in front of it is not.
+
+    The cache is keyed on (query, model_name) so a model swap (settings.
+    embedding_model, e.g. scripts/migrate_to_bge_m3.py's rollback path)
+    can never serve a vector from the wrong model -- which would be
+    silently wrong rather than loudly broken, since a stale 1024-dim
+    vector from another model is still a valid pgvector literal.
+
+    An explicitly-passed `model` bypasses the cache: callers that hand in
+    their own SentenceTransformer (tests, scripts/eval_retrieval.py) mean
+    "use exactly this object", and the cache has no way to key on it.
+    """
+    if model is not None and model is not _loaded_default_model():
+        return to_vector_literal(model.encode([query])[0])
+    return _embed_query_cached(query, DEFAULT_EMBEDDING_MODEL)
+
+
+def _loaded_default_model() -> Optional[SentenceTransformer]:
+    """The default model IF it is already loaded, without triggering a
+    load. Lets embed_query tell "the caller handed me the same shared
+    model load_embedding_model() would have returned" (cacheable) from
+    "the caller handed me a different model object" (not cacheable),
+    without a multi-second load as a side effect of the check.
+    """
+    if _load_embedding_model_cached.cache_info().currsize == 0:
+        return None
+    return load_embedding_model(DEFAULT_EMBEDDING_MODEL)
+
+
 def embed_chunks(
     model: SentenceTransformer,
     chunks: list[str],
 ) -> list[list[float]]:
-    """Generate embeddings for a list of text chunks."""
-    embeddings = model.encode(chunks, show_progress_bar=False, batch_size=BATCH_SIZE)
-    return embeddings.tolist()
+    """Generate embeddings for a list of text chunks.
+
+    Batch size comes from settings.embedding_batch_size, and a CUDA
+    out-of-memory error halves it and retries rather than failing the
+    whole document. This is not defensive padding: this deployment runs
+    the embedding model, the Ollama tutor model AND (during an upload with
+    scanned pages) the resident PaddleOCR-VL worker on one 8GB card, and
+    the chunk size went from 400 to 2000 characters in the bge-m3
+    migration without the batch size being revisited -- so a 64-chunk
+    batch of 2000-char chunks is a much larger activation spike than the
+    number was originally chosen against. Losing an 80-page ingest at the
+    embed step, after tens of minutes of OCR, is the expensive failure
+    here; a slower retry is not.
+    """
+    batch_size = get_settings().embedding_batch_size
+    while True:
+        try:
+            embeddings = model.encode(
+                chunks, show_progress_bar=False, batch_size=batch_size
+            )
+            return embeddings.tolist()
+        except Exception as e:
+            if batch_size <= 1 or not _is_oom(e):
+                raise
+            batch_size = max(1, batch_size // 2)
+            logger.warning(
+                "embedding batch hit an out-of-memory error; retrying at batch_size=%d",
+                batch_size,
+            )
+            _release_cuda_cache()
+
+
+def _is_oom(exc: Exception) -> bool:
+    name = type(exc).__name__
+    message = str(exc).lower()
+    return (
+        name == "OutOfMemoryError"
+        or "out of memory" in message
+        or "cuda error" in message and "memory" in message
+    )
+
+
+def _release_cuda_cache() -> None:
+    try:
+        import torch
+
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+    except Exception:
+        pass
 
 
 def insert_documents(
@@ -725,8 +1246,6 @@ def insert_documents(
     what lets app.services.search's source_ids filter and the
     enable/disable toggle work per-upload.
     """
-    cursor = conn.conn.cursor() if hasattr(conn, "conn") else conn.cursor()
-
     if not metadata_list:
         metadata_list = [{} for _ in chunks]
 
@@ -742,7 +1261,10 @@ def insert_documents(
             domain,
             ingest_batch_id,
             language,
-            str(embedding),
+            # to_vector_literal, not str(embedding): repr() of a 1024-float
+            # Python list is ~21KB per chunk at a precision the float32
+            # model never produced. See that function.
+            to_vector_literal(embedding),
             json.dumps(meta),
             source_file_id,
         ))
@@ -753,15 +1275,28 @@ def insert_documents(
         VALUES %s
     """
 
-    execute_values(
-        cursor,
-        insert_query,
-        rows,
-        template="(%s::uuid, %s, %s, %s, %s, %s, %s, %s, %s::vector, %s::jsonb, %s::uuid)",
-        page_size=BATCH_SIZE,
-    )
-
-    conn.commit()
+    cursor = conn.conn.cursor() if hasattr(conn, "conn") else conn.cursor()
+    try:
+        execute_values(
+            cursor,
+            insert_query,
+            rows,
+            template="(%s::uuid, %s, %s, %s, %s, %s, %s, %s, %s::vector, %s::jsonb, %s::uuid)",
+            page_size=INSERT_PAGE_SIZE,
+        )
+        conn.commit()
+    except Exception:
+        # Explicit, because connections are POOLED now (get_db_connection):
+        # a failed INSERT leaves the connection in an aborted transaction,
+        # and handing that back to the pool makes the NEXT borrower fail
+        # with InFailedSqlTransaction on a perfectly valid statement.
+        # _PooledConnection.close() also rolls back as a backstop; doing it
+        # here keeps the failure attributable to the statement that caused
+        # it.
+        conn.rollback()
+        raise
+    finally:
+        cursor.close()
     return len(rows)
 
 

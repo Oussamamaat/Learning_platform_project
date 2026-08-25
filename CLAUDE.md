@@ -22,7 +22,7 @@ migration brief for that work, and the place to prompt a coding agent toward for
 - Install deps (first time only): `.gguf_venv/Scripts/python.exe -m pip install -r config/requirements.txt`
 - Run all tests: `.gguf_venv/Scripts/python.exe -m pytest`
 - Run one test file: `.gguf_venv/Scripts/python.exe -m pytest tests/test_citations.py`
-- Start dev server: `.gguf_venv/Scripts/python.exe -m uvicorn app.main:app --reload` (needs Postgres/pgvector and Ollama reachable — see `app/config.py` for URLs/defaults; a `redis` container may be running in `docker-compose.yml` but no application code imports `redis` or reads a `redis_url` setting, so it is not actually required)
+- Start dev server: `.gguf_venv/Scripts/python.exe -m uvicorn app.main:app --reload` (needs Postgres/pgvector and Ollama reachable — see `app/config.py` for URLs/defaults)
 - Full stack in Docker: `docker compose -f config/docker-compose.yml --project-directory . up --build`
 - No linter or formatter is configured in this repo — match surrounding style, don't add one unasked.
 

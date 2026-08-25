@@ -121,25 +121,43 @@ def _has_arabic_indic_digit_leak(ocr_text: str) -> bool:
     return False
 
 
+_HTML_TAG_NAMES_STANDALONE = (
+    "table", "thead", "tbody", "tfoot", "tr", "td", "th",
+    "p", "div", "span", "br", "hr",
+    "h1", "h2", "h3", "h4", "h5", "h6",
+    "ul", "ol", "li",
+    "b", "i", "em", "strong", "u",
+    "a", "img",
+)
+_HTML_TAG_RE_STANDALONE = re.compile(
+    r"</?(?:" + "|".join(_HTML_TAG_NAMES_STANDALONE) + r")\b[^<>]*/?>", re.IGNORECASE
+)
+
+
 def _strip_markdown_standalone(text: str) -> str:
     """Copy of app.services.ingestion.strip_markdown, kept byte-for-byte in
-    sync, for venvs (e.g. .ocr_venv) that don't carry the full app
+    sync (including app.services.ingestion._HTML_TAG_NAMES/_HTML_TAG_RE
+    above), for venvs (e.g. .ocr_venv) that don't carry the full app
     dependency stack ingestion.py's other top-level imports require."""
+    import html as _html_mod
+
     text = re.sub(r"</\s*(?:td|th)\s*>", " ", text, flags=re.IGNORECASE)
     text = re.sub(
         r"</\s*(?:tr|p|div|li|h[1-6])\s*>|<\s*br\s*/?\s*>", "\n", text, flags=re.IGNORECASE
     )
-    text = re.sub(r"<[^>]+>", "", text)
+    text = _HTML_TAG_RE_STANDALONE.sub("", text)
     text = re.sub(r"^#{1,6}\s+", "", text, flags=re.MULTILINE)
-    text = re.sub(r"\*{1,3}([^*]+)\*{1,3}", r"\1", text)
-    text = re.sub(r"_{1,3}([^_]+)_{1,3}", r"\1", text)
+    text = re.sub(r"(?<!\w)\*{1,3}(?!\s)([^*]+)(?<!\s)\*{1,3}(?!\w)", r"\1", text)
+    text = re.sub(r"(?<!\w)_{1,3}(?!\s)([^_]+)(?<!\s)_{1,3}(?!\w)", r"\1", text)
     text = re.sub(r"`([^`]+)`", r"\1", text)
-    text = re.sub(r"^>\s?", "", text, flags=re.MULTILINE)
+    text = re.sub(r"^>\s+(?!\d)", "", text, flags=re.MULTILINE)
     text = re.sub(r"^[-*_]{3,}\s*$", "", text, flags=re.MULTILINE)
-    text = re.sub(r"^\|[-:| ]+\|\s*$", "", text, flags=re.MULTILINE)
-    text = re.sub(r"\|\s*", " ", text)
-    text = re.sub(r"\[([^\]]+)\]\([^)]+\)", r"\1", text)
+    text = re.sub(r"^\|(?:\s*:?-{3,}:?\s*\|)+\s*$", "", text, flags=re.MULTILINE)
+    text = re.sub(r"(?<!\\)\|\s*", " ", text)
+    text = text.replace("\\|", "|")
+    text = re.sub(r"\[([^\]]+)\]\(([^)]+)\)", r"\1 (\2)", text)
     text = re.sub(r"\n{3,}", "\n\n", text)
+    text = _html_mod.unescape(text).replace("\xa0", " ")
     return text.strip()
 
 

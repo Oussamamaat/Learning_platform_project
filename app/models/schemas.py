@@ -16,6 +16,67 @@ class Domain(str, Enum):
     BLOCKCHAIN = "blockchain"
 
 
+class DiagramKind(str, Enum):
+    FLOWCHART = "flowchart"
+    SEQUENCE = "sequence"
+    MINDMAP = "mindmap"
+    PIE = "pie"
+    XY = "xy"
+    CANDLESTICK = "candlestick"
+
+
+class Candle(BaseModel):
+    """One OHLC bar. Used both as ChatRequest.candles (caller-supplied real
+    data, rendered verbatim) and inside DiagramPayload.spec (model-invented
+    or caller-supplied, whichever generate_diagram actually used)."""
+
+    label: str = Field(..., description="X-axis tick, e.g. a date or session label")
+    open: float
+    high: float
+    low: float
+    close: float
+
+
+class DiagramPayload(BaseModel):
+    """A generated diagram, attached to ChatResponse when the turn's message
+    triggered app.services.diagrams.detect_diagram_intent. See
+    docs/architecture/diagram-generation.md."""
+
+    kind: DiagramKind
+    kind_source: str = Field(
+        ..., description="How `kind` was chosen: 'keyword' (Tier 1, deterministic) or "
+        "'semantic' (Tier 2 fallback, not yet implemented)."
+    )
+    title: str
+    caption: str = Field(
+        ..., description="One-to-two sentence explanation, also used as ChatResponse.response "
+        "for this turn -- follows the turn's response language, unlike the diagram's own "
+        "structural labels, which always follow settings.diagram_label_language."
+    )
+    mermaid: Optional[str] = Field(
+        None, description="Mermaid source, populated for every kind except 'candlestick' "
+        "(Mermaid has no OHLC diagram type -- see `spec` instead)."
+    )
+    spec: dict = Field(
+        default_factory=dict,
+        description="Raw render data for kinds Mermaid can't express. Only populated for "
+        "'candlestick': {'candles': [Candle, ...]}.",
+    )
+    grounded: bool = Field(
+        ..., description="True when retrieval found tenant context and every structural label "
+        "passed the same ungrounded-reference check quiz questions do. False means the diagram "
+        "is illustrative (e.g. a candlestick pattern with no corpus) -- still shown, just "
+        "flagged so the UI can say it isn't from the tenant's own documents."
+    )
+    repairs: list[str] = Field(
+        default_factory=list,
+        description="Deterministic salvage actions taken on the model's raw output before "
+        "rendering (e.g. a dangling edge dropped) -- never a fabrication, only a removal. "
+        "Empty when the model's output needed no repair.",
+    )
+    sources: list[str] = Field(default_factory=list, description="Retrieved document sources, when grounded")
+
+
 class ChatRequest(BaseModel):
     message: str = Field(..., min_length=1, max_length=4000, description="User message")
     session_id: Optional[str] = Field(None, description="Conversation session ID")
@@ -51,6 +112,19 @@ class ChatRequest(BaseModel):
             "tenant just disabled. The tenant's always-on global corpus is "
             "never affected by this field. Omitted means every currently-"
             "enabled uploaded source is eligible."
+        ),
+    )
+    candles: Optional[list[Candle]] = Field(
+        None,
+        description=(
+            "Real OHLC data for a candlestick diagram, when the caller already "
+            "has it. Rendered verbatim -- app.services.diagrams overrides "
+            "whatever the model invented with this list rather than the "
+            "reverse, so a real dataset can never be silently replaced by "
+            "illustrative model output. Ignored unless the message's detected "
+            "diagram intent is 'candlestick' (app.services.diagrams."
+            "detect_diagram_intent); omitted means the model invents "
+            "illustrative values for the named pattern (e.g. 'marteau haussier')."
         ),
     )
 
@@ -104,6 +178,15 @@ class ChatResponse(BaseModel):
             "built-in corpus, but any uploaded sources are silently absent from it "
             "until Postgres recovers; the UI should say so rather than let a "
             "confident, cited-looking answer imply otherwise."
+        ),
+    )
+    diagram: Optional[DiagramPayload] = Field(
+        None,
+        description=(
+            "Set when the message's own text triggered "
+            "app.services.diagrams.detect_diagram_intent -- there is no separate "
+            "diagram endpoint. `response` is the diagram's own caption in that "
+            "case. None for every ordinary chat turn."
         ),
     )
 
@@ -196,6 +279,12 @@ class SourceFileOut(BaseModel):
     language: Optional[str] = None
     chunk_count: int = 0
     page_count: Optional[int] = None
+    pages_done: Optional[int] = Field(
+        None,
+        description="Live progress while status='processing': pages attempted so far, "
+        "out of page_count. NULL once ready/partial/error -- read chunk_count/page_count "
+        "for the finished result instead.",
+    )
     parser: Optional[str] = Field(
         None,
         description="How the file was parsed: pdf_text | pdf_ocr | pdf_mixed | docx | pptx | "

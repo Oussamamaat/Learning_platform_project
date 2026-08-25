@@ -179,12 +179,54 @@ def _select_with_affinity(
     return selected, cross_language
 
 
+# Two chunks from the same document are built with CHUNK_OVERLAP=250
+# characters of deliberate overlap (app.services.ingestion), so when both
+# land in the same top-k the tail of one is literally the head of the
+# next. Trimming that repeat is pure signal-to-noise: it costs the model
+# nothing to lose a duplicate paragraph, and 250 characters is ~4% of the
+# 6000-character context budget per adjacent pair.
+_MIN_OVERLAP_TO_TRIM = 60
+
+
+def _trim_leading_overlap(previous: str, content: str) -> str:
+    """Drop the head of `content` that is already the tail of `previous`.
+
+    Only exact overlaps are removed, longest first, and only when the
+    repeat is at least _MIN_OVERLAP_TO_TRIM characters -- a short
+    coincidental match (a shared heading line, a repeated article number)
+    is NOT redundancy worth cutting, and cutting it could remove the one
+    copy of a citation the answer needed. Bounded by the configured
+    overlap, so this can never eat a chunk that merely resembles its
+    predecessor.
+    """
+    from app.services.ingestion import CHUNK_OVERLAP
+
+    limit = min(len(previous), len(content), CHUNK_OVERLAP * 2)
+    for size in range(limit, _MIN_OVERLAP_TO_TRIM - 1, -1):
+        if previous.endswith(content[:size]):
+            return content[size:].lstrip()
+    return content
+
+
 def _build_context(selected: list[dict], *, max_context_length: int) -> tuple[str, list[str]]:
     context_parts: list[str] = []
     sources: list[str] = []
     current_length = 0
+    seen_content: set[str] = set()
     for c in selected:
         content = c["content"]
+        # Exact duplicates: the same chunk can legitimately be returned
+        # twice once uploaded and global-corpus rows both match (a tenant
+        # re-uploading a document that is also in raw/shared), and paying
+        # context budget to say the same thing twice makes the answer
+        # worse, not just longer.
+        if content in seen_content:
+            continue
+        seen_content.add(content)
+        if context_parts:
+            content = _trim_leading_overlap(context_parts[-1], content)
+            if not content:
+                continue
         if current_length + len(content) > max_context_length:
             remaining = max_context_length - current_length
             if remaining > 100:

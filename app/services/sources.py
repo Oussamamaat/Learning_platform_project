@@ -33,10 +33,11 @@ import logging
 from datetime import datetime, timezone
 from typing import Optional
 
-from sqlalchemy import create_engine, text
+from sqlalchemy import text
 from sqlalchemy.orm import sessionmaker
 
 from app.config import get_settings
+from app.models.db import get_engine
 
 logger = logging.getLogger(__name__)
 
@@ -60,11 +61,11 @@ def _get_session():
     """
     global _engine, _SessionLocal
     if _engine is None:
-        _engine = create_engine(
-            get_settings().database_url,
-            pool_pre_ping=True,
-            connect_args={"connect_timeout": 2},
-        )
+        # The process-wide engine + pool (app.models.db), not a private
+        # one -- see that module for why four independent pools for the
+        # same database URL was a real resource problem. The globals stay
+        # so tests can monkeypatch an in-memory SQLite engine in.
+        _engine = get_engine()
         _SessionLocal = sessionmaker(bind=_engine)
     return _SessionLocal()
 
@@ -84,27 +85,73 @@ def active_source_ids(tenant_id: str, *, requested: Optional[list[str]] = None) 
     search_similar_chunks (app/services/search.py), reproducing exactly
     the pre-upload-feature global-only retrieval behaviour.
     """
+    rows = _retrievable_rows(tenant_id)
+    if rows is None:
+        return []
+    return _narrow(_enabled_ids(rows), requested)
+
+
+def _enabled_ids(rows) -> set:
+    return {str(r[0]) for r in rows if r[1]}
+
+
+def _narrow(ready_ids: set, requested: Optional[list[str]]) -> list[str]:
+    if requested is None:
+        return sorted(ready_ids)
+    return sorted(ready_ids & {str(r) for r in requested})
+
+
+def _retrievable_rows(tenant_id: str):
+    """Every (id, enabled) pair for this tenant's status IN
+    ('ready','partial') sources, or None on any DB failure.
+
+    ONE query behind both active_source_ids and corpus_version, which used
+    to issue two nearly identical SELECTs over the same rows -- and
+    app/routers/chat.py calls both on every single turn (active_source_ids
+    for the retrieval filter, corpus_version for pin invalidation), so
+    that was a wasted Postgres round trip per message. The `enabled = true`
+    filter moves into Python because corpus_version needs the DISABLED rows
+    too: a toggle must change the version hash, which is the whole point
+    of that signal.
+    """
     try:
         session = _get_session()
         try:
-            rows = session.execute(
+            return session.execute(
                 text(
-                    "SELECT id FROM source_files "
+                    "SELECT id, enabled FROM source_files "
                     "WHERE tenant_id = :tenant_id AND status IN ('ready', 'partial') "
-                    "AND enabled = true"
+                    "ORDER BY id"
                 ),
                 {"tenant_id": tenant_id},
             ).fetchall()
         finally:
             session.close()
     except Exception:
-        logger.exception("active_source_ids failed for tenant=%s; treating as no uploads", tenant_id)
-        return []
+        logger.exception("source_files lookup failed for tenant=%s", tenant_id)
+        return None
 
-    ready_ids = {str(r[0]) for r in rows}
-    if requested is None:
-        return sorted(ready_ids)
-    return sorted(ready_ids & {str(r) for r in requested})
+
+def active_sources_and_version(
+    tenant_id: str, *, requested: Optional[list[str]] = None
+) -> tuple[list[str], Optional[str]]:
+    """(active_source_ids, corpus_version) from a SINGLE query.
+
+    Both values are derived from the same row set, and app/routers/chat.py
+    needs both on every turn -- see _retrievable_rows. Semantics are
+    identical to calling the two functions separately, including their
+    distinct failure sentinels: [] for "no upload filter" and None for
+    "version unknown, do not invalidate a pin".
+    """
+    rows = _retrievable_rows(tenant_id)
+    if rows is None:
+        return [], None
+    return _narrow(_enabled_ids(rows), requested), _hash_rows(rows)
+
+
+def _hash_rows(rows) -> str:
+    key = "|".join(f"{r[0]}:{r[1]}" for r in rows) + f"|n={len(rows)}"
+    return hashlib.sha256(key.encode("utf-8")).hexdigest()
 
 
 def corpus_version(tenant_id: str) -> Optional[str]:
@@ -126,25 +173,10 @@ def corpus_version(tenant_id: str) -> Optional[str]:
     Deliberately NOT cached (no lru_cache) -- it IS the invalidation
     signal; caching it would defeat its own purpose.
     """
-    try:
-        session = _get_session()
-        try:
-            rows = session.execute(
-                text(
-                    "SELECT id, enabled FROM source_files "
-                    "WHERE tenant_id = :tenant_id AND status IN ('ready', 'partial') "
-                    "ORDER BY id"
-                ),
-                {"tenant_id": tenant_id},
-            ).fetchall()
-        finally:
-            session.close()
-    except Exception:
-        logger.exception("corpus_version failed for tenant=%s; returning None (no invalidation)", tenant_id)
+    rows = _retrievable_rows(tenant_id)
+    if rows is None:
         return None
-
-    key = "|".join(f"{r[0]}:{r[1]}" for r in rows) + f"|n={len(rows)}"
-    return hashlib.sha256(key.encode("utf-8")).hexdigest()
+    return _hash_rows(rows)
 
 
 def reap_orphaned_processing(tenant_id: str) -> int:

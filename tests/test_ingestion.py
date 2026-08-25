@@ -14,6 +14,7 @@ import pytest
 
 from app.services.ingestion import (
     XLSX_MAX_ROWS,
+    _render_row,
     chunk_document,
     detect_document_domain,
     detect_document_language,
@@ -111,6 +112,45 @@ def test_no_heading_document_still_chunks():
     assert chunks[0]["heading"] == ""
 
 
+# --- chunk_document: 2026-08-23 fix -- a heading with an empty body used
+# to be dropped ENTIRELY, taking its article/law reference with it -------
+
+def test_heading_with_empty_body_is_still_emitted():
+    """Two back-to-back article headings with no body between the first
+    and second: the first used to vanish completely (heading AND its
+    reference number), indistinguishable from that article never having
+    existed in the source. It must now still appear somewhere in the
+    corpus, even with nothing to say about it yet."""
+    text = "## المادة 12\n\n## المادة 13\n\nنص المادة 13"
+    chunks = chunk_document(text)
+    all_content = " ".join(c["content"] for c in chunks)
+    assert "المادة 12" in all_content
+    assert "المادة 13" in all_content
+    assert "نص المادة 13" in all_content
+
+
+def test_heading_whose_body_is_only_a_horizontal_rule_keeps_the_heading():
+    """strip_markdown legitimately reduces a lone '---' body to nothing --
+    that's correct (a real horizontal rule is not content), but the
+    heading above it ('Article 14 (Art. 283)', the actual citation) must
+    survive even though its body does not."""
+    text = "## Article 14 (Art. 283)\n\n---\n\n## Article 15\n\ncontenu"
+    chunks = chunk_document(text)
+    all_content = " ".join(c["content"] for c in chunks)
+    assert "Art. 283" in all_content
+
+
+def test_heading_only_section_does_not_reintroduce_fully_empty_chunks():
+    """The fix must not regress the ORIGINAL guard it modifies: a section
+    with neither a real heading NOR a body -- two consecutive '## ' marker
+    lines with nothing between them, each a heading match with no title
+    text and an empty body -- still contributes nothing."""
+    chunks = chunk_document("## \n\n## \n\nreal content")
+    for c in chunks:
+        assert c["content"].strip() != ""
+    assert any("real content" in c["content"] for c in chunks)
+
+
 # --- detect_document_language -------------------------------------------
 
 def test_detects_arabic_script_document():
@@ -171,6 +211,105 @@ def test_strip_markdown_leaves_markdown_tables_and_headings_intact():
     """The HTML fix must not disturb the existing markdown paths."""
     assert strip_markdown("| Col A | Col B |").split() == ["Col", "A", "Col", "B"]
     assert strip_markdown("# Titre\n\n**gras** ici") == "Titre\n\ngras ici"
+
+
+# --- strip_markdown: 2026-08-23 hardening -- data corruption on a
+# regulatory/technical corpus, found by auditing every rule against real
+# content rather than just the HTML-table case above ----------------------
+
+def test_strip_markdown_preserves_inequality_thresholds():
+    """The old `<[^>]+>` wildcard treated ANY '<...>' span as a tag,
+    deleting regulatory threshold clauses: measured live,
+    'seuil <= 5 mg/m3 selon <NF EN 166>' collapsed to just 'seuil'. Requiring
+    a whitelisted tag name immediately after '<' (see _HTML_TAG_RE) leaves
+    these untouched -- 'NF' and a bare digit are never tag names."""
+    assert strip_markdown("temperature < 40 C et pression > 2 bars") == \
+        "temperature < 40 C et pression > 2 bars"
+    assert strip_markdown("seuil <= 5 mg/m3 selon <NF EN 166>") == \
+        "seuil <= 5 mg/m3 selon <NF EN 166>"
+
+
+def test_strip_markdown_preserves_document_codes_with_underscores():
+    """Measured in the live corpus: 'D_Ain_el_Abd_1970' (a geodetic datum
+    name) became 'DAinelAbd1970' -- unfindable by vector or lexical search.
+    The old emphasis regex had no notion of word boundaries; every
+    underscore in an identifier sits between two word characters, which the
+    new (?<!\\w)...(?!\\w) guards now require NOT be the case for a real
+    emphasis match."""
+    assert strip_markdown("D_Ain_el_Abd_1970") == "D_Ain_el_Abd_1970"
+    assert strip_markdown("norme ISO_45001 et EN_166 requis") == \
+        "norme ISO_45001 et EN_166 requis"
+
+
+def test_strip_markdown_preserves_spaced_asterisk_arithmetic():
+    """'surface = L * l * h' lost its multiplication signs entirely. Real
+    markdown emphasis never has whitespace immediately inside its
+    delimiters ('** gras **' is not bold); the new (?!\\s)...(?<!\\s) guards
+    encode exactly that, so a '*' with a space on both sides is left alone."""
+    assert strip_markdown("surface = L * l * h") == "surface = L * l * h"
+    assert strip_markdown("5 * 3 = 15 et 2 * 4 = 8") == "5 * 3 = 15 et 2 * 4 = 8"
+
+
+def test_strip_markdown_still_collapses_real_emphasis():
+    """The hardening must not regress genuine markdown emphasis -- only
+    guard against identifiers/arithmetic that happen to reuse '*'/'_'."""
+    assert strip_markdown("**gras** ici") == "gras ici"
+    assert strip_markdown("_italic_ mot") == "italic mot"
+
+
+def test_strip_markdown_preserves_leading_threshold_angle():
+    """The blockquote rule '^>\\s?' unconditionally deleted a leading '>',
+    which INVERTS the meaning of a threshold ('> 40 C' -> '40 C'). Gating on
+    'not immediately followed by a digit' distinguishes that from
+    _parse_pptx's own blockquote notes, which are always prose."""
+    assert strip_markdown("> 40 C au poste") == "> 40 C au poste"
+    assert strip_markdown("> Remarque importante du formateur") == \
+        "Remarque importante du formateur"
+
+
+def test_strip_markdown_keeps_a_real_data_row_of_dashes():
+    """'| - | - |' is this corpus's french-regulatory 'neant/sans objet'
+    convention for an empty-valued DATA row, not a markdown alignment
+    separator -- the old 1+-dash pattern deleted it outright. Requiring 3+
+    dashes per cell (the normal markdown convention) fixes this while a
+    real alignment row ('|---|---|') still vanishes as before."""
+    out = strip_markdown("| - | - |")
+    assert out.strip() != ""
+    assert "-" in out
+
+    out = strip_markdown("nom\n|---|---|\nval")
+    assert "---" not in out
+    assert "nom" in out and "val" in out
+
+
+def test_strip_markdown_keeps_pipe_escaping_round_trip():
+    """`_render_row` escapes a literal pipe inside a cell as `\\|` so it
+    survives the generic pipe-collapse rule. The old unconditional
+    `\\|\\s*` -> ' ' regex broke that contract, leaving a stray backslash
+    in the stored text instead of the literal '|' the escaping was meant
+    to preserve."""
+    row = _render_row(["a|b", "c"])
+    out = strip_markdown(row)
+    assert "a|b" in out
+    assert "\\" not in out
+
+
+def test_strip_markdown_keeps_legal_reference_in_link():
+    """The old link rule kept only the display text and silently deleted
+    the parenthetical -- in this corpus that parenthetical is usually a
+    legal/article reference, not a URL: 'Article 5 [modifie](Loi 65-99)'
+    became 'Article 5 modifie', losing the citation entirely."""
+    assert strip_markdown("Article 5 [modifie](Loi 65-99) applicable") == \
+        "Article 5 modifie (Loi 65-99) applicable"
+
+
+def test_strip_markdown_decodes_html_entities():
+    """PaddleOCR-VL's HTML tables can carry literal entities (&lt; &amp;
+    &gt; &nbsp;) that never had a decoding step -- they survived verbatim
+    into embedded/stored text. Decoded LAST, after every markup-handling
+    rule, so a decoded '<'/'>' can never be mistaken for new markup by an
+    earlier step in the same call."""
+    assert strip_markdown("5 &lt; x &amp; y &gt; 2") == "5 < x & y > 2"
 
 
 # --- parse_document_to_markdown: passthrough + dispatch -------------------
@@ -369,6 +508,99 @@ def test_pdf_mixed_document_skips_only_the_ocr_required_pages(tmp_path, monkeypa
     assert unprocessed[0]["detail"]
 
 
+def test_on_page_processed_fires_once_per_page_in_order(tmp_path, monkeypatch):
+    """app.services.ingest_jobs.process_source_file uses this callback to
+    keep source_files.pages_done current DURING processing -- pinned here
+    at the point that actually calls it, independent of that wiring."""
+    from pypdf import PdfWriter
+    from app.services.ocr import NullOcrEngine
+    from app.services.pdf_classify import PageDecision, PageSignals, PageStrategy
+
+    monkeypatch.setattr("app.services.ocr.get_ocr_engine", lambda: NullOcrEngine())
+
+    class _FakePage:
+        def __init__(self, marker):
+            self.marker = marker
+            self.mediabox = _FakeBox(612, 792)
+
+        def extract_text(self):
+            return f"Native content for {self.marker}"
+
+        def get(self, key):
+            return None
+
+    class _FakeReader:
+        def __init__(self, path):
+            self.pages = [_FakePage("a"), _FakePage("b"), _FakePage("c")]
+
+    monkeypatch.setattr("pypdf.PdfReader", _FakeReader)
+    forced_signals = PageSignals(
+        char_count=10, page_area_in2=7.7, char_density=5.0, font_count=1,
+        image_count=0, has_full_page_raster=False, full_raster_dpi=None,
+        bad_char_ratio=0.0,
+    )
+    monkeypatch.setattr(
+        "app.services.pdf_classify.classify_page",
+        lambda page, text=None: PageDecision(PageStrategy.NATIVE, forced_signals, "native for test"),
+    )
+
+    f = tmp_path / "three_pages.pdf"
+    writer = PdfWriter()
+    for _ in range(3):
+        writer.add_blank_page(width=200, height=200)
+    with open(f, "wb") as fh:
+        writer.write(fh)
+
+    calls: list = []
+    parse_document_to_markdown(f, on_page_processed=lambda page_num, total: calls.append((page_num, total)))
+
+    assert calls == [(1, 3), (2, 3), (3, 3)]
+
+
+def test_on_page_processed_exception_does_not_fail_the_parse(tmp_path, monkeypatch):
+    """A progress callback is a side channel (e.g. a DB write) -- a bug in
+    it must never take down an otherwise-successful parse."""
+    from pypdf import PdfWriter
+    from app.services.ocr import NullOcrEngine
+    from app.services.pdf_classify import PageDecision, PageSignals, PageStrategy
+
+    monkeypatch.setattr("app.services.ocr.get_ocr_engine", lambda: NullOcrEngine())
+
+    class _FakePage:
+        def extract_text(self):
+            return "some native text"
+
+        def get(self, key):
+            return None
+
+    class _FakeReader:
+        def __init__(self, path):
+            self.pages = [_FakePage()]
+
+    monkeypatch.setattr("pypdf.PdfReader", _FakeReader)
+    forced_signals = PageSignals(
+        char_count=10, page_area_in2=7.7, char_density=5.0, font_count=1,
+        image_count=0, has_full_page_raster=False, full_raster_dpi=None,
+        bad_char_ratio=0.0,
+    )
+    monkeypatch.setattr(
+        "app.services.pdf_classify.classify_page",
+        lambda page, text=None: PageDecision(PageStrategy.NATIVE, forced_signals, "native for test"),
+    )
+
+    f = tmp_path / "one_page.pdf"
+    writer = PdfWriter()
+    writer.add_blank_page(width=200, height=200)
+    with open(f, "wb") as fh:
+        writer.write(fh)
+
+    def _raising_callback(page_num, total):
+        raise RuntimeError("simulated DB write failure")
+
+    md = parse_document_to_markdown(f, on_page_processed=_raising_callback)
+    assert "some native text" in md
+
+
 def test_pdf_presentation_form_text_normalized_to_standard_arabic(tmp_path, monkeypatch):
     """Measured on a real 80-page administrative guide: a PDF's table text
     can extract as Unicode Presentation Forms B glyphs (U+FE70-FEFF)
@@ -444,6 +676,26 @@ def test_docx_headings_become_markdown_headings(tmp_path):
     assert any("Art. 283" in heading for heading, _ in sections)
 
 
+def test_docx_table_cell_pipe_is_escaped(tmp_path):
+    """`_parse_docx` builds table rows via `_render_row`, the same helper
+    xlsx/csv already use, specifically so a literal '|' inside a cell is
+    escaped rather than misread as a cell boundary -- before this it built
+    rows inline and skipped that escaping, so a cell like 'A|B' corrupted
+    the row instead of surviving as one cell's content."""
+    import docx
+
+    d = docx.Document()
+    table = d.add_table(rows=1, cols=2)
+    table.cell(0, 0).text = "A|B"
+    table.cell(0, 1).text = "C"
+    f = tmp_path / "doc.docx"
+    d.save(str(f))
+
+    md = parse_document_to_markdown(f)
+    assert "A\\|B" in md  # escaped in the raw markdown, same as xlsx/csv
+    assert "A|B" in strip_markdown(md)  # and round-trips back to a literal '|'
+
+
 def test_pptx_slide_title_becomes_heading_and_notes_included(tmp_path):
     import pptx
 
@@ -459,6 +711,33 @@ def test_pptx_slide_title_becomes_heading_and_notes_included(tmp_path):
     assert "## Equipements de protection (Art. 99)" in md
     assert "Casque, gants, lunettes." in md
     assert "Verifier la conformite CE." in md
+
+
+def test_pptx_table_shape_is_extracted_not_dropped(tmp_path):
+    """A PowerPoint table is a SEPARATE shape type (GraphicFrame with
+    has_table=True) from the text-frame shapes the rest of this parser
+    handles -- it was previously invisible to _parse_pptx entirely:
+    silently absent from the output, no error, no unprocessed_pages
+    record, indistinguishable from a slide that never had a table."""
+    import pptx
+    from pptx.util import Inches
+
+    p = pptx.Presentation()
+    slide = p.slides.add_slide(p.slide_layouts[6])  # blank layout
+    table_shape = slide.shapes.add_table(
+        rows=2, cols=2, left=Inches(1), top=Inches(1), width=Inches(4), height=Inches(2)
+    )
+    table = table_shape.table
+    table.cell(0, 0).text = "Norme"
+    table.cell(0, 1).text = "Seuil"
+    table.cell(1, 0).text = "EN 397"
+    table.cell(1, 1).text = "450 metres"
+    f = tmp_path / "doc.pptx"
+    p.save(str(f))
+
+    md = parse_document_to_markdown(f)
+    assert "EN 397" in md
+    assert "450 metres" in md
 
 
 def test_xlsx_sheet_name_becomes_heading(tmp_path):

@@ -24,10 +24,11 @@ import re
 import uuid
 from typing import Optional
 
-from sqlalchemy import create_engine, func, select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.config import get_settings
+from app.models.db import get_engine
 from app.models.database import ChatMessage, ChatSession
 from app.services.generate_training_data import _QUESTION_MARK
 
@@ -47,19 +48,26 @@ _engine = None
 
 
 def _get_engine():
+    """The process-wide engine (app.models.db), not a private one.
+
+    Was building its own create_engine() here, which meant this module's
+    pool and app.services.sources' pool (and ingest's, and video's) were
+    four separate sets of Postgres backends for the same URL -- a single
+    chat turn checked connections out of two of them and reused nothing.
+    The connect_timeout that this fail-open contract depends on now lives
+    in app.models.db.CONNECT_TIMEOUT_SECONDS, unchanged in value: without
+    it an unreachable Postgres (a dead container mid-demo, not just "not
+    started") hangs on the platform's default TCP timeout -- observed
+    multiple seconds on this machine's IPv6 (::1) attempt before falling
+    back to IPv4 -- turning every chat request slow instead of gracefully
+    stateless.
+
+    The module-level `_engine` global is kept (rather than calling
+    get_engine() inline) because tests monkeypatch it to swap in SQLite.
+    """
     global _engine
     if _engine is None:
-        # connect_timeout matters for the fail-open contract itself, not
-        # just test speed: without it, an unreachable Postgres (a dead
-        # container mid-demo, not just "not started") can hang on the
-        # platform's default TCP timeout -- observed multiple seconds on
-        # this machine's IPv6 (::1) attempt before falling back to IPv4 --
-        # turning every chat request slow instead of gracefully stateless.
-        _engine = create_engine(
-            get_settings().database_url,
-            pool_pre_ping=True,
-            connect_args={"connect_timeout": 2},
-        )
+        _engine = get_engine()
     return _engine
 
 

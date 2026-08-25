@@ -299,11 +299,12 @@ add(
 
 
 def main():
+    from app.services.generate_corpus_index import write_corpus_doc
+
     written = 0
     for spec in FILES:
         target = RAW / spec["scope"] / spec["domain"] / "text" / Path(spec["path"]).name
-        target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_text(spec["content"].strip() + "\n", encoding="utf-8")
+        write_corpus_doc(target, spec["content"])
         print(f"  wrote {target}")
         written += 1
     print(f"\n{written} Arabic-script documents written to {RAW}/")

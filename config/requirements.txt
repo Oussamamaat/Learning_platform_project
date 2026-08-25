@@ -15,6 +15,10 @@ psycopg2-binary==2.9.9
 # OCR's own heavier, mutually-incompatible dependencies live in
 # config/requirements-ocr.txt, deliberately kept out of this file.
 pypdf==5.1.0
+# pypdf needs this to open AES-encrypted PDFs (no user password, publisher
+# DRM against editing -- common on institutional PDFs, e.g. INRS guides).
+# Without it, ingestion fails outright on an otherwise-readable document.
+cryptography>=3.1
 pypdfium2==4.30.0
 python-docx==1.1.2
 python-pptx==1.0.2

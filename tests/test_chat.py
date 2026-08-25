@@ -445,19 +445,200 @@ def test_chat_response_not_degraded_on_happy_path():
 
 def test_active_source_ids_from_request_reaches_retrieve_context():
     """ChatRequest.active_source_ids must reach _retrieve_context's
-    source_ids kwarg -- threaded through source_service.active_source_ids
-    (mocked here to isolate this test from real Postgres state) and
-    _resolve_turn_context."""
-    with patch("app.routers.chat.source_service.active_source_ids",
-               return_value=["src-1", "src-2"]) as asi, \
-         patch("app.routers.chat._retrieve_context",
+    source_ids kwarg -- threaded through source_service.
+    active_sources_and_version (mocked here to isolate this test from real
+    Postgres state) and _resolve_turn_context.
+
+    Patches active_sources_and_version, not active_source_ids: chat() now
+    gets the active-id list and the pin-invalidation corpus_version from
+    ONE query instead of two (both derive from the same source_files rows
+    -- see app.services.sources). The contract under test is unchanged;
+    only which function chat calls to satisfy it moved.
+    """
+    with patch("app.routers.chat.source_service.active_sources_and_version",
+               return_value=(["src-1", "src-2"], "corpus-v1")) as asv,          patch("app.routers.chat._retrieve_context",
                return_value=("ctx", ["doc.md"], False)) as rc:
         chat(ChatRequest(
             message="Que dit le document uploade ?", domain=Domain.INDUSTRIAL,
             active_source_ids=["src-1", "src-2", "src-unrelated"],
         ))
     # The client-supplied list is passed through as a NARROWING hint --
-    # active_source_ids itself (mocked here) owns the actual intersection
-    # logic, tested directly in tests/test_sources.py.
-    asi.assert_called_once_with("company_abc", requested=["src-1", "src-2", "src-unrelated"])
+    # active_sources_and_version itself (mocked here) owns the actual
+    # intersection logic, tested directly in tests/test_sources.py.
+    asv.assert_called_once_with("company_abc", requested=["src-1", "src-2", "src-unrelated"])
     assert rc.call_args.kwargs["source_ids"] == ["src-1", "src-2"]
+
+
+def test_corpus_version_is_not_re_queried_after_the_merged_lookup():
+    """The corpus_version chat() already holds from active_sources_and_version
+    must be threaded into _resolve_turn_context, not fetched a second time --
+    that duplicate SELECT over identical rows is what merging the two
+    lookups removed."""
+    with patch("app.routers.chat.source_service.active_sources_and_version",
+               return_value=([], "corpus-v1")),          patch("app.routers.chat.source_service.corpus_version") as cv,          patch("app.routers.chat._retrieve_context",
+               return_value=("ctx", ["doc.md"], False)),          patch("app.routers.chat.generate_llm_response", return_value="Reponse."):
+        chat(ChatRequest(message="Que dit le document ?", domain=Domain.INDUSTRIAL))
+    cv.assert_not_called()
+
+
+# --- Diagram generation (app.services.diagrams) ---------------------------
+#
+# The trigger is the message's own text (app.services.diagrams.
+# detect_diagram_intent), checked BEFORE the empty-context refusal gate --
+# see chat.py's step 2b. No separate diagram endpoint exists.
+
+
+def test_diagram_request_returns_populated_diagram():
+    def fake_context(*args, **kwargs):
+        return "Article 12 : couper l'alimentation puis verrouiller la machine.", ["doc1.pdf"], False
+
+    diagram_spec = {
+        "title": "Consignation",
+        "caption": "Voici les etapes de consignation avant intervention.",
+        "direction": "TD",
+        "nodes": [{"id": "a", "label": "Couper l'alimentation"}, {"id": "b", "label": "Verrouiller"}],
+        "edges": [{"source": "a", "target": "b"}],
+    }
+
+    class FakeResponse:
+        def __init__(self, body):
+            self._body = body
+        def read(self):
+            import json
+            return json.dumps(self._body).encode("utf-8")
+        def __enter__(self):
+            return self
+        def __exit__(self, *exc):
+            return False
+
+    with patch("app.routers.chat._retrieve_context", side_effect=fake_context), \
+         patch("app.services.llm.urllib.request.urlopen",
+               return_value=FakeResponse({"response": __import__("json").dumps(diagram_spec)})):
+        response = chat(ChatRequest(
+            message="Dessine-moi un schema des etapes de consignation",
+            domain=Domain.INDUSTRIAL,
+        ))
+    assert response.diagram is not None
+    assert response.diagram.kind == "flowchart"
+    assert response.diagram.grounded is True
+    assert "flowchart TD" in response.diagram.mermaid
+    assert response.response == response.diagram.caption
+
+
+def test_ordinary_question_never_populates_diagram():
+    """A normal question containing no diagram keyword must return
+    diagram=None and never even attempt diagram generation."""
+    def fake_context(*args, **kwargs):
+        return "Selon Article 8, le port du casque est obligatoire.", ["doc1.pdf"], False
+
+    class FakeResponse:
+        def __init__(self, body):
+            self._body = body
+        def read(self):
+            import json
+            return json.dumps(self._body).encode("utf-8")
+        def __enter__(self):
+            return self
+        def __exit__(self, *exc):
+            return False
+
+    fake_ollama = FakeResponse(
+        {"message": {"role": "assistant", "content": "Le port du casque est obligatoire (Article 8)."}}
+    )
+    with patch("app.routers.chat._retrieve_context", side_effect=fake_context), \
+         patch("app.services.llm.urllib.request.urlopen", return_value=fake_ollama):
+        response = chat(ChatRequest(message="Que dit le document sur le port du casque ?", domain=Domain.INDUSTRIAL))
+    assert response.diagram is None
+
+
+def test_diagram_request_with_empty_context_still_produces_ungrounded_diagram():
+    """The empty-context refusal gate must not fire for a diagram request --
+    an ungrounded diagram (grounded=False) is produced instead, never a
+    refusal. This is the ordering invariant chat.py's step 2b docstring
+    calls out explicitly."""
+    diagram_spec = {
+        "title": "Marteau haussier",
+        "caption": "Illustration d'un marteau haussier.",
+        "candles": [
+            {"label": "J1", "open": 10, "high": 12, "low": 8, "close": 11},
+            {"label": "J2", "open": 11, "high": 13, "low": 9, "close": 12},
+        ],
+    }
+
+    class FakeResponse:
+        def __init__(self, body):
+            self._body = body
+        def read(self):
+            import json
+            return json.dumps(self._body).encode("utf-8")
+        def __enter__(self):
+            return self
+        def __exit__(self, *exc):
+            return False
+
+    with patch("app.routers.chat._retrieve_context", side_effect=_empty_context), \
+         patch("app.services.llm.urllib.request.urlopen",
+               return_value=FakeResponse({"response": __import__("json").dumps(diagram_spec)})):
+        response = chat(ChatRequest(message="Montre-moi une bougie en marteau haussier", domain=Domain.INDUSTRIAL))
+    assert response.diagram is not None
+    assert response.diagram.kind == "candlestick"
+    assert response.diagram.grounded is False
+
+
+def test_diagram_request_ignores_stale_pinned_context_on_no_match():
+    """Regression test for a defect caught live via a real same-session,
+    two-turn browser conversation (Playwright): a grounded flowchart turn
+    followed by an off-topic candlestick follow-up. _resolve_turn_context's
+    own documented fallback ("a stale-but-relevant answer beats a false
+    refusal") reused turn 1's pinned lockout/tagout context and sources for
+    turn 2, even though domain_source == "no_match" (this turn's own vote
+    found nothing candlestick-relevant). Before the fix, generate_diagram
+    saw that non-empty stale context, set grounded=True, and returned an
+    unrelated safety document as the candlestick's "source" -- exactly the
+    confident-but-wrong signal ChatResponse.degraded's docstring warns
+    against for the pgvector-fallback case, here caused by pin reuse
+    instead. chat.py's diagram branch now treats domain_source == "no_match"
+    as empty context/sources for generate_diagram's purposes, same as the
+    refusal gate below it already does."""
+    def stale_pin_context(*args, **kwargs):
+        # Simulates _resolve_turn_context falling back to a same-session
+        # pin from an earlier, unrelated (but genuinely grounded) turn.
+        return (
+            "Article 12 : couper l'alimentation puis verrouiller la machine.",  # context
+            ["1.5_lockout_tagout_procedures.md"],  # sources
+            1,      # segment_id
+            False,  # is_new_pin
+            "industrial",  # domain
+            "no_match",    # domain_source -- THIS turn's own vote found nothing
+            False,  # degraded
+            None,   # corpus_version
+        )
+
+    diagram_spec = {
+        "title": "Marteau haussier",
+        "caption": "Illustration d'un marteau haussier.",
+        "candles": [
+            {"label": "J1", "open": 10, "high": 12, "low": 8, "close": 11},
+            {"label": "J2", "open": 11, "high": 13, "low": 9, "close": 12},
+        ],
+    }
+
+    class FakeResponse:
+        def __init__(self, body):
+            self._body = body
+        def read(self):
+            import json
+            return json.dumps(self._body).encode("utf-8")
+        def __enter__(self):
+            return self
+        def __exit__(self, *exc):
+            return False
+
+    with patch("app.routers.chat._resolve_turn_context", side_effect=stale_pin_context), \
+         patch("app.services.llm.urllib.request.urlopen",
+               return_value=FakeResponse({"response": __import__("json").dumps(diagram_spec)})):
+        response = chat(ChatRequest(message="Montre-moi une bougie en marteau haussier", domain=Domain.INDUSTRIAL))
+    assert response.diagram is not None
+    assert response.diagram.grounded is False
+    assert response.diagram.sources == []
+    assert response.sources == []

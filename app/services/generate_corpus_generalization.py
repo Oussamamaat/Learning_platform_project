@@ -334,11 +334,12 @@ conservé pour chaque préparation servie.
 
 
 def main():
+    from app.services.generate_corpus_index import write_corpus_doc
+
     written = 0
     for domain, filename, content in DOCS:
         target = RAW / SCOPE / domain / "text" / filename
-        target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_text(content.strip() + "\n", encoding="utf-8")
+        write_corpus_doc(target, content)
         print(f"  wrote {target}")
         written += 1
     domains = sorted({d for d, _, _ in DOCS})

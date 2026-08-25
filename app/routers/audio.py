@@ -12,17 +12,18 @@ async def process_audio(
     language: Language = Language.DARIJA,
 ):
     """
-    Audio processing endpoint.
-    Receives audio blob, transcribes via Whisper, processes through RAG pipeline.
+    Audio processing endpoint -- reserved for the voice-chat feature
+    (STT -> RAG pipeline -> TTS). Not implemented: no STT/TTS vendor has
+    been selected yet (resurrection.md Q0.2, the program's single largest
+    unresolved MVP item, tracked #1 in resurrection.md's "Known-open,
+    carried forward" list). This must fail loudly rather than return a
+    placeholder transcription -- a mounted endpoint that fakes success is
+    worse than one that says so, once a real client is wired to it.
     """
-    # TODO: Week 6 - Integrate Whisper STT
-    # TODO: Week 6 - Pass transcription to RAG pipeline
     if not audio.content_type or not audio.content_type.startswith("audio/"):
         raise HTTPException(status_code=400, detail="File must be an audio type")
 
-    return AudioResponse(
-        transcription="[Placeholder] Audio transcription will appear here.",
-        response="[Placeholder] AI response to transcribed audio.",
-        session_id=session_id or "new-session",
-        sources=[],
+    raise HTTPException(
+        status_code=501,
+        detail="Audio transcription is not implemented yet (no STT/TTS vendor selected).",
     )

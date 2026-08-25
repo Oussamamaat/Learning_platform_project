@@ -51,23 +51,31 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from app.config import get_settings  # noqa: E402
 
-TENANT = "company_efg"
+TENANT = os.environ.get("PROBE_TENANT", "company_efg")
+
+# Which uploaded file the arabic needles should be looked for in. Defaults
+# to the full 80-page arabic_test.pdf; set PROBE_ARABIC_DOC=arabic_probe.pdf
+# to run the same checks against tests/data/real_pdfs/arabic_probe.pdf, the
+# 10-page structural subset (see that fixture's README for the page map).
+# Every needle below lives on a page the subset keeps, so the checks are
+# identical in strength -- only the OCR wall-clock differs.
+ARABIC_DOC = os.environ.get("PROBE_ARABIC_DOC", "arabic_test.pdf")
 
 # (label, needle, tier, source_doc, why_it_matters)
 STORED_CHECKS = [
     # --- Tier 1: hand-verified, the pages the pre-fix pipeline lost ---
-    ("p51 DPF constant 1.5765", "1.5765", 1, "arabic_test.pdf", "page was classified EMPTY and dropped entirely pre-fix"),
-    ("p51 DPF exponent 0.158", "0.158", 1, "arabic_test.pdf", "same page"),
-    ("p51 seconds/day 86400", "86400", 1, "arabic_test.pdf", "same page"),
-    ("p15 CAD layer حدود القسيمة", "حدود القسيمة", 1, "arabic_test.pdf", "table lost pre-fix (page kept as sparse NATIVE)"),
-    ("p15 CAD layer التقسيمات", "التقسيمات", 1, "arabic_test.pdf", "same table"),
-    ("p15 CAD layer نص التقسيمات", "نص التقسيمات", 1, "arabic_test.pdf", "same table"),
-    ("p15 datum 1970", "1970", 1, "arabic_test.pdf", "geodetic datum, native layer"),
-    ("p15 scale factor 0.999600", "0.999600", 1, "arabic_test.pdf", "native-only value -- proves native+OCR MERGE, not replace"),
+    ("p51 DPF constant 1.5765", "1.5765", 1, ARABIC_DOC, "page was classified EMPTY and dropped entirely pre-fix"),
+    ("p51 DPF exponent 0.158", "0.158", 1, ARABIC_DOC, "same page"),
+    ("p51 seconds/day 86400", "86400", 1, ARABIC_DOC, "same page"),
+    ("p15 CAD layer حدود القسيمة", "حدود القسيمة", 1, ARABIC_DOC, "table lost pre-fix (page kept as sparse NATIVE)"),
+    ("p15 CAD layer التقسيمات", "التقسيمات", 1, ARABIC_DOC, "same table"),
+    ("p15 CAD layer نص التقسيمات", "نص التقسيمات", 1, ARABIC_DOC, "same table"),
+    ("p15 datum 1970", "1970", 1, ARABIC_DOC, "geodetic datum, native layer"),
+    ("p15 scale factor 0.999600", "0.999600", 1, ARABIC_DOC, "native-only value -- proves native+OCR MERGE, not replace"),
     # --- Tier 2: tenant benchmark TC-01..TC-07 ---
-    ("TC-06 substation threshold 12,000", "12,000", 2, "arabic_test.pdf", "was stored pre-fix but never retrieved"),
-    ("TC-05 reclamation line خط الدفان", "خط الدفان", 2, "arabic_test.pdf", "waterfront setback"),
-    ("TC-07 telecom zone BB1", "BB1", 2, "arabic_test.pdf", "tower exclusion zone list, p80"),
+    ("TC-06 substation threshold 12,000", "12,000", 2, ARABIC_DOC, "was stored pre-fix but never retrieved"),
+    ("TC-05 reclamation line خط الدفان", "خط الدفان", 2, ARABIC_DOC, "waterfront setback"),
+    ("TC-07 telecom zone BB1", "BB1", 2, ARABIC_DOC, "tower exclusion zone list, p80"),
     # --- french_test.pdf: needs ZERO OCR, pure native-parse control ---
     ("FR safety component rule", "composant de sécurité", 1, "french_test.pdf", "p13 rule used by the tutoring eval"),
     ("FR CE marking", "marquage CE", 1, "french_test.pdf", "p12/p13"),

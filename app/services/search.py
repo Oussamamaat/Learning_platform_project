@@ -11,6 +11,7 @@ from sentence_transformers import SentenceTransformer
 
 from app.config import get_settings
 from app.services.ingestion import (
+    embed_query,
     load_embedding_model,
     get_db_connection,
 )
@@ -64,60 +65,73 @@ def search_similar_chunks(
     if embedding_model is None:
         embedding_model = load_embedding_model()
 
-    query_embedding = embedding_model.encode([query])[0].tolist()
+    # Cached: a single chat turn embeds the SAME query text twice -- once
+    # for app.services.routing.resolve_domain's tier-2 vote, once for the
+    # domain-scoped retrieval that follows it -- and bge-m3 is a 2.2GB
+    # transformer, not a hash function. See embed_query's docstring.
+    embedding_str = embed_query(query, model=embedding_model)
 
     conn = get_db_connection(db_url)
     try:
         cursor = conn.conn.cursor() if hasattr(conn, "conn") else conn.cursor()
+        try:
+            domain_clause = "AND (domain = %(domain)s OR source_file_id IS NOT NULL)" if domain else ""
+            source_clause = (
+                "AND (source_file_id IS NULL OR source_file_id = ANY(%(source_ids)s::uuid[]))"
+                if source_ids is not None else ""
+            )
+            # NAMED parameters, so the 1024-dim query vector is sent ONCE
+            # even though it appears twice in the statement (the similarity
+            # projection and the ORDER BY). With positional %s it was bound
+            # twice, i.e. ~2x20KB of vector literal pushed over the wire per
+            # search, and every chat turn issues two searches.
+            search_query = f"""
+                SELECT
+                    id,
+                    content,
+                    source_name,
+                    source_type,
+                    domain,
+                    language,
+                    metadata,
+                    1 - (embedding <=> %(emb)s::vector) AS similarity,
+                    source_file_id
+                FROM documents
+                WHERE tenant_id = %(tenant_id)s
+                {domain_clause}
+                {source_clause}
+                ORDER BY embedding <=> %(emb)s::vector
+                LIMIT %(top_k)s;
+            """
 
-        domain_clause = "AND (domain = %s OR source_file_id IS NOT NULL)" if domain else ""
-        source_clause = (
-            "AND (source_file_id IS NULL OR source_file_id = ANY(%s::uuid[]))"
-            if source_ids is not None else ""
-        )
-        search_query = f"""
-            SELECT
-                id,
-                content,
-                source_name,
-                source_type,
-                domain,
-                language,
-                metadata,
-                1 - (embedding <=> %s::vector) AS similarity,
-                source_file_id
-            FROM documents
-            WHERE tenant_id = %s
-            {domain_clause}
-            {source_clause}
-            ORDER BY embedding <=> %s::vector
-            LIMIT %s;
-        """
+            params = {"emb": embedding_str, "tenant_id": tenant_id, "top_k": top_k}
+            if domain:
+                params["domain"] = domain
+            if source_ids is not None:
+                params["source_ids"] = list(source_ids)
+            cursor.execute(search_query, params)
 
-        embedding_str = str(query_embedding)
-        params = [embedding_str, tenant_id]
-        if domain:
-            params.append(domain)
-        if source_ids is not None:
-            params.append(source_ids)
-        params.extend([embedding_str, top_k])
-        cursor.execute(search_query, params)
-
-        results = []
-        for row in cursor.fetchall():
-            results.append({
-                "id": str(row[0]),
-                "content": row[1],
-                "source_name": row[2],
-                "source_type": row[3],
-                "domain": row[4],
-                "language": row[5],
-                "metadata": row[6],
-                "similarity": float(row[7]),
-                "source_file_id": str(row[8]) if row[8] else None,
-            })
-
-        return results
+            return [
+                {
+                    "id": str(row[0]),
+                    "content": row[1],
+                    "source_name": row[2],
+                    "source_type": row[3],
+                    "domain": row[4],
+                    "language": row[5],
+                    "metadata": row[6],
+                    "similarity": float(row[7]),
+                    "source_file_id": str(row[8]) if row[8] else None,
+                }
+                for row in cursor.fetchall()
+            ]
+        finally:
+            # Explicit, because connections are pooled now (app.services.
+            # ingestion.get_db_connection): a cursor left open on a
+            # connection that goes straight back into the pool keeps its
+            # server-side portal and result set alive until the next
+            # borrower happens to close it.
+            cursor.close()
     finally:
         conn.close()
 
@@ -128,8 +142,6 @@ def build_rag_context(
     top_k: int = 5,
     similarity_threshold: Optional[float] = None,
     max_context_length: int = 6000,
-    database_url: Optional[str] = None,
-    embedding_model: Optional[SentenceTransformer] = None,
     domain: Optional[str] = None,
     ui_lang: Optional[str] = None,
     source_ids: Optional[list[str]] = None,
@@ -140,10 +152,7 @@ def build_rag_context(
     Thin (context, sources) wrapper around app.services.retrieval.retrieve()
     -- kept as its own function (not just calling retrieve() at every call
     site) so this module's existing signature and the tests that import it
-    directly are unaffected. `database_url`/`embedding_model` are accepted
-    for backward compatibility but unused: retrieve()'s pgvector path
-    always uses the configured settings connection and the shared cached
-    embedding model, same as before.
+    directly are unaffected.
 
     `similarity_threshold=None` defers to settings.similarity_threshold
     (retrieve()'s own default) rather than baking a value in here, so a

@@ -1,0 +1,30 @@
+=== 1. Upload + poll to ready ===
+Loading embedding model: BAAI/bge-m3
+Model loaded. Embedding dimension: 1024
+  2 file(s) ready: ['0a8df4b2-bb73-43b2-beff-3c1b348fdc4b', '923a35dd-58c4-49ba-9e56-06ad934a2f53']
+
+=== 2. Baseline turn, seeds a pin ===
+  sources: ['1.1_code_du_travail_health_safety.md', 'french_test.pdf', '1.7_machine_guarding_basics.md']
+
+  [OK] baseline answered with real sources
+
+=== 3. Mid-conversation upload -- the actual pin-invalidation proof ===
+  uploaded politique_consignation_nord.md, id=728c3946-113d-4b3b-88df-278fae01e439, status=ready
+  reply: Selon l'Article Z-99, tout cadenas de consignation électrique individuel doit être recertifié par le responsable HSE tous les 47 jours.  Est-ce que cela vous est clair ?
+  sources: ['politique_consignation_nord.md', '1.5_lockout_tagout_procedures.md', '1.7_machine_guarding_basics.md']
+  [OK] new source appears in the very next turn (source_in_sources=True, mentions_47=True)
+
+=== 4. Toggle off -- disappears on the very next turn ===
+  sources after toggle-off: ['Company EFG Benchmark2.pdf', '1.7_machine_guarding_basics.md', '1.6_ppe_requirements.md']
+  [OK] disabled source no longer grounds the answer
+
+=== 5. Delete -- chunk count returns to baseline ===
+  deleted_chunks=1, total_chunks 108 -> 107
+  [OK] chunk count dropped by exactly the deleted amount
+
+=== 6. Global corpus remained reachable throughout ===
+  sources: ['1.6_ppe_requirements.md', '1.7_machine_guarding_basics.md', 'french_test.pdf', '1.8_hazardous_materials_handling.md']
+  [OK] global raw/shared corpus still answers normally
+
+============================================================
+VERDICT: OK -- mid-conversation upload invalidates the pin, toggle/delete both take effect immediately, global corpus unaffected.

@@ -54,7 +54,24 @@ def _get_pipeline(engine: str):
 
     if engine == "vl":
         from paddleocr import PaddleOCRVL
-        pipeline = PaddleOCRVL()
+        # Preprocessing disabled deliberately, and measured rather than
+        # assumed: app.services.ingestion._ocr_pdf_page renders every page
+        # itself from the PDF at a known scale and orientation, so document
+        # orientation classification (PP-LCNet_x1_0_doc_ori) and dewarping
+        # (UVDoc) have nothing to correct; seal and chart recognition are
+        # irrelevant to this corpus. Measured on arabic_test.pdf p15/p51:
+        # construct 30.8s -> 9.2s, warm per-page average 62.0s -> 52.5s
+        # (page-dependent: p15 52.9s -> 34.7s, p51 essentially unchanged),
+        # with ground-truth recovery IDENTICAL at 12/13 -- i.e. a real but
+        # modest speedup at zero fidelity cost. It is NOT the big lever;
+        # two-tier routing in _ocr_pdf_page is (see this module's `classic`
+        # entry and ingestion._classic_ocr_looks_incomplete).
+        pipeline = PaddleOCRVL(
+            use_doc_orientation_classify=False,
+            use_doc_unwarping=False,
+            use_seal_recognition=False,
+            use_chart_recognition=False,
+        )
     elif engine == "structure":
         from paddleocr import PPStructureV3
         pipeline = PPStructureV3()

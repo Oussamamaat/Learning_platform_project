@@ -3,9 +3,11 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from app.config import get_settings, get_tenant_id
-from app.routers import chat, audio, quiz, demo, ingest, video
+from app.routers import chat, audio, quiz, ingest, video
 from app.errors import AppError
-from app.services.ingestion import load_embedding_model
+from app.models.db import dispose_engine
+from app.services.ingestion import close_db_pools, load_embedding_model
+from app.services.ocr import shutdown_resident_worker
 from app.services.sources import reap_orphaned_processing
 
 logging.basicConfig(
@@ -49,7 +51,6 @@ async def generic_error_handler(request: Request, exc: Exception) -> JSONRespons
 app.include_router(chat.router)
 app.include_router(audio.router)
 app.include_router(quiz.router)
-app.include_router(demo.router)
 app.include_router(ingest.router)
 app.include_router(video.router)
 
@@ -78,6 +79,33 @@ async def _reap_orphaned_uploads() -> None:
     never mark another tenant's in-flight uploads as errored.
     """
     reap_orphaned_processing(get_tenant_id())
+
+
+@app.on_event("shutdown")
+def _release_resources() -> None:
+    """Give back everything this process holds outside its own heap.
+
+    Without this, a uvicorn --reload cycle (or any restart) left three
+    things behind: pooled Postgres backends from the shared SQLAlchemy
+    engine and the psycopg2 pool, and -- the expensive one -- the resident
+    OCR worker subprocess, which holds GPU memory. On an 8GB card the new
+    process then tries to load its models alongside the old worker's,
+    which is exactly the contention app/config.py's
+    ocr_worker_idle_release_seconds docstring records as pushing the tutor
+    model onto 31% CPU and past a live request's timeout.
+
+    Sync, not async: every call here is blocking, and a shutdown hook is
+    the one place where running blocking work on the loop costs nothing.
+    """
+    for label, release in (
+        ("psycopg2 pools", close_db_pools),
+        ("SQLAlchemy engine", dispose_engine),
+        ("resident OCR worker", shutdown_resident_worker),
+    ):
+        try:
+            release()
+        except Exception:
+            logging.exception("could not release %s at shutdown", label)
 
 
 @app.get("/health", tags=["health"])

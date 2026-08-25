@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import type { QuizResponse } from "../types/api";
+import type { DiagramPayload, QuizResponse } from "../types/api";
 
 export type MessageRole = "user" | "assistant";
 
@@ -10,6 +10,7 @@ export interface ChatMessage {
   createdAt: number;
   sources?: string[];
   quiz?: QuizResponse;
+  diagram?: DiagramPayload;
   pending?: boolean;
   error?: boolean;
   crossLanguage?: boolean;

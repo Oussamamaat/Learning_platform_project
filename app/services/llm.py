@@ -7,6 +7,7 @@ Supports multi-domain enterprise tutoring with Socratic methodology.
 
 import json
 import logging
+import time
 import urllib.request
 import urllib.error
 from typing import Optional
@@ -203,6 +204,131 @@ def build_explanatory_prompt(domain: str, context: str, language: str = "darija"
         return EXPLANATORY_PROMPT_TEMPLATE_FR.format(domain=domain_label, context=context)
     domain_label = DOMAIN_LABELS.get(domain, domain)
     return EXPLANATORY_PROMPT_TEMPLATE.format(domain=domain_label, context=context)
+
+
+# Diagram-generation prompts. Deliberately separate constants, not edits to
+# SYSTEM_PROMPT_TEMPLATE / _FR, for the same train/serve parity reason
+# EXPLANATORY_PROMPT_TEMPLATE above is separate -- those two remain under
+# test_generation_gates.py's byte-identical assertion and must never gain a
+# new instruction line.
+#
+# Unlike SYSTEM_PROMPT_TEMPLATE, this asks for a JSON object (Ollama's
+# `format` constrains the shape further -- see app/services/diagrams.py's
+# per-kind schemas), not prose, and the "structural labels always in
+# French" instruction is unconditional even in the Darija variant: the
+# model's own free-text CAPTION follows the turn's response language, but
+# every node/edge/participant/slice/axis label inside the diagram itself
+# follows settings.diagram_label_language regardless. This is why a
+# Darija-speaking learner can still get a diagram whose own labels read
+# "les EPI" / "la procedure" rather than a transliteration -- the same
+# French-technical-vocabulary convention SYSTEM_PROMPT_TEMPLATE already
+# establishes for prose, extended to diagram content.
+DIAGRAM_PROMPT_TEMPLATE_FR = (
+    "Tu es un tuteur d'entreprise expert, specialise en {domain}.\n"
+    "Tu dois produire un diagramme structure, au format JSON strict conforme "
+    "au schema impose -- ne renvoie RIEN d'autre que ce JSON.\n"
+    "Tous les libelles du diagramme (titres, noeuds, etiquettes de fleches, "
+    "participants, parts, axes) doivent etre en francais, en ecriture latine.\n"
+    "La legende (caption) doit etre une ou deux phrases en francais expliquant "
+    "le diagramme.\n"
+    "Fonde le diagramme strictement sur le contexte fourni ci-dessous ; "
+    "n'invente jamais de reference legale, de numero d'article ou de fait "
+    "absent du contexte. Si le contexte est vide, illustre le sujet demande "
+    "sans inventer de reference documentaire.\n\n"
+    "CONTEXTE :\n"
+    "{context}"
+)
+
+
+# English meta-instruction, Arabic-script output for `caption` only --
+# matching SYSTEM_PROMPT_TEMPLATE's own register exactly (that template
+# instructs "Answer in Moroccan Darija written in Arabic script" in
+# English, not in Darija itself). This is the fine-tune's actual trained
+# shape (generate_training_data.PRODUCTION_SYSTEM_PROMPT_TEMPLATE is the
+# same English-instructions/Arabic-output split); an all-Arabic-script
+# system prompt here would be a novel register with zero training
+# exemplars behind it, not merely a stylistic choice.
+DIAGRAM_PROMPT_TEMPLATE_DARIJA = (
+    "You are an expert bilingual enterprise tutor specializing in {domain}.\n"
+    "Produce a structured diagram as a strict JSON object conforming to the "
+    "imposed schema -- return NOTHING else, no prose, no markdown fences.\n"
+    "Every structural label in the diagram (titles, node text, edge labels, "
+    "participant names, slice labels, axis labels) must be in French, Latin "
+    "script -- never Arabic script, never Darija.\n"
+    "The \"caption\" field must be written in Moroccan Darija, in Arabic "
+    "script, one or two sentences explaining the diagram to the learner.\n"
+    "Ground the diagram strictly in the context below. Never invent a legal "
+    "reference, an article number, or a fact absent from the context. If the "
+    "context is empty, illustrate the requested topic without inventing any "
+    "document reference.\n\n"
+    "CONTEXTE :\n"
+    "{context}"
+)
+
+# One French hint per kind, appended to the user turn so a 9B model
+# reliably reaches for the right shape (flowchart vs. pie vs. candlestick)
+# beyond what the schema's field names alone convey. Kept short: the
+# schema, not this sentence, is what actually constrains structure.
+DIAGRAM_KIND_HINTS_FR = {
+    "flowchart": (
+        "Produis un ORGANIGRAMME (flowchart) : une liste d'etapes (nodes) et "
+        "de fleches (edges) qui les relient dans l'ordre logique du processus."
+    ),
+    "sequence": (
+        "Produis un DIAGRAMME DE SEQUENCE : une liste d'acteurs (participants) "
+        "et une suite ordonnee de messages echanges entre eux."
+    ),
+    "mindmap": (
+        "Produis une CARTE MENTALE (mindmap) : un theme central (root) et des "
+        "branches, chacune avec ses sous-elements (children)."
+    ),
+    "pie": (
+        "Produis un CAMEMBERT (pie chart) : une liste de parts (label + valeur "
+        "numerique) dont la somme represente un tout."
+    ),
+    "xy": (
+        "Produis un GRAPHIQUE (barres ou courbe) : des categories sur l'axe X "
+        "et une serie de valeurs numeriques correspondantes."
+    ),
+    "candlestick": (
+        "Produis un GRAPHIQUE EN CHANDELIERS JAPONAIS (candlestick) : une liste "
+        "de bougies, chacune avec open/high/low/close, illustrant le motif "
+        "demande. Si aucune donnee reelle n'est fournie, invente des valeurs "
+        "plausibles pour illustrer ce motif precis."
+    ),
+}
+
+DIAGRAM_KIND_HINTS_DARIJA = {
+    "flowchart": "دير organigramme : لائحة ديال الخطوات (nodes) والسهام (edges) اللي كتربطهم بالترتيب المنطقي.",
+    "sequence": "دير diagramme de sequence : لائحة ديال الفاعلين (participants) وسلسلة رسائل مرتبة بينهم.",
+    "mindmap": "دير mindmap : فكرة مركزية (root) وفروع، كل واحد بالعناصر ديالو (children).",
+    "pie": "دير camembert : لائحة ديال الأجزاء (label + رقم) اللي مجموعهم كيمثل الكل.",
+    "xy": "دير graphique (بارات ولا courbe) : فئات فمحور X وسلسلة أرقام كتوافقهم.",
+    "candlestick": (
+        "دير graphique en chandeliers japonais : لائحة ديال البوجيات، كل واحدة "
+        "فيها open/high/low/close، باش توضح الشكل المطلوب. إلا ماكاينش داطا "
+        "حقيقية، اخترع أرقام معقولة باش توضح هاد الشكل بالضبط."
+    ),
+}
+
+
+def build_diagram_prompt(kind: str, domain: str, context: str, language: str = "darija") -> str:
+    """System prompt for diagram generation -- the model returns ONLY a JSON
+    object (constrained further by Ollama's `format`, see
+    app.services.diagrams's per-kind schemas), never prose. Separate from
+    _build_system_prompt for the train/serve parity reason documented above
+    the template constants."""
+    if language == "fr":
+        domain_label = DOMAIN_LABELS_FR.get(domain, DOMAIN_LABELS.get(domain, domain))
+        return DIAGRAM_PROMPT_TEMPLATE_FR.format(domain=domain_label, context=context)
+    domain_label = DOMAIN_LABELS.get(domain, domain)
+    return DIAGRAM_PROMPT_TEMPLATE_DARIJA.format(domain=domain_label, context=context)
+
+
+def diagram_kind_hint(kind: str, language: str = "darija") -> str:
+    """The per-kind instruction line appended to the diagram user turn."""
+    hints = DIAGRAM_KIND_HINTS_FR if language == "fr" else DIAGRAM_KIND_HINTS_DARIJA
+    return hints.get(kind, "")
 
 
 # Deterministic refusal templates -- fired by the chat route when retrieval
@@ -446,12 +572,135 @@ def _build_system_prompt(domain: str, context: str, language: str = "darija") ->
     return SYSTEM_PROMPT_TEMPLATE.format(domain=domain_label, context=context)
 
 
+# -- Ollama transport ---------------------------------------------------
+#
+# Deliberately still urllib, not requests/httpx: this repo has no HTTP
+# client dependency (config/requirements.txt), and the whole test suite
+# patches `app.services.llm.urllib.request.urlopen` as its seam. What was
+# missing was everything AROUND the call.
+
+# Transient network failures get bounded retries with a short backoff.
+# Ollama on localhost drops connections in exactly two recoverable
+# situations: while it is swapping a model into VRAM (this deployment
+# alternates between the Darija and French tutor models, and an 8GB card
+# cannot hold both), and for a moment after the resident OCR worker
+# releases its VRAM mid-ingest. Both used to surface as a hard
+# OllamaConnectionError on a request that would have succeeded a second
+# later.
+_RETRY_DELAYS_SECONDS = (0.5, 2.0)
+# HTTP statuses worth retrying: Ollama returns 503 while a model loads, and
+# 502/504 through a reverse proxy that is still starting it. A 404 (no such
+# model) or a 400 (bad request) is deterministic -- retrying it just
+# doubles the time to a guaranteed failure.
+_RETRYABLE_STATUS = frozenset({502, 503, 504})
+
+
+def _ollama_options() -> dict:
+    """Per-request options.
+
+    num_ctx explicit, overriding each Modelfile's default of 4096 -- Ollama
+    truncates from the FRONT of the prompt when the context window is
+    exceeded, i.e. it silently eats the system block holding the retrieved
+    RAG context first. Raised alongside the 2026-08-13 chunk-size increase
+    (app/services/ingestion.py's CHUNK_SIZE, now ~2000 chars) and
+    max_context_length (app/services/retrieval.py, now 6000 chars/~1500
+    tokens) -- 4096 total left too little headroom for that context plus
+    conversation history plus the response itself. Now read from
+    settings.ollama_num_ctx instead of being duplicated as a literal in
+    two call sites that could drift apart.
+    """
+    return {"temperature": 0.2, "num_ctx": get_settings().ollama_num_ctx}
+
+
+def _post_ollama(path: str, payload: dict, *, timeout: Optional[int] = None) -> dict:
+    """POST a JSON body to Ollama and return the decoded response.
+
+    Adds three things the two call sites below each lacked:
+
+    1. `keep_alive`, so the model stays resident between requests. Ollama's
+       own default unloads an idle model after 5 minutes; this deployment's
+       tutor model is ~7.5GB and takes minutes to load from cold, so a demo
+       with a pause in it was paying a full model load on the next question
+       -- indistinguishable, from the user's side, from a hang. See
+       settings.ollama_keep_alive.
+    2. A bounded retry on TRANSIENT failures only (see
+       _RETRY_DELAYS_SECONDS / _RETRYABLE_STATUS).
+    3. HTTPError handled separately from URLError. urllib.error.HTTPError
+       is a SUBCLASS of URLError, so the previous `except URLError` mapped
+       every HTTP status -- including a 404 "model not found" -- to
+       OllamaConnectionError("could not connect"). That sent anyone
+       debugging a missing or misnamed model (settings.ollama_model /
+       ollama_model_fr) looking at the network instead of at their model
+       list.
+    """
+    settings = get_settings()
+    url = f"{settings.ollama_base_url.rstrip('/')}{path}"
+    payload = {**payload, "keep_alive": settings.ollama_keep_alive}
+    data = json.dumps(payload).encode("utf-8")
+    effective_timeout = timeout if timeout is not None else settings.ollama_timeout_seconds
+
+    last_error: Optional[Exception] = None
+    for attempt in range(len(_RETRY_DELAYS_SECONDS) + 1):
+        req = urllib.request.Request(
+            url,
+            data=data,
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=effective_timeout) as response:
+                return json.loads(response.read().decode("utf-8"))
+        except urllib.error.HTTPError as e:
+            body = ""
+            try:
+                body = e.read().decode("utf-8", errors="replace")[:500]
+            except Exception:
+                pass
+            if e.code in _RETRYABLE_STATUS and attempt < len(_RETRY_DELAYS_SECONDS):
+                logger.warning(
+                    "Ollama returned HTTP %s (retryable); retrying in %.1fs",
+                    e.code, _RETRY_DELAYS_SECONDS[attempt],
+                )
+                last_error = e
+                time.sleep(_RETRY_DELAYS_SECONDS[attempt])
+                continue
+            logger.error("Ollama returned HTTP %s for %s: %s", e.code, path, body)
+            if e.code == 404:
+                raise GenerationError(
+                    f"Ollama has no model named {payload.get('model')!r} (HTTP 404). "
+                    f"Check settings.ollama_model / ollama_model_fr against the "
+                    f"models actually pulled on {settings.ollama_base_url}."
+                ) from e
+            raise GenerationError(f"Ollama HTTP {e.code}: {body}") from e
+        except urllib.error.URLError as e:
+            if attempt < len(_RETRY_DELAYS_SECONDS):
+                logger.warning(
+                    "Ollama connection failed (%s); retrying in %.1fs",
+                    e, _RETRY_DELAYS_SECONDS[attempt],
+                )
+                last_error = e
+                time.sleep(_RETRY_DELAYS_SECONDS[attempt])
+                continue
+            logger.error("Ollama connection failed: %s", e)
+            raise OllamaConnectionError(payload.get("model"), settings.ollama_base_url) from e
+        except json.JSONDecodeError as e:
+            logger.error("Invalid JSON from Ollama: %s", e)
+            raise GenerationError(f"Invalid JSON response: {e}") from e
+        except (OllamaConnectionError, GenerationError):
+            raise
+        except Exception as e:
+            logger.error("Unexpected LLM error: %s", e)
+            raise GenerationError(str(e)) from e
+
+    raise OllamaConnectionError(payload.get("model"), settings.ollama_base_url) from last_error
+
+
 def _call_ollama_generate(
     model: str,
     prompt: str,
     system: str,
     *,
-    timeout: int = 180,
+    timeout: Optional[int] = None,
     format_schema: Optional[dict] = None,
 ) -> str:
     """POST to Ollama's /api/generate and return the raw `response` string.
@@ -463,61 +712,28 @@ def _call_ollama_generate(
     Raises OllamaConnectionError on network failure, GenerationError on an
     empty or invalid response.
     """
-    settings = get_settings()
-    url = f"{settings.ollama_base_url.rstrip('/')}/api/generate"
     payload = {
         "model": model,
         "prompt": prompt,
         "system": system,
         "stream": False,
-        # num_ctx explicit per-request, overriding each Modelfile's default
-        # of 4096 -- Ollama truncates from the FRONT of the prompt when the
-        # context window is exceeded, i.e. it silently eats the system
-        # block holding the retrieved RAG context first. Raised alongside
-        # the 2026-08-13 chunk-size increase (app/services/ingestion.py's
-        # CHUNK_SIZE, now ~2000 chars) and max_context_length (app/services/
-        # retrieval.py, now 6000 chars/~1500 tokens) -- 4096 total left too
-        # little headroom for that context plus conversation history plus
-        # the response itself.
-        "options": {"temperature": 0.2, "num_ctx": 8192},
+        "options": _ollama_options(),
     }
     if format_schema is not None:
         payload["format"] = format_schema
 
-    data = json.dumps(payload).encode("utf-8")
-    req = urllib.request.Request(
-        url,
-        data=data,
-        headers={"Content-Type": "application/json"},
-        method="POST",
-    )
-
-    try:
-        with urllib.request.urlopen(req, timeout=timeout) as response:
-            res_body = response.read().decode("utf-8")
-            res_json = json.loads(res_body)
-            result = res_json.get("response", "").strip()
-            if not result:
-                raise GenerationError("Ollama returned empty response")
-            return result
-    except urllib.error.URLError as e:
-        logger.error("Ollama connection failed: %s", e)
-        raise OllamaConnectionError(model, settings.ollama_base_url) from e
-    except json.JSONDecodeError as e:
-        logger.error("Invalid JSON from Ollama: %s", e)
-        raise GenerationError(f"Invalid JSON response: {e}") from e
-    except (OllamaConnectionError, GenerationError):
-        raise
-    except Exception as e:
-        logger.error("Unexpected LLM error: %s", e)
-        raise GenerationError(str(e)) from e
+    res_json = _post_ollama("/api/generate", payload, timeout=timeout)
+    result = res_json.get("response", "").strip()
+    if not result:
+        raise GenerationError("Ollama returned empty response")
+    return result
 
 
 def _call_ollama_chat(
     model: str,
     messages: list[dict],
     *,
-    timeout: int = 180,
+    timeout: Optional[int] = None,
     format_schema: Optional[dict] = None,
 ) -> str:
     """POST to Ollama's /api/chat with a messages array and return the
@@ -530,53 +746,20 @@ def _call_ollama_chat(
     string, which would place the transcript inside the first user turn
     with no turn separators -- a shape that appears nowhere in training.
     """
-    settings = get_settings()
-    url = f"{settings.ollama_base_url.rstrip('/')}/api/chat"
     payload = {
         "model": model,
         "messages": messages,
         "stream": False,
-        # num_ctx explicit per-request, overriding each Modelfile's default
-        # of 4096 -- Ollama truncates from the FRONT of the prompt when the
-        # context window is exceeded, i.e. it silently eats the system
-        # block holding the retrieved RAG context first. Raised alongside
-        # the 2026-08-13 chunk-size increase (app/services/ingestion.py's
-        # CHUNK_SIZE, now ~2000 chars) and max_context_length (app/services/
-        # retrieval.py, now 6000 chars/~1500 tokens) -- 4096 total left too
-        # little headroom for that context plus conversation history plus
-        # the response itself.
-        "options": {"temperature": 0.2, "num_ctx": 8192},
+        "options": _ollama_options(),
     }
     if format_schema is not None:
         payload["format"] = format_schema
 
-    data = json.dumps(payload).encode("utf-8")
-    req = urllib.request.Request(
-        url,
-        data=data,
-        headers={"Content-Type": "application/json"},
-        method="POST",
-    )
-
-    try:
-        with urllib.request.urlopen(req, timeout=timeout) as response:
-            res_body = response.read().decode("utf-8")
-            res_json = json.loads(res_body)
-            result = res_json.get("message", {}).get("content", "").strip()
-            if not result:
-                raise GenerationError("Ollama returned empty response")
-            return result
-    except urllib.error.URLError as e:
-        logger.error("Ollama connection failed: %s", e)
-        raise OllamaConnectionError(model, settings.ollama_base_url) from e
-    except json.JSONDecodeError as e:
-        logger.error("Invalid JSON from Ollama: %s", e)
-        raise GenerationError(f"Invalid JSON response: {e}") from e
-    except (OllamaConnectionError, GenerationError):
-        raise
-    except Exception as e:
-        logger.error("Unexpected LLM error: %s", e)
-        raise GenerationError(str(e)) from e
+    res_json = _post_ollama("/api/chat", payload, timeout=timeout)
+    result = res_json.get("message", {}).get("content", "").strip()
+    if not result:
+        raise GenerationError("Ollama returned empty response")
+    return result
 
 
 def generate_llm_response(

@@ -87,6 +87,32 @@ def init_db():
         #   ALTER TABLE source_files ADD CONSTRAINT ck_source_files_status
         #       CHECK (status IN ('pending','processing','ready','partial','error'));
         #
+        # Same again for source_files.pages_done (added 2026-08-23 so a poll
+        # during a still-processing upload has a live progress signal --
+        # app.services.ingest_jobs.process_source_file writes page_count as
+        # soon as it knows the total, then bumps pages_done after every page
+        # app.services.ingestion._parse_pdf's on_page_processed callback
+        # fires for; a document could otherwise sit at chunk_count=0,
+        # status='processing' for tens of minutes with nothing else to show):
+        #
+        #   ALTER TABLE source_files ADD COLUMN IF NOT EXISTS pages_done INTEGER;
+        #
+        # Same again for the two composite indexes added to Document
+        # (documents.__table_args__) so the retrieval predicate
+        # `tenant_id = ... AND domain = ...` is covered by ONE index
+        # instead of a BitmapAnd of two single-column ones. create_all
+        # does create indexes for a table it is creating, but it will not
+        # add one to a table that already exists:
+        #
+        #   CREATE INDEX CONCURRENTLY IF NOT EXISTS ix_documents_tenant_domain
+        #     ON documents (tenant_id, domain);
+        #   CREATE INDEX CONCURRENTLY IF NOT EXISTS ix_documents_tenant_source_file
+        #     ON documents (tenant_id, source_file_id);
+        #
+        # CONCURRENTLY so an existing corpus stays readable while they
+        # build; it cannot run inside a transaction block, so run these by
+        # hand rather than adding them to this function.
+        #
         # A fresh database never hits any of this -- create_all builds the
         # full current model shape correctly the first time.
 

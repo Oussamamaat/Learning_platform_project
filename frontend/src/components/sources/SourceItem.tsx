@@ -29,12 +29,24 @@ function StatusPill({ source }: { source: SourceFile }) {
           <Loader2 className="h-2.5 w-2.5 animate-spin" /> Uploading
         </span>
       );
-    case "processing":
+    case "processing": {
+      // pages_done/page_count: written incrementally by
+      // app.services.ingest_jobs.process_source_file as each PDF page
+      // finishes (native or OCR) -- before this signal existed, a
+      // 20-30 minute OCR-heavy upload looked identical to a hung one, with
+      // nothing here to distinguish "still working" from "stuck". Both
+      // fields are undefined for fast/non-PDF formats and for the first
+      // instant after a PDF upload starts, before the first page lands --
+      // "Processing" alone is still correct there, just less specific.
+      const hasProgress =
+        typeof source.pages_done === "number" && typeof source.page_count === "number" && source.page_count > 0;
       return (
         <span className="inline-flex items-center gap-1 rounded-full bg-warn-soft px-2 py-0.5 text-[10px] text-warn">
-          <Loader2 className="h-2.5 w-2.5 animate-spin" /> Processing
+          <Loader2 className="h-2.5 w-2.5 animate-spin" />
+          {hasProgress ? `Processing page ${source.pages_done} of ${source.page_count}` : "Processing"}
         </span>
       );
+    }
     case "ready":
       return (
         <span className="inline-flex items-center gap-1 rounded-full bg-success-soft px-2 py-0.5 text-[10px] text-success-deep">

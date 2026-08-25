@@ -1343,19 +1343,14 @@ Les normes ISO/TC 307 sont utilisées comme références pour :
 
 
 # ─── Write everything ────────────────────────────────────────────────────────
-def write_file(filepath: Path, content: str):
-    filepath.parent.mkdir(parents=True, exist_ok=True)
-    filepath.write_text(content.strip() + "\n", encoding="utf-8")
-
-
 def main():
-    from app.services.generate_corpus_index import INDEX_PATH, append_to_index, init_index
+    from app.services.generate_corpus_index import append_to_index, init_index, write_corpus_doc
 
     init_index()
     count = 0
     for f in FILES:
         path = RAW / f["path"]
-        write_file(path, f["content"])
+        write_corpus_doc(path, f["content"])
         append_to_index(path, f["title"], f["rights"], f["domain"], f["scope"])
         count += 1
         print(f"  OK {path}")

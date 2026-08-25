@@ -556,3 +556,239 @@ later.
 load; it is now correctly *reported* rather than silently dropped. And
 `reap_orphaned_processing` had no `tenant_id` predicate — every backend restart errored out
 **every other tenant's** in-flight uploads; now scoped, with a regression test.
+
+### Two-tier OCR routing: 45% faster at identical accuracy (2026-08-19)
+
+Following the ingestion repair above, ingestion still took ~55 min for an 80-page document.
+Profiling first — rather than optimising the plausible-looking thing — found that **99.8% of
+per-page time is inside the OCR call**: rendering a page (open + rasterise + PNG) measures
+~200 ms against a ~52,500 ms OCR call, and *opening* the PDF, which looked like an obvious
+redundancy at one open per OCR'd page, measures **1 ms**. Two assumptions died here: the
+"reopen the PDF per page" inefficiency is worth ~25 ms across a whole document (not fixed —
+it isn't worth the churn), and the previously-quoted "~120 s/page" was cold-load
+contamination; real warm cost is 52–62 s.
+
+**Measured, `arabic_test.pdf` p15/p51, warm (steady state, what a 25-page run pays):**
+
+| Config | Construct | Warm avg/page | Ground truth |
+|---|---|---|---|
+| classic PP-OCRv5 | 27.8 s | **5.5 s** | 4/13 |
+| PaddleOCR-VL, zero-arg call | 30.8 s | 62.0 s | **12/13** |
+| PaddleOCR-VL, preprocessing off | **9.2 s** | **52.5 s** | **12/13** |
+
+Disabling document-orientation classification, dewarping, seal and chart recognition is
+free (identical 12/13) but modest — 15% on average, and page-dependent (p15 52.9 → 34.7 s;
+p51 essentially unchanged). It is not the lever. The lever is **not calling the heavy engine**:
+classic is ~10× faster and scores 4/5 on p15's CAD-layer table, its only miss there
+(`0.999600`) coming from the native text layer that `_parse_pdf` merges in anyway. It scores
+**0/4** on p51's formula constants, which is precisely why formula pages must not land on it.
+
+**Routing** (`_ocr_pdf_page`, `settings.ocr_two_tier`): `OCR_REQUIRED` → heavy, because no
+native text exists to fall back on; `OCR_PREFERRED` → light, because its native text is
+already being merged and OCR is only being asked for the embedded table/figure. The light
+tier **self-escalates** to heavy when `_classic_ocr_looks_incomplete` finds neither a decimal
+nor a ≥4-digit integer — a signal calibrated against the only two pages where the light
+engine's real behaviour is known (p51: 0 decimals, 0 long ints → escalate; p15: one `1970` →
+keep), and deliberately biased toward escalation, since a false escalation costs ~47 s of GPU
+while a false negative silently loses a formula from a regulatory document.
+
+**Live result, both documents under `company_efg`:**
+
+| | VL everywhere | Two-tier | |
+|---|---|---|---|
+| wall-clock | 55 min 14 s | **30 min 14 s** | **−45%** |
+| heavy OCR calls | 25 | **18** (9 direct + 9 escalated) | |
+| light OCR calls | 0 | 16 (7 kept) | |
+| chunks / chars (arabic) | 41 / 63,855 | **43 / 63,879** | slightly more |
+| ground truth stored | 13/13 | **13/13** | unchanged |
+| ground truth retrieved | 4/4 | **4/4** | unchanged |
+
+The escalation fired on 9 of 16 light-tier pages, each with real text but no numeric
+evidence — i.e. the check is doing work, not decorating the log. Note **two 300 s heavy-OCR
+timeouts inside that 30 min cost ~10 min on their own**; they are the 8 GB VRAM ceiling
+showing through, not a routing cost.
+
+Regression posture: 475 tests pass (462 + 13 new in `tests/test_ocr_two_tier.py`), and the
+three pinned real-PDF fixtures are untouched — routing changes which engine an already-
+classified page goes to, and never changes the classification itself.
+
+### Corpus-wide correctness audit: strip_markdown, empty uploads, dropped headings, VRAM (2026-08-23)
+
+Asked "are there more ingestion improvements", rather than guess, the parts never yet
+verified were audited: everything downstream of `_parse_pdf` (which the two entries above
+already cover) and every non-PDF format. Two defects turned out to be **more severe** than
+the page-loss bug fixed earlier, because they run on **every document format**, silently,
+with no page-level signal to catch them.
+
+**`strip_markdown` was silently corrupting stored text on every format.** Verified by
+running the real function:
+
+| Input | Became | Why it mattered |
+|---|---|---|
+| `temperature < 40 C et pression > 2 bars` | `temperature  2 bars` | `<[^>]+>` treated any `<...>` span as an HTML tag — **a threshold clause deleted** |
+| `seuil <= 5 mg/m3 selon <NF EN 166>` | `seuil` | one stray `<` swallowed the rest of the sentence |
+| `D_Ain_el_Abd_1970` | `DAinelAbd1970` | confirmed in the live corpus — the geodetic datum became unfindable by vector or lexical search |
+| `> 40 C au poste` | `40 C au poste` | the blockquote rule **inverted the meaning** of a limit |
+| `Article 5 [modifie](Loi 65-99)` | `Article 5 modifie` | the legal reference was deleted, keeping only display text |
+| `\| - \| - \|` (a "néant/sans objet" data row) | `` (empty) | mistaken for a markdown alignment separator and deleted whole |
+
+Fixed with a whitelist of real HTML tag names (`_HTML_TAG_RE`) instead of the `<[^>]+>`
+wildcard, word-boundary-guarded emphasis regexes so `**gras**` still collapses but
+`D_Ain_el_Abd_1970`/`L * l * h` don't, a digit-gated blockquote rule, a 3+-dash requirement
+for alignment rows (vs. a real single-dash data row), pipe-escape-aware collapsing (so
+`_render_row`'s `\|` round-trips), links keeping both display text and target, and HTML
+entity decoding. Mirrored byte-for-byte into `scripts/verify_ocr_arabic.py`
+(`_strip_markdown_standalone`) per that file's own sync contract. The OCR gate was re-run
+against the cached ground-truth OCR output rather than re-costing a live model load:
+**fidelity unchanged at 0.9464, all 4 gates still pass** — this specific ground-truth
+document doesn't exercise the patterns that changed, so the baseline held rather than moved.
+
+**A `ready` upload could contain zero retrievable chunks, and could never be retried.**
+`process_source_file` derived status *solely* from `unprocessed_pages`, which only
+`_parse_pdf` ever populates — `ingest_text` already returns
+`{"chunks_created": 0, "status": "empty"}` for every other format, and that result was read
+only for `chunks_created`, discarding the one field that mattered. Consequence: an empty
+`.docx`, a text-free `.pptx`, an image whose OCR returned nothing, a headers-only `.csv`
+landed as `status="ready"`, `chunk_count=0`, `error_message=NULL` — rendered as an
+unqualified green success pill, and (worse) a valid match for the sha256 dedupe
+short-circuit, so **re-uploading the identical file returned `duplicate_of` and never
+re-ingested**, with no signal anything was wrong. Fixed: `process_source_file` now branches
+on `chunks_created == 0` → `status="error"` with an actionable message, closing the dedupe
+trap (`error` is not in the `IN ('ready','partial')` match) without touching the
+already-correct `partial` path. `tests/test_ingest_jobs.py` is new — `process_source_file`
+had zero direct test coverage before this.
+
+**Two small, real losses folded in from an external ingestion-pipeline review:**
+`_parse_pptx` only read `shape.has_text_frame`, so a slide's **table was a separate shape
+type it never saw at all** — silently absent, no error, no record. `_parse_docx` built table
+rows inline instead of reusing the existing `_render_row` helper xlsx/csv already use, so a
+cell containing `|` corrupted the row instead of being escaped.
+
+**A heading with an empty body was dropped entirely, taking its reference with it.**
+`chunk_document` did `if not clean_body: continue` before building the chunk piece, so two
+back-to-back article headings, or a heading whose body is only a horizontal rule, lost the
+**heading itself** — exactly where an article/law number lives in this corpus. Now emits
+the heading alone in that case, guarded so a section with neither heading nor body (the
+only case meant to be dropped) still is.
+
+**The OCR worker had no idle release.** `_ResidentOcrWorker._kill()` existed but was only
+reached on timeout/crash — the resident subprocess held its ~2 GB VRAM for this app
+process's entire remaining lifetime once started. Measured consequence, live: with the
+worker resident, `IBLOG_TUTOR` (7.5 GB) loaded 31% CPU / 69% GPU and a chat request exceeded
+its 180 s client timeout. Fixed with a re-armed idle timer
+(`settings.ocr_worker_idle_release_seconds`, default 120 s) that kills the subprocess after
+inactivity; `_ensure_alive`'s existing self-healing transparently restarts it (paying the
+cold-load cost again) on the next call — the correct tradeoff for a single-worker queue that
+processes one document at a time.
+
+**The audit trail columns were finally populated.** `page_count`/`parser`/`ocr_engine`
+existed on `SourceFile` and are documented on `SourceFileOut` — *"was this text OCR'd, by
+which engine"* — but `process_source_file` never wrote them; always `NULL`. A new
+`_infer_parser_metadata` (best-effort, non-fatal on any failure) reports
+`pdf_text`/`pdf_ocr`/`pdf_mixed`/`docx`/`pptx`/`xlsx`/`csv`/`text`/`image_ocr` plus page
+count, using the exact vocabulary the schema already documented.
+
+**Live progress signal, built same day (superseding the "deliberately not built" note this
+entry originally carried).** A new `pages_done` column (nullable, distinct from
+`page_count` — never overloading a column that has to mean two different things depending
+on `status`) is written incrementally as `_parse_pdf` finishes each page, via an
+`on_page_processed` callback threaded through `parse_document_to_markdown`, and cleared to
+`NULL` on every terminal state (`ready`/`partial`/`error`) so it only ever means "processing,
+as of last poll" and never goes stale. `SourceFileOut`, the ingest router's column list, and
+the frontend's `StatusPill` all show `"Processing page N of M"` once both fields are
+populated, falling back to plain `"Processing"` before the first page lands or for
+non-paginated formats. Migration applied by hand to the live Postgres instance per this
+project's no-Alembic convention (`app/models/db_init.py`).
+
+Regression posture: full suite green including 3 new test files/additions
+(`tests/test_ingest_jobs.py` new; `tests/test_ingestion.py` and
+`tests/test_ocr_resident_worker.py` extended) and the three pinned real-PDF fixtures
+untouched.
+
+### GPU-OOM cascade in the resident OCR worker, found by the deferred re-ingest verification (2026-08-23)
+
+The phases above were verified once against the real ~80-page `arabic_test.pdf` corpus and
+came back **worse** than the pre-fix baseline: 0 failed pages became 6 (pages 51, 52, 53, 54,
+62, 70), dropping the chunk count from a prior best of 43 to 29. All 6 failures carried the
+identical message — `RuntimeError: ... CUDA error(2), out of memory` — and
+`out/backend.err.log`'s idle-release line fired exactly once, at the very end of the run, not
+between any of the failures: **the same resident worker process served all 6.**
+
+Root cause: `_handle_ocr` (`scripts/ocr_worker_resident.py`) catches every exception,
+including CUDA OOM, and returns `{"ok": false, "error": ...}` without ever exiting — the
+process keeps running. `_ResidentOcrWorker.ocr` (`app/services/ocr.py`) only called
+`self._kill()` on transport-level failures (broken pipe, response timeout, process exit),
+never on an application-level `{"ok": false}`. A CUDA allocator that has hit OOM once
+commonly stays poisoned for that process's remaining lifetime, so every later page routed to
+the same still-alive worker failed identically, regardless of whether that later page had
+any real reason to run out of memory itself.
+
+Fixed by treating a GPU-memory-shaped error message (`_looks_like_gpu_memory_error`: "out of
+memory" / "cuda error" / "cudaerrormemoryallocation") as fatal to the *process*, not just the
+page — `ocr()` now calls `self._kill()` and skips arming the idle timer on that path, so
+`_ensure_alive`'s existing self-healing gives the next page a fresh CUDA context instead of
+reusing the poisoned one. Per-page failure isolation (`ingestion.py`'s `OcrUnavailableError`
+catch around each page) already meant one bad page couldn't abort the document — this closes
+the gap where "one bad page" was silently becoming six.
+
+**A second, related bug surfaced while pinning this with a test that kills a still-alive (not
+crashed) fake worker and immediately re-calls `ocr()`:** `_drain_stdout`'s thread read
+`self._out_q` *dynamically* rather than capturing the queue at spawn time. `_kill()` can now
+end a process that was still genuinely mid-request — its drain thread is still blocked on
+`proc.stdout` at the moment `_ensure_alive()` spawns a replacement and reassigns
+`self._out_q`. The dying thread's eventual EOF (`None` sentinel) landed on the
+*replacement's* queue, killing the next page's genuinely healthy response. Fixed by passing
+the queue into `_drain_stdout` as an explicit argument, captured per-thread at spawn time.
+
+Pinned in `tests/test_ocr_resident_worker.py`: an `"oom.png"` case in the fake worker script
+that returns a CUDA-OOM-shaped error without exiting, asserting the process is killed
+(unlike an ordinary `"unknown.png"` error, which must *not* kill a healthy process) and that
+the very next call gets a fresh, working process.
+
+**Verified live, twice.** First against the full `arabic_test.pdf` (80 pages, deleted and
+re-uploaded under `company_efg` against the fixed code): the run was interrupted partway
+through by an unrelated RAM-reclaim request, but confirmed the fix's two load-bearing
+behaviours before it stopped — `pages_done`/`page_count` populated correctly during
+processing (`pages_done: 1, page_count: 80` observed mid-run, live, not mocked), and no OOM
+cascade in the pages it reached.
+
+Second, against a purpose-built fast fixture (see below): completed clean in ~7.5 min, only
+the one genuinely `EMPTY` page reported unprocessed, and
+`probe_rag_groundtruth_company_efg.py` came back **13/13 STORED (10/10 Tier-1
+hand-verified), 4/4 RETRIEVED** — full ground-truth parity with what the 80-page document
+was proving, at a fraction of the wall-clock.
+
+### Fast ingestion fixture: `arabic_probe.pdf`, a 10-page structural subset (2026-08-24)
+
+Re-verifying every ingestion change against the full 80-page `arabic_test.pdf` (~16-30 min)
+was the bottleneck slowing down the corpus-wide audit above. Classifying all 80 pages with
+the real classifier showed why that cost bought little: 50 pages are `NATIVE`, 16
+`OCR_PREFERRED`, 9 `OCR_REQUIRED`, 5 `EMPTY` — four branches, with the 50 `NATIVE` pages
+repeating the same trivial path 50 times. The extra pages mostly measure OCR throughput, not
+ingestion correctness.
+
+`tests/data/real_pdfs/arabic_probe.pdf` (2.1 MB, 10 pages, full page map and rationale in
+`tests/data/real_pdfs/README_arabic_probe.md`) keeps one page per distinct classifier
+sub-branch, chosen only after locating every needle
+`probe_rag_groundtruth_company_efg.py` asserts, so the subset's STORED/RETRIEVED checks are
+identical in strength to the full document's — not weakened, just faster. Page 15 is the
+single highest-value page kept: it carries both a native-only value (`0.999600`) and
+OCR-only values (the CAD-layer table), the one page that proves native+OCR text is merged
+rather than one replacing the other. Verified after extraction that every kept page retained
+its original classification (embedded-image resources a naive page copy can drop would have
+silently changed what's being tested) and that native-layer needles were present while
+OCR-only needles were correctly still absent pre-OCR.
+
+Deliberately excluded: the original page 2 (72 embedded images) reliably exhausts the OCR
+worker's 300 s timeout and contributes nothing but 5 minutes of wall-clock per run — kept out
+of the default fixture, worth adding back only when specifically testing timeout handling.
+
+`probe_rag_groundtruth_company_efg.py` now reads `PROBE_ARABIC_DOC` (default
+`arabic_test.pdf`) and `PROBE_TENANT` (default `company_efg`) from the environment, so
+existing full-corpus invocations are unaffected; point it at the fixture with
+`PROBE_ARABIC_DOC=arabic_probe.pdf`.
+
+**This fixture does not replace the full document for everything.** The GPU-OOM cascade
+above only emerged under sustained VRAM pressure across ~50 pages — that class of bug needs
+the full `arabic_test.pdf` as a deliberate, occasional soak test, not the default
+correctness-iteration loop.

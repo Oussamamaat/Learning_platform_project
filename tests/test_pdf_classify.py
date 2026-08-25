@@ -245,3 +245,37 @@ def test_profil_sst_maroc_catches_diagram_scan_and_blank_trailing_page():
     assert decisions[137].strategy == PageStrategy.EMPTY  # page 138
     ocr_required_count = sum(1 for d in decisions if d.strategy == PageStrategy.OCR_REQUIRED)
     assert ocr_required_count == 1
+
+
+@pytestmark_real
+def test_arabic_probe_pages_keep_their_source_classification():
+    """arabic_probe.pdf is a 10-page structural subset of the ~16-30min
+    arabic_test.pdf (see tests/data/real_pdfs/README_arabic_probe.md for
+    the page map and why each page was chosen), built to iterate on
+    ingestion in ~7min instead of ~16-30. It only stays a faithful stand-in
+    if page extraction didn't change what each page classifies as --
+    classification reads embedded image resources a naive page copy can
+    drop, which would silently change what's being tested. This pins the
+    exact sequence measured when the fixture was built, one page per
+    distinct classifier sub-branch: no-font-resources OCR_REQUIRED (p1),
+    EMPTY (p2), NATIVE (p3), the merge-proving OCR_PREFERRED page carrying
+    both native-only and OCR-only ground-truth values (p4), NATIVE (p5),
+    OCR_REQUIRED via embedded images too small to be a full-page raster
+    (p6), OCR_REQUIRED via a full-page raster scan (p7), NATIVE (p8),
+    OCR_PREFERRED with substantial native text (p9), NATIVE (p10)."""
+    from pypdf import PdfReader
+
+    reader = PdfReader(str(REAL_PDF_DIR / "arabic_probe.pdf"))
+    strategies = [classify_page(p).strategy for p in reader.pages]
+    assert strategies == [
+        PageStrategy.OCR_REQUIRED,
+        PageStrategy.EMPTY,
+        PageStrategy.NATIVE,
+        PageStrategy.OCR_PREFERRED,
+        PageStrategy.NATIVE,
+        PageStrategy.OCR_REQUIRED,
+        PageStrategy.OCR_REQUIRED,
+        PageStrategy.NATIVE,
+        PageStrategy.OCR_PREFERRED,
+        PageStrategy.NATIVE,
+    ]

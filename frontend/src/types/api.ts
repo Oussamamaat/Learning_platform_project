@@ -22,6 +22,48 @@ export type DomainSource =
   | "tenant_default"
   | "pinned";
 
+// app.models.schemas.DiagramKind
+export type DiagramKind = "flowchart" | "sequence" | "mindmap" | "pie" | "xy" | "candlestick";
+
+// app.models.schemas.Candle -- one OHLC bar. Used both as ChatRequest.candles
+// (caller-supplied real data, rendered verbatim) and inside
+// DiagramPayload.spec.candles (whichever generate_diagram actually used).
+export interface Candle {
+  label: string;
+  open: number;
+  high: number;
+  low: number;
+  close: number;
+}
+
+// app.models.schemas.DiagramPayload
+export interface DiagramPayload {
+  kind: DiagramKind;
+  // How `kind` was chosen: "keyword" (Tier 1, deterministic) or "semantic"
+  // (Tier 2 fallback, not yet implemented -- see app.services.diagrams).
+  kind_source: string;
+  title: string;
+  // Also used as ChatResponse.response for this turn -- follows the turn's
+  // response language, unlike the diagram's own structural labels, which
+  // always follow the backend's diagram_label_language setting (French).
+  caption: string;
+  // Mermaid source, populated for every kind except "candlestick" (Mermaid
+  // has no OHLC diagram type -- see `spec` instead).
+  mermaid?: string;
+  // Raw render data for kinds Mermaid can't express. Only populated for
+  // "candlestick": { candles: Candle[] }.
+  spec: { candles?: Candle[] };
+  // True when retrieval found tenant context and every structural label
+  // passed the ungrounded-reference check. False means the diagram is
+  // illustrative (e.g. a candlestick pattern with no corpus) -- still
+  // shown, just flagged as not sourced from the tenant's own documents.
+  grounded: boolean;
+  // Deterministic salvage actions taken before rendering (e.g. a dangling
+  // edge dropped) -- never a fabrication, only a removal.
+  repairs: string[];
+  sources: string[];
+}
+
 export interface ChatRequest {
   message: string;
   session_id?: string;
@@ -38,6 +80,12 @@ export interface ChatRequest {
   // widens it). Omitted means every currently-enabled uploaded source is
   // eligible; the global corpus is never affected by this field.
   active_source_ids?: string[];
+  // Real OHLC data for a candlestick diagram, when the caller already has
+  // it. Rendered verbatim -- overrides whatever the model would have
+  // invented. Ignored unless the message's detected diagram intent is
+  // "candlestick"; omitted means the model invents illustrative values for
+  // the named pattern.
+  candles?: Candle[];
 }
 
 export interface ChatResponse {
@@ -55,6 +103,10 @@ export interface ChatResponse {
   // is still grounded in the built-in corpus, but any uploaded sources are
   // silently absent from it until Postgres recovers.
   degraded: boolean;
+  // Set when the message's own text triggered diagram intent detection --
+  // there is no separate diagram endpoint. `response` is the diagram's own
+  // caption in that case. Undefined for every ordinary chat turn.
+  diagram?: DiagramPayload;
 }
 
 export interface QuizRequest {
@@ -112,6 +164,10 @@ export interface SourceFile {
   language?: string;
   chunk_count: number;
   page_count?: number;
+  // Live progress while status="processing": pages attempted so far, out
+  // of page_count. Undefined/null once ready/partial/error -- read
+  // chunk_count/page_count for the finished result instead.
+  pages_done?: number;
   // How the file was parsed -- pdf_text | pdf_ocr | pdf_mixed | docx |
   // pptx | xlsx | csv | text | image_ocr -- an audit trail for "was this
   // text OCR'd".

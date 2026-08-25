@@ -16,16 +16,20 @@ polls GET /sources for status.
 import hashlib
 import json
 import logging
+import shutil
+import tempfile
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
-from sqlalchemy import create_engine, text
+from fastapi.concurrency import run_in_threadpool
+from sqlalchemy import text
 from sqlalchemy.orm import sessionmaker
 
 from app.config import get_settings, get_tenant_id
+from app.models.db import get_engine
 from app.models.schemas import SourceFileOut, SourceListResponse, SourceStatus, SourceToggleRequest
 from app.services import ingest_queue
 from app.services.ingest_jobs import process_source_file
@@ -37,20 +41,29 @@ router = APIRouter(prefix="/api/v1/ingest", tags=["ingest"])
 _engine = None
 _SessionLocal = None
 
+# 1MB read granularity: large enough that a 25MB upload is ~25 awaits
+# rather than thousands, small enough that no single chunk is a
+# meaningful allocation.
+_UPLOAD_CHUNK_BYTES = 1024 * 1024
+# Uploads under this stay entirely in memory; larger ones spill to a temp
+# file instead of being held as one contiguous bytes object.
+_SPOOL_MAX_MEMORY_BYTES = 2 * 1024 * 1024
+
 _COLUMNS = (
     "id, filename, status, error_message, enabled, domain, language, "
-    "chunk_count, page_count, parser, ocr_engine, unprocessed_pages, size_bytes, created_at"
+    "chunk_count, page_count, pages_done, parser, ocr_engine, unprocessed_pages, "
+    "size_bytes, created_at"
 )
 
 
 def _get_session():
     global _engine, _SessionLocal
     if _engine is None:
-        _engine = create_engine(
-            get_settings().database_url,
-            pool_pre_ping=True,
-            connect_args={"connect_timeout": 2},
-        )
+        # The process-wide engine + pool (app.models.db), not a private
+        # one -- see that module for why four independent pools for the
+        # same database URL was a real resource problem. The globals stay
+        # so tests can monkeypatch an in-memory SQLite engine in.
+        _engine = get_engine()
         _SessionLocal = sessionmaker(bind=_engine)
     return _SessionLocal()
 
@@ -78,12 +91,80 @@ def _row_to_out(row) -> SourceFileOut:
         language=row.language,
         chunk_count=row.chunk_count,
         page_count=row.page_count,
+        pages_done=row.pages_done,
         parser=row.parser,
         ocr_engine=row.ocr_engine,
         unprocessed_pages=_decode_unprocessed_pages(row.unprocessed_pages),
         size_bytes=row.size_bytes,
         created_at=row.created_at,
     )
+
+
+async def _spool_upload(upload: UploadFile, max_bytes: int):
+    """Read one upload in bounded chunks, hashing as we go.
+
+    Returns (sha256_hex, size_bytes, spooled_file). `spooled_file` is None
+    -- and the partial data discarded -- when the upload exceeds
+    max_bytes, which is detected DURING the read rather than after the
+    whole thing is in memory.
+
+    The bytes land in a SpooledTemporaryFile, which keeps small uploads
+    entirely in memory and only spills the large ones to disk. That is
+    what bounds this endpoint's memory: the previous `await upload.read()`
+    held the full file as a single `bytes` object, and a 20-file
+    drag-and-drop (settings.max_upload_files_per_request) walked that
+    allocation 20 times in one request.
+    """
+    hasher = hashlib.sha256()
+    size = 0
+    spooled = tempfile.SpooledTemporaryFile(max_size=_SPOOL_MAX_MEMORY_BYTES)
+    while True:
+        chunk = await upload.read(_UPLOAD_CHUNK_BYTES)
+        if not chunk:
+            break
+        size += len(chunk)
+        if size > max_bytes:
+            spooled.close()
+            return hasher.hexdigest(), size, None
+        hasher.update(chunk)
+        spooled.write(chunk)
+    spooled.seek(0)
+    return hasher.hexdigest(), size, spooled
+
+
+def _finalize_upload(spooled, stored_path: Path) -> None:
+    """Copy the spooled upload to its permanent path and release the
+    spool. Runs in a worker thread (see the call site) because both halves
+    block."""
+    try:
+        with open(stored_path, "wb") as out:
+            shutil.copyfileobj(spooled, out, length=_UPLOAD_CHUNK_BYTES)
+    finally:
+        spooled.close()
+
+
+def _insert_and_read_back(session, params: dict) -> None:
+    session.execute(
+        text(
+            # chunk_count and created_at are explicit even though the ORM
+            # model declares defaults for both -- those defaults are
+            # applied by SQLAlchemy when IT constructs an INSERT
+            # (session.add()/flush), not by the database, so a raw text()
+            # INSERT that omits them either violates chunk_count's NOT
+            # NULL constraint outright, or (created_at, nullable but
+            # required by SourceFileOut's response schema) silently stores
+            # NULL and only crashes later, serializing the response
+            # (caught by tests/test_ingest_router.py against a real
+            # schema).
+            "INSERT INTO source_files "
+            "(id, tenant_id, filename, stored_path, content_type, size_bytes, sha256, "
+            " status, enabled, domain, chunk_count, created_at, updated_at) "
+            "VALUES (:id, :tenant_id, :filename, :stored_path, :content_type, :size_bytes, "
+            " :sha256, 'pending', true, :domain, 0, :now, :now)"
+        ),
+        params,
+    )
+    session.commit()
 
 
 def _require_writable() -> None:
@@ -130,15 +211,27 @@ async def upload_sources(
                     detail=f"{upload.filename}: unsupported file type {suffix!r}.",
                 )
 
-            body = await upload.read()
-            if len(body) > settings.max_upload_bytes:
+            # Streamed in chunks with the hash computed as we go, instead
+            # of `body = await upload.read()`. Three reasons that mattered:
+            #   1. read() materializes the WHOLE file in memory (up to
+            #      settings.max_upload_bytes, 25MB) and then hashlib walked
+            #      it a second time -- two full passes plus a large
+            #      short-lived allocation per file, x20 files per request.
+            #   2. An oversize file was only rejected AFTER being fully
+            #      read into memory; now it is rejected the moment the
+            #      running total crosses the limit, so an over-limit upload
+            #      costs bounded memory instead of its full size.
+            #   3. The bytes never need to be held at all -- the very next
+            #      thing that happens to them is a write to disk.
+            sha256, size_bytes, spooled = await _spool_upload(
+                upload, settings.max_upload_bytes
+            )
+            if spooled is None:
                 raise HTTPException(
                     status_code=413,
                     detail=f"{upload.filename}: exceeds max upload size "
                     f"({settings.max_upload_bytes} bytes).",
                 )
-
-            sha256 = hashlib.sha256(body).hexdigest()
 
             # Idempotency: a byte-identical file already ready for this
             # tenant short-circuits re-ingestion entirely.
@@ -151,6 +244,12 @@ async def upload_sources(
                 {"t": tenant_id, "h": sha256},
             ).fetchone()
             if existing is not None:
+                # Release the spool: this file is a known duplicate, so
+                # nothing further will read it. Without this, every
+                # duplicate in a re-uploaded batch leaks a
+                # SpooledTemporaryFile (and, above the spill threshold, a
+                # real temp file) for the life of the process.
+                spooled.close()
                 out = _row_to_out(existing)
                 out.duplicate_of = out.id
                 results.append(out)
@@ -158,42 +257,35 @@ async def upload_sources(
 
             source_id = uuid.uuid4()
             stored_path = upload_root / f"{source_id.hex}{suffix}"
-            stored_path.write_bytes(body)
+            # run_in_threadpool, not a bare rename/write: this is an
+            # `async def` endpoint, so ANY blocking call in it runs on the
+            # event loop and stalls every other in-flight request --
+            # including the status polls the Sources panel fires while
+            # this same upload is processing. A 25MB write is milliseconds
+            # on a good day and much worse on a busy disk; either way it
+            # does not belong on the loop.
+            await run_in_threadpool(_finalize_upload, spooled, stored_path)
 
             now = datetime.now(timezone.utc)
-            session.execute(
-                text(
-                    # chunk_count and created_at are explicit even though
-                    # the ORM model declares defaults for both -- those
-                    # defaults are applied by SQLAlchemy when IT
-                    # constructs an INSERT (session.add()/flush), not by
-                    # the database, so a raw text() INSERT that omits them
-                    # either violates chunk_count's NOT NULL constraint
-                    # outright, or (created_at, nullable but required by
-                    # SourceFileOut's response schema) silently stores
-                    # NULL and only crashes later, serializing the
-                    # response (caught by tests/test_ingest_router.py
-                    # against a real schema).
-                    "INSERT INTO source_files "
-                    "(id, tenant_id, filename, stored_path, content_type, size_bytes, sha256, "
-                    " status, enabled, domain, chunk_count, created_at, updated_at) "
-                    "VALUES (:id, :tenant_id, :filename, :stored_path, :content_type, :size_bytes, "
-                    " :sha256, 'pending', true, :domain, 0, :now, :now)"
-                ),
-                {
-                    "id": str(source_id),
-                    "tenant_id": tenant_id,
-                    "filename": upload.filename or stored_path.name,
-                    "stored_path": str(stored_path),
-                    "content_type": upload.content_type,
-                    "size_bytes": len(body),
-                    "sha256": sha256,
-                    "domain": domain,
-                    "now": now,
-                },
-            )
-            session.commit()
-
+            # Deliberately NOT run_in_threadpool, unlike the file write
+            # above: a SQLAlchemy Session has thread affinity (SQLite
+            # enforces it outright, which is what tests/test_ingest_router
+            # .py's fixture uses), and these are single-row OLTP
+            # statements measured in a millisecond or two -- nothing like
+            # the up-to-25MB copy the write is. Offloading bulk I/O is
+            # worth it; offloading a sub-millisecond INSERT to dodge a
+            # session's threading contract is not.
+            _insert_and_read_back(session, {
+                "id": str(source_id),
+                "tenant_id": tenant_id,
+                "filename": upload.filename or stored_path.name,
+                "stored_path": str(stored_path),
+                "content_type": upload.content_type,
+                "size_bytes": size_bytes,
+                "sha256": sha256,
+                "domain": domain,
+                "now": now,
+            })
             row = session.execute(
                 text(f"SELECT {_COLUMNS} FROM source_files WHERE id = :id"),
                 {"id": str(source_id)},

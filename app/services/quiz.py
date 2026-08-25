@@ -17,12 +17,10 @@ prevented here — the JSON `format` schema below only constrains structure
 import json
 import logging
 import random
-import urllib.request
-import urllib.error
 
 from app.config import get_settings
 from app.errors import OllamaConnectionError, GenerationError
-from app.services.llm import _build_system_prompt
+from app.services.llm import _build_system_prompt, _call_ollama_generate
 from app.services.generate_training_data import (
     QUIZ_USER_FALLBACKS,
     QUIZ_USER_FALLBACKS_FR,
@@ -119,48 +117,33 @@ def generate_quiz_questions(
     # silently served by the Darija-tuned model instead of iblog-tutor-fr.
     model = settings.ollama_model_fr if language == "fr" else settings.ollama_model
 
-    url = f"{settings.ollama_base_url.rstrip('/')}/api/generate"
-    payload = {
-        "model": model,
-        "prompt": user_turn,
-        "system": system_prompt,
-        "stream": False,
-        "format": _quiz_format_schema(n),
-        "options": {"temperature": 0.2},
-    }
-
-    data = json.dumps(payload).encode("utf-8")
-    req = urllib.request.Request(
-        url,
-        data=data,
-        headers={"Content-Type": "application/json"},
-        method="POST",
+    logger.info(
+        "Calling Ollama for quiz model=%s domain=%s topic=%s",
+        model, domain, topic,
+    )
+    # Through app.services.llm._call_ollama_generate rather than this
+    # module's own urllib block, which was a near-copy of it. The copy had
+    # drifted in a way that mattered: it sent `options={"temperature": 0.2}`
+    # with NO num_ctx, so every quiz ran at each Modelfile's 4096 default
+    # while chat ran at 8192. Ollama truncates from the FRONT when the
+    # window is exceeded -- so a quiz built on a full 6000-character
+    # retrieved context (app/services/retrieval.py's max_context_length)
+    # was having that context silently eaten before generation, which is
+    # precisely the failure llm.py's num_ctx comment exists to prevent.
+    # Sharing the transport also gives quiz the keep_alive, the bounded
+    # retry on transient failures, and the HTTPError-vs-URLError split
+    # (a 404 "no such model" no longer reports as a connection failure).
+    raw = _call_ollama_generate(
+        model, user_turn, system_prompt, format_schema=_quiz_format_schema(n)
     )
 
     try:
-        logger.info(
-            "Calling Ollama for quiz model=%s domain=%s topic=%s",
-            model, domain, topic,
-        )
-        with urllib.request.urlopen(req, timeout=180) as response:
-            res_body = response.read().decode("utf-8")
-            res_json = json.loads(res_body)
-            raw = res_json.get("response", "").strip()
-            if not raw:
-                raise GenerationError("Ollama returned empty response")
-            payload_obj = json.loads(raw)
-            questions = payload_obj.get("questions")
-            if not isinstance(questions, list):
-                raise GenerationError("Quiz response missing a questions array")
-            return questions[:n]
-    except urllib.error.URLError as e:
-        logger.error("Ollama connection failed (quiz): %s", e)
-        raise OllamaConnectionError(model, settings.ollama_base_url) from e
+        payload_obj = json.loads(raw)
     except json.JSONDecodeError as e:
         logger.error("Invalid JSON from Ollama (quiz): %s", e)
         raise GenerationError(f"Invalid JSON response: {e}") from e
-    except (OllamaConnectionError, GenerationError):
-        raise
-    except Exception as e:
-        logger.error("Unexpected LLM error (quiz): %s", e)
-        raise GenerationError(str(e)) from e
+
+    questions = payload_obj.get("questions")
+    if not isinstance(questions, list):
+        raise GenerationError("Quiz response missing a questions array")
+    return questions[:n]

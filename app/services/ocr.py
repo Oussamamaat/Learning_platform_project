@@ -62,12 +62,22 @@ class OcrUnavailableError(RuntimeError):
 class OcrEngine(Protocol):
     name: str
 
-    def image_to_markdown(self, image_bytes: bytes, *, lang_hint: str = "ar+fr") -> str:
+    def image_to_markdown(
+        self, image_bytes: bytes, *, lang_hint: str = "ar+fr", tier: Optional[str] = None
+    ) -> str:
         """Return markdown text extracted from one page's raster image.
 
         Callers (app.services.ingestion's PDF/image parsers) are
         responsible for wrapping the result in a `## Page N` heading where
         applicable -- this returns body text only, not document structure.
+
+        `tier` selects between the heavy and light pipelines for engines
+        that have both: "heavy" (settings.ocr_paddle_engine) or "light"
+        (settings.ocr_light_engine). None means "whatever this engine
+        does by default", which for every engine except PaddleOcrEngine is
+        its only behaviour. This is a per-CALL choice, not a per-process
+        one, because the right engine depends on the individual page --
+        see app.services.ingestion._ocr_pdf_page's two-tier routing.
         """
         ...
 
@@ -80,7 +90,9 @@ class NullOcrEngine:
 
     name = "none"
 
-    def image_to_markdown(self, image_bytes: bytes, *, lang_hint: str = "ar+fr") -> str:
+    def image_to_markdown(
+        self, image_bytes: bytes, *, lang_hint: str = "ar+fr", tier: Optional[str] = None
+    ) -> str:
         raise OcrUnavailableError(
             "This page has no usable embedded text layer and OCR is not "
             "enabled in this environment (settings.ocr_engine='none'). "
@@ -98,7 +110,9 @@ class TesseractEngine:
 
     name = "tesseract"
 
-    def image_to_markdown(self, image_bytes: bytes, *, lang_hint: str = "ar+fr") -> str:
+    def image_to_markdown(
+        self, image_bytes: bytes, *, lang_hint: str = "ar+fr", tier: Optional[str] = None
+    ) -> str:
         try:
             import pytesseract
             from PIL import Image
@@ -119,6 +133,28 @@ class TesseractEngine:
                 "not found on PATH -- install Tesseract OCR plus the 'ara' and "
                 "'fra' traineddata files."
             ) from e
+
+
+# Substrings that mark an OCR worker error as a GPU-memory failure rather
+# than an ordinary per-page application error. Measured live: one page's
+# CUDA OOM (RuntimeError: "CUDA error(2)... cudaErrorMemoryAllocation")
+# was immediately followed by 5 more OOM failures on completely
+# different, unrelated pages within the SAME still-alive worker process --
+# _handle_ocr (scripts/ocr_worker_resident.py) catches the exception and
+# returns {"ok": false}, so the process never exits and _ensure_alive
+# never has a reason to give it a fresh CUDA context. A GPU allocator that
+# has hit OOM once commonly cannot recover cleanly within that process
+# even once VRAM pressure elsewhere passes, so _ResidentOcrWorker.ocr
+# treats this class of error as fatal to the WORKER (kills it, same as a
+# crash) rather than just fatal to the one page.
+_GPU_MEMORY_ERROR_MARKERS = (
+    "out of memory", "outofmemoryerror", "cuda error", "cudaerrormemoryallocation",
+)
+
+
+def _looks_like_gpu_memory_error(message: str) -> bool:
+    lower = (message or "").lower()
+    return any(marker in lower for marker in _GPU_MEMORY_ERROR_MARKERS)
 
 
 class _ResidentOcrWorker:
@@ -152,26 +188,101 @@ class _ResidentOcrWorker:
     A single ingestion run's worth of state is a page number and an image
     path, both owned by the caller, so losing an in-flight subprocess
     costs at most the one page that was mid-flight, not the whole run.
+
+    IDLE RELEASE: unlike the model-load cost above, there was previously
+    NO mechanism to free this worker's VRAM once an ingestion run finished
+    -- `_kill()` existed but was only ever reached on a timeout or crash,
+    so the subprocess (and PaddleOCR-VL's ~2GB) stayed resident for this
+    app process's entire remaining lifetime. Measured consequence: with
+    this worker resident, `IBLOG_TUTOR` (the Darija tutor model, 7.5GB)
+    could not fit in the remaining VRAM on an 8GB card and Ollama loaded it
+    31% CPU / 69% GPU -- slow enough that a live chat request exceeded its
+    180s client timeout. `_arm_idle_timer`/`_release_idle` below fix that:
+    after `idle_release_seconds` with no OCR call, the subprocess is killed
+    and its VRAM freed; `_ensure_alive` transparently restarts it (paying
+    the cold-load cost again) on the next call, which is the correct
+    tradeoff for a single-worker ingest queue that processes one document
+    at a time and is otherwise idle for long stretches.
     """
 
-    def __init__(self, venv_python: str, worker_script: str):
+    def __init__(self, venv_python: str, worker_script: str, *, idle_release_seconds: float = 120.0):
         self._venv_python = venv_python
         self._worker_script = worker_script
         self._proc = None
         self._lock = threading.Lock()
         self._out_q: "queue.Queue[Optional[str]]" = queue.Queue()
+        self._idle_release_seconds = idle_release_seconds
+        self._idle_timer: Optional[threading.Timer] = None
 
-    def _drain_stdout(self, proc) -> None:
-        for line in proc.stdout:
-            self._out_q.put(line)
-        self._out_q.put(None)  # signals EOF / process exit to any waiting _send
+    def _drain_stdout(self, proc, out_q: "queue.Queue[Optional[str]]") -> None:
+        # ValueError/OSError here means _kill() closed the pipe out from
+        # under this thread, which is a normal shutdown, not an error --
+        # the finally still posts the EOF sentinel so nothing waits forever.
+        # `out_q` is the queue captured at spawn time, NOT `self._out_q` --
+        # deliberately, to close a race hit live by the GPU-memory-error
+        # kill path: `_kill()` can end a process that is still genuinely
+        # alive (mid-request), so THIS thread is still blocked reading its
+        # stdout at the moment `_ensure_alive()` spawns a replacement and
+        # reassigns `self._out_q` to a fresh queue. If this loop read
+        # `self._out_q` instead of a captured reference, this now-dead
+        # process's late EOF would arrive as a None on the REPLACEMENT's
+        # queue, killing the next page's genuinely healthy response.
+        try:
+            for line in proc.stdout:
+                out_q.put(line)
+        except (ValueError, OSError):
+            pass
+        finally:
+            out_q.put(None)  # signals EOF / process exit to any waiting _send
 
     def _drain_stderr(self, proc) -> None:
-        for line in proc.stderr:
-            logger.debug("ocr_worker_resident: %s", line.rstrip())
+        try:
+            for line in proc.stderr:
+                logger.debug("ocr_worker_resident: %s", line.rstrip())
+        except (ValueError, OSError):
+            pass
+
+    def _cancel_idle_timer(self) -> None:
+        if self._idle_timer is not None:
+            self._idle_timer.cancel()
+            self._idle_timer = None
+
+    def _release_idle(self) -> None:
+        """Timer callback (runs on its own thread, not the caller's) --
+        acquires the same lock `ocr()` does, so it can never kill a
+        subprocess an in-flight call is actively using. Narrow benign
+        race: if this fires the instant a new `ocr()` call is about to
+        start, that call may pay one extra cold reload rather than reusing
+        a warm worker -- self-healing (`_ensure_alive`) absorbs it exactly
+        like a crash would, so it is not worth a generation counter to
+        close completely."""
+        with self._lock:
+            self._idle_timer = None
+            if self._proc is not None:
+                self._kill()
+                logger.info(
+                    "resident OCR worker idle for %.0fs -- released to free VRAM "
+                    "(will cold-restart on the next OCR call)",
+                    self._idle_release_seconds,
+                )
+
+    def _arm_idle_timer(self) -> None:
+        """Call with self._lock already held. Cheap no-op when disabled
+        (idle_release_seconds <= 0)."""
+        self._cancel_idle_timer()
+        if self._idle_release_seconds > 0:
+            self._idle_timer = threading.Timer(self._idle_release_seconds, self._release_idle)
+            self._idle_timer.daemon = True
+            self._idle_timer.start()
 
     def _ensure_alive(self) -> None:
         import subprocess
+
+        # Cancel any pending idle-release the moment this worker is about
+        # to be used -- this call is the first thing `ocr()` does inside
+        # the lock, so there is no window for the idle timer to fire
+        # against a process a caller is actively about to use.
+        self._cancel_idle_timer()
 
         if self._proc is not None and self._proc.poll() is None:
             return
@@ -181,16 +292,52 @@ class _ResidentOcrWorker:
             stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
             text=True, encoding="utf-8", errors="replace", bufsize=1,
         )
-        threading.Thread(target=self._drain_stdout, args=(self._proc,), daemon=True).start()
+        threading.Thread(target=self._drain_stdout, args=(self._proc, self._out_q), daemon=True).start()
         threading.Thread(target=self._drain_stderr, args=(self._proc,), daemon=True).start()
 
     def _kill(self) -> None:
-        if self._proc is not None:
+        """Kill the worker AND reclaim everything the OS gave us for it.
+
+        `self._proc.kill()` alone -- which is all this used to do -- leaves
+        three open pipe handles (stdin/stdout/stderr, all subprocess.PIPE)
+        and an unreaped child. That is a real leak here rather than a
+        theoretical one, because this is not a once-per-process teardown:
+        `_release_idle` kills the worker after every
+        settings.ocr_worker_idle_release_seconds of inactivity and
+        `_ensure_alive` restarts it on the next page, and the GPU-memory
+        and timeout paths kill it too. A server that ingests documents
+        through the day therefore cycles the worker many times, leaking a
+        handle set per cycle, until the process hits its descriptor/handle
+        ceiling -- at which point the NEXT Popen fails and OCR looks
+        broken for reasons that have nothing to do with OCR.
+
+        stdin is closed first, on purpose: the worker's read loop sees EOF
+        and can exit on its own, which is a clean shutdown rather than a
+        kill. The kill still follows, because a worker blocked in a CUDA
+        call will not notice EOF promptly and this must not block the
+        caller (it runs under self._lock).
+        """
+        proc, self._proc = self._proc, None
+        if proc is None:
+            return
+        for stream in (proc.stdin, proc.stdout, proc.stderr):
             try:
-                self._proc.kill()
+                if stream is not None:
+                    stream.close()
             except Exception:
                 pass
-            self._proc = None
+        try:
+            proc.kill()
+        except Exception:
+            pass
+        try:
+            # Reap it. Without a wait() the child stays a zombie on POSIX
+            # and its handle stays open on Windows; the drain threads have
+            # already been detached from it by the stream closes above, so
+            # this returns promptly.
+            proc.wait(timeout=5)
+        except Exception:
+            pass
 
     def ocr(self, image_path: str, *, engine: str, timeout: float) -> str:
         with self._lock:
@@ -219,12 +366,54 @@ class _ResidentOcrWorker:
                 )
             resp = json.loads(line)
             if not resp.get("ok"):
-                raise OcrUnavailableError(f"resident OCR worker (engine={engine!r}) error: {resp.get('error')}")
+                error_message = resp.get("error", "")
+                if _looks_like_gpu_memory_error(error_message):
+                    # _handle_ocr (ocr_worker_resident.py) catches CUDA OOM
+                    # like any other exception and keeps the process alive --
+                    # but a GPU allocator that has hit OOM once tends to stay
+                    # poisoned for that process's lifetime. Measured live: one
+                    # OOM on an unrelated page was immediately followed by 5
+                    # more OOM failures on completely different pages, all in
+                    # this same still-alive worker. Kill it here so the next
+                    # call gets a fresh CUDA context instead of reusing the
+                    # poisoned one -- do not arm the idle timer on a process
+                    # that no longer exists.
+                    self._kill()
+                    raise OcrUnavailableError(
+                        f"resident OCR worker (engine={engine!r}) hit a GPU-memory error and was "
+                        f"killed to avoid poisoning subsequent pages: {error_message}"
+                    )
+                # The process itself is alive and about to go idle regardless
+                # of whether THIS call's result was an application-level
+                # error -- arm the release timer either way. Only the
+                # exception paths above (broken pipe, timeout, process exit,
+                # GPU-memory error) already killed the process and correctly
+                # skip this.
+                self._arm_idle_timer()
+                raise OcrUnavailableError(f"resident OCR worker (engine={engine!r}) error: {error_message}")
+            self._arm_idle_timer()
             return resp.get("markdown", "")
 
 
 _resident_worker: Optional[_ResidentOcrWorker] = None
 _resident_worker_lock = threading.Lock()
+
+
+def shutdown_resident_worker() -> None:
+    """Kill the resident OCR worker if one is running. Called from app
+    shutdown (app/main.py): the worker is a CHILD process holding GPU
+    memory, and without this an app restart could leave the old worker
+    holding VRAM while the new one tries to load its own model onto the
+    same 8GB card."""
+    global _resident_worker
+    with _resident_worker_lock:
+        worker = _resident_worker
+        _resident_worker = None
+    if worker is not None:
+        with worker._lock:
+            worker._cancel_idle_timer()
+            worker._kill()
+        logger.info("resident OCR worker shut down")
 
 
 def _get_resident_worker(venv_python: str, worker_script: str) -> _ResidentOcrWorker:
@@ -236,7 +425,10 @@ def _get_resident_worker(venv_python: str, worker_script: str) -> _ResidentOcrWo
     if _resident_worker is None:
         with _resident_worker_lock:
             if _resident_worker is None:
-                _resident_worker = _ResidentOcrWorker(venv_python, worker_script)
+                _resident_worker = _ResidentOcrWorker(
+                    venv_python, worker_script,
+                    idle_release_seconds=get_settings().ocr_worker_idle_release_seconds,
+                )
     return _resident_worker
 
 
@@ -274,7 +466,9 @@ class PaddleOcrEngine:
     _WORKER_SCRIPT = "scripts/ocr_worker_resident.py"
     _TIMEOUT_SECONDS = 300
 
-    def image_to_markdown(self, image_bytes: bytes, *, lang_hint: str = "ar+fr") -> str:
+    def image_to_markdown(
+        self, image_bytes: bytes, *, lang_hint: str = "ar+fr", tier: Optional[str] = None
+    ) -> str:
         import tempfile
         import os
         from pathlib import Path
@@ -292,12 +486,21 @@ class PaddleOcrEngine:
         if not worker_script.exists():
             raise OcrUnavailableError(f"OCR worker script not found: {worker_script}")
 
+        # tier -> which of the worker's pipelines handles THIS page. The
+        # resident worker keeps each pipeline it has been asked for loaded
+        # for the rest of its life, so mixing tiers within one document
+        # costs one extra model load total, not one per page.
+        if tier == "light":
+            engine = settings.ocr_light_engine
+        else:
+            engine = settings.ocr_paddle_engine
+
         with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as f:
             f.write(image_bytes)
             image_path = f.name
         try:
             worker = _get_resident_worker(str(venv_python), str(worker_script))
-            return worker.ocr(image_path, engine=settings.ocr_paddle_engine, timeout=self._TIMEOUT_SECONDS)
+            return worker.ocr(image_path, engine=engine, timeout=self._TIMEOUT_SECONDS)
         finally:
             os.unlink(image_path)
 
@@ -316,7 +519,9 @@ class UnlimitedOcrEngine:
         self._model = None
         self._processor = None
 
-    def image_to_markdown(self, image_bytes: bytes, *, lang_hint: str = "ar+fr") -> str:
+    def image_to_markdown(
+        self, image_bytes: bytes, *, lang_hint: str = "ar+fr", tier: Optional[str] = None
+    ) -> str:
         try:
             import torch
             from transformers import AutoModelForCausalLM, AutoProcessor
@@ -329,22 +534,47 @@ class UnlimitedOcrEngine:
                 "this environment -- see huggingface.co/baidu/Unlimited-OCR."
             ) from e
 
-        model = AutoModelForCausalLM.from_pretrained(
-            "baidu/Unlimited-OCR", trust_remote_code=True, torch_dtype=torch.bfloat16
-        ).cuda()
-        processor = AutoProcessor.from_pretrained("baidu/Unlimited-OCR", trust_remote_code=True)
+        keep_resident = get_settings().ocr_keep_resident
+
+        # settings.ocr_keep_resident used to do NOTHING here beyond
+        # skipping empty_cache(): the model was a local, so it was dropped
+        # and re-loaded from scratch on the next call whether the flag was
+        # set or not. self._model/self._processor existed for exactly this
+        # and were never assigned. An ~8GB BF16 load per page is not a
+        # subtle regression -- the flag's only reason to exist is to avoid
+        # it on a box with the VRAM to spare.
+        if keep_resident and self._model is not None:
+            model, processor = self._model, self._processor
+        else:
+            model = AutoModelForCausalLM.from_pretrained(
+                "baidu/Unlimited-OCR", trust_remote_code=True, torch_dtype=torch.bfloat16
+            ).cuda()
+            processor = AutoProcessor.from_pretrained("baidu/Unlimited-OCR", trust_remote_code=True)
+            if keep_resident:
+                self._model, self._processor = model, processor
+
+        image = None
         try:
             image = Image.open(io.BytesIO(image_bytes))
             inputs = processor(images=image, return_tensors="pt").to(model.device)
             output_ids = model.generate(**inputs, max_new_tokens=4096)
             return processor.decode(output_ids[0], skip_special_tokens=True)
         finally:
+            # PIL keeps the decoded buffer alive until the image object is
+            # closed; these are full-page renders at OCR_RENDER_DPI, so on
+            # a long document the un-closed ones add up.
+            if image is not None:
+                try:
+                    image.close()
+                except Exception:
+                    pass
             # Load-per-job, free-after (see module docstring): an ~8GB
             # BF16 model cannot co-reside with the resident tutor model on
             # an 8GB card, so a reload per document is the accepted cost
             # rather than risk an OOM mid-demo.
-            if not get_settings().ocr_keep_resident:
+            if not keep_resident:
                 del model
+                del processor
                 torch.cuda.empty_cache()
 
 

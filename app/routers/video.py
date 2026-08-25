@@ -12,10 +12,11 @@ contract.
 import uuid
 
 from fastapi import APIRouter, HTTPException
-from sqlalchemy import create_engine, text
+from sqlalchemy import text
 from sqlalchemy.orm import sessionmaker
 
 from app.config import get_settings, get_tenant_id
+from app.models.db import get_engine
 from app.models.schemas import (
     VideoGenerateRequest,
     VideoJobOut,
@@ -37,11 +38,11 @@ _COLUMNS = (
 def _get_session():
     global _engine, _SessionLocal
     if _engine is None:
-        _engine = create_engine(
-            get_settings().database_url,
-            pool_pre_ping=True,
-            connect_args={"connect_timeout": 2},
-        )
+        # The process-wide engine + pool (app.models.db), not a private
+        # one -- see that module for why four independent pools for the
+        # same database URL was a real resource problem. The globals stay
+        # so tests can monkeypatch an in-memory SQLite engine in.
+        _engine = get_engine()
         _SessionLocal = sessionmaker(bind=_engine)
     return _SessionLocal()
 

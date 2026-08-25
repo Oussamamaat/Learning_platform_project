@@ -11,6 +11,7 @@ from app.services import history
 # name would silently shadow it.
 from app.services import sources as source_service
 from app.services.domain_context import build_domain_context
+from app.services.diagrams import detect_diagram_intent, generate_diagram
 from app.services.retrieval import _fingerprint
 from app.services.routing import resolve_domain, resolve_language
 from app.services.search import build_rag_context
@@ -98,6 +99,7 @@ def _resolve_turn_context(
     query_lang: str,
     tenant_id: str,
     source_ids: Optional[list[str]] = None,
+    corpus_version: Optional[str] = None,
 ):
     """Decide which context this turn answers from, which domain and
     segment it belongs to -- the pinned-context / segment-reset design
@@ -171,7 +173,14 @@ def _resolve_turn_context(
     it to history.pin_context when (and only when) is_new_pin is True.
     """
     pinned = history.get_pinned(session_id)
-    current_corpus_version = source_service.corpus_version(tenant_id)
+    # Supplied by chat() from the SAME query that produced `source_ids`
+    # (app.services.sources.active_sources_and_version) -- this used to
+    # issue its own SELECT over the identical row set, one extra Postgres
+    # round trip on every turn. Recomputed here only for the callers that
+    # don't pass it (tests calling this function directly).
+    current_corpus_version = (
+        corpus_version if corpus_version is not None else source_service.corpus_version(tenant_id)
+    )
     corpus_changed = (
         current_corpus_version is not None
         and pinned is not None
@@ -302,7 +311,11 @@ def chat(request: ChatRequest):
     # hint, never widened by it (app.services.sources.active_source_ids's
     # docstring). The tenant's always-on global corpus is never affected
     # by this.
-    active_source_ids = source_service.active_source_ids(
+    # ONE query for both -- the active-source filter and the pin-
+    # invalidation hash are derived from the same source_files rows, and
+    # this turn needs both (see app.services.sources.active_sources_and_
+    # version). They were two separate SELECTs over identical rows before.
+    active_source_ids, corpus_version_now = source_service.active_sources_and_version(
         tenant_id, requested=request.active_source_ids
     )
 
@@ -318,8 +331,98 @@ def chat(request: ChatRequest):
         degraded, corpus_version,
     ) = _resolve_turn_context(
         session_id, request.message, requested_domain, query_lang, tenant_id,
-        source_ids=active_source_ids,
+        source_ids=active_source_ids, corpus_version=corpus_version_now,
     )
+
+    # 2b. Diagram intent -- checked BEFORE the refusal gate below, on
+    # purpose: an ungrounded diagram request (a candlestick pattern has no
+    # corpus under the current three-domain enum) must still be able to
+    # produce a diagram with grounded=False, which that gate would
+    # otherwise refuse outright on seeing empty `context`. Deterministic
+    # keyword match (app.services.diagrams.detect_diagram_intent), not a
+    # model judgement -- see that module's docstring for why. No dedicated
+    # diagram endpoint exists; the trigger is the message's own text.
+    diagram_intent = detect_diagram_intent(request.message)
+    if diagram_intent is not None:
+        # domain_source == "no_match" means THIS turn's routing vote found
+        # nothing relevant anywhere in the corpus -- but `context`/`sources`
+        # can still be non-empty here, reused from a same-session pin on an
+        # unrelated prior topic (chat.py's own fallback: "a stale-but-
+        # relevant answer beats a false refusal", _resolve_turn_context's
+        # docstring above). That's a reasonable trade for ordinary prose,
+        # where the returned `sources` visibly flags the mismatch to the
+        # user -- but generate_diagram's grounded flag is derived from
+        # `bool(context.strip())` alone, so without this it would mark an
+        # off-topic diagram "grounded" in a document that has nothing to do
+        # with it (caught live: a candlestick follow-up inherited a pinned
+        # lockout/tagout context and reported grounded=True with that
+        # document as its source). Treating "no_match" as empty context
+        # here, same as the refusal gate below does, is what makes
+        # generate_diagram's own context.strip() check produce grounded=False
+        # correctly in this case.
+        diagram_context = context if domain_source != "no_match" else ""
+        diagram_sources = sources if domain_source != "no_match" else []
+        try:
+            diagram_payload = generate_diagram(
+                message=request.message,
+                intent=diagram_intent,
+                domain=domain,
+                context=diagram_context,
+                language=response_lang,
+                sources=diagram_sources,
+                caller_candles=request.candles,
+            )
+        except AppError as e:
+            logger.error("LLM error in diagram generation: %s", e.code)
+            return JSONResponse(
+                status_code=e.status_code,
+                content={"error": {"code": e.code, "message": e.message}},
+            )
+        if diagram_payload is not None:
+            # Same history/pin bookkeeping a normal turn gets below --
+            # only the caption is appended, never the Mermaid source, so a
+            # follow-up question's replayed window doesn't bloat with
+            # diagram syntax it has no use for.
+            history.append_exchange(
+                session_id,
+                tenant_id=tenant_id,
+                user_id=user_id,
+                domain=domain,
+                language=query_lang,
+                segment_id=segment_id,
+                user_content=request.message,
+                assistant_content=diagram_payload.caption,
+                sources=diagram_payload.sources,
+                response_lang_override=lang.override_to_persist,
+                override_query_lang=lang.override_query_lang_to_persist,
+            )
+            if is_new_pin:
+                history.pin_context(
+                    session_id,
+                    tenant_id=tenant_id,
+                    user_id=user_id,
+                    domain=domain,
+                    language=query_lang,
+                    segment_id=segment_id,
+                    context=context,
+                    sources=sources,
+                    fingerprint=_fingerprint(domain=domain, ui_lang=query_lang, query=request.message),
+                    corpus_version=corpus_version,
+                )
+            return ChatResponse(
+                response=diagram_payload.caption,
+                session_id=session_id,
+                sources=diagram_payload.sources,
+                tokens_used=0,
+                domain=domain,
+                domain_source=domain_source,
+                language=response_lang,
+                degraded=degraded,
+                diagram=diagram_payload,
+            )
+        # generate_diagram gave up after its own retry (rare -- see its
+        # docstring) -- fall through to the normal flow below exactly as
+        # if no diagram intent had been detected.
 
     # 3. Refuse deterministically rather than let the model compose its own
     # refusal. The fine-tuned model's refusal register is welded to tenant

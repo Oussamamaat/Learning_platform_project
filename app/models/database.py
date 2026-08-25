@@ -55,6 +55,25 @@ class Document(Base):
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
     updated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
 
+    __table_args__ = (
+        # Every retrieval query filters `WHERE tenant_id = ... AND (domain
+        # = ... OR source_file_id IS NOT NULL)` before ordering by vector
+        # distance (app.services.search.search_similar_chunks). The
+        # separate single-column indexes on tenant_id and domain make
+        # Postgres either pick one and re-check the other per row, or
+        # BitmapAnd two scans; a composite covers the actual predicate in
+        # one. It matters more, not less, as the corpus grows -- with no
+        # ANN index (see app/models/db_init.py for why that is deliberate
+        # at this size) the vector ordering is a sequential scan over
+        # whatever this predicate leaves, so shrinking that set is the
+        # whole optimization.
+        Index("ix_documents_tenant_domain", "tenant_id", "domain"),
+        # The delete path (app/routers/ingest.py's DELETE /sources/{id})
+        # and the source_ids retrieval filter both scope by tenant AND
+        # source file.
+        Index("ix_documents_tenant_source_file", "tenant_id", "source_file_id"),
+    )
+
     def __repr__(self):
         return f"<Document(id={self.id}, source={self.source_name}, tenant={self.tenant_id})>"
 
@@ -188,6 +207,16 @@ class SourceFile(Base):
     language = Column(String(10), nullable=True)
     chunk_count = Column(Integer, nullable=False, default=0)
     page_count = Column(Integer, nullable=True)
+    # LIVE progress counter, updated per-page WHILE status='processing' --
+    # distinct from page_count (only known/written once parsing finishes,
+    # since computing it means reading the whole file). Added 2026-08-23:
+    # before this, chunk_count stayed 0 and status stayed 'processing' for
+    # a whole OCR-heavy run (tens of minutes on a laptop GPU) with no
+    # other signal a poll could show, indistinguishable from a hang. NULL
+    # once a document is ready/partial/error (see app.services.ingest_jobs
+    # .process_source_file) -- it describes an in-flight run, not a
+    # finished one; page_count is the number to read after completion.
+    pages_done = Column(Integer, nullable=True)
     parser = Column(String(30), nullable=True)
     ocr_engine = Column(String(30), nullable=True)
     # Populated only for status='partial': pages a parser skipped rather

@@ -54,7 +54,7 @@
           "audio"
         ],
         "summary": "Process Audio",
-        "description": "Audio processing endpoint.\nReceives audio blob, transcribes via Whisper, processes through RAG pipeline.",
+        "description": "Audio processing endpoint -- reserved for the voice-chat feature\n(STT -> RAG pipeline -> TTS). Not implemented: no STT/TTS vendor has\nbeen selected yet (resurrection.md Q0.2, the program's single largest\nunresolved MVP item, tracked #1 in resurrection.md's \"Known-open,\ncarried forward\" list). This must fail loudly rather than return a\nplaceholder transcription -- a mounted endpoint that fakes success is\nworse than one that says so, once a real client is wired to it.",
         "operationId": "process_audio_api_v1_audio__post",
         "parameters": [
           {
@@ -145,46 +145,6 @@
                 "schema": {
                   "$ref": "#/components/schemas/QuizResponse"
                 }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/v1/demo/conversation": {
-      "post": {
-        "tags": [
-          "demo"
-        ],
-        "summary": "Get Demo Conversation",
-        "description": "Generate a demo multi-turn conversation.",
-        "operationId": "get_demo_conversation_api_v1_demo_conversation_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/DemoRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {}
               }
             }
           },
@@ -677,6 +637,41 @@
         ],
         "title": "Body_upload_sources_api_v1_ingest_upload_post"
       },
+      "Candle": {
+        "properties": {
+          "label": {
+            "type": "string",
+            "title": "Label",
+            "description": "X-axis tick, e.g. a date or session label"
+          },
+          "open": {
+            "type": "number",
+            "title": "Open"
+          },
+          "high": {
+            "type": "number",
+            "title": "High"
+          },
+          "low": {
+            "type": "number",
+            "title": "Low"
+          },
+          "close": {
+            "type": "number",
+            "title": "Close"
+          }
+        },
+        "type": "object",
+        "required": [
+          "label",
+          "open",
+          "high",
+          "low",
+          "close"
+        ],
+        "title": "Candle",
+        "description": "One OHLC bar. Used both as ChatRequest.candles (caller-supplied real\ndata, rendered verbatim) and inside DiagramPayload.spec (model-invented\nor caller-supplied, whichever generate_diagram actually used)."
+      },
       "ChatRequest": {
         "properties": {
           "message": {
@@ -746,6 +741,21 @@
             ],
             "title": "Active Source Ids",
             "description": "Which of the tenant's uploaded sources (app/routers/ingest.py) may ground this turn's answer. A NARROWING hint only, like tenant_id -- app.services.sources.active_source_ids intersects this against server-side (status='ready' AND enabled) state, never widens it, so a stale client can't resurrect a source the tenant just disabled. The tenant's always-on global corpus is never affected by this field. Omitted means every currently-enabled uploaded source is eligible."
+          },
+          "candles": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/Candle"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Candles",
+            "description": "Real OHLC data for a candlestick diagram, when the caller already has it. Rendered verbatim -- app.services.diagrams overrides whatever the model invented with this list rather than the reverse, so a real dataset can never be silently replaced by illustrative model output. Ignored unless the message's detected diagram intent is 'candlestick' (app.services.diagrams.detect_diagram_intent); omitted means the model invents illustrative values for the named pattern (e.g. 'marteau haussier')."
           }
         },
         "type": "object",
@@ -814,6 +824,17 @@
             "title": "Degraded",
             "description": "True when pgvector retrieval raised and this answer fell back to the disk backend (app/routers/chat.py's _retrieve_context) -- which knows nothing about tenant uploads. The answer is still grounded in the built-in corpus, but any uploaded sources are silently absent from it until Postgres recovers; the UI should say so rather than let a confident, cited-looking answer imply otherwise.",
             "default": false
+          },
+          "diagram": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DiagramPayload"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Set when the message's own text triggered app.services.diagrams.detect_diagram_intent -- there is no separate diagram endpoint. `response` is the diagram's own caption in that case. None for every ordinary chat turn."
           }
         },
         "type": "object",
@@ -826,23 +847,86 @@
         ],
         "title": "ChatResponse"
       },
-      "DemoRequest": {
+      "DiagramKind": {
+        "type": "string",
+        "enum": [
+          "flowchart",
+          "sequence",
+          "mindmap",
+          "pie",
+          "xy",
+          "candlestick"
+        ],
+        "title": "DiagramKind"
+      },
+      "DiagramPayload": {
         "properties": {
-          "language": {
-            "type": "string",
-            "title": "Language"
+          "kind": {
+            "$ref": "#/components/schemas/DiagramKind"
           },
-          "turn": {
-            "type": "integer",
-            "title": "Turn"
+          "kind_source": {
+            "type": "string",
+            "title": "Kind Source",
+            "description": "How `kind` was chosen: 'keyword' (Tier 1, deterministic) or 'semantic' (Tier 2 fallback, not yet implemented)."
+          },
+          "title": {
+            "type": "string",
+            "title": "Title"
+          },
+          "caption": {
+            "type": "string",
+            "title": "Caption",
+            "description": "One-to-two sentence explanation, also used as ChatResponse.response for this turn -- follows the turn's response language, unlike the diagram's own structural labels, which always follow settings.diagram_label_language."
+          },
+          "mermaid": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mermaid",
+            "description": "Mermaid source, populated for every kind except 'candlestick' (Mermaid has no OHLC diagram type -- see `spec` instead)."
+          },
+          "spec": {
+            "type": "object",
+            "title": "Spec",
+            "description": "Raw render data for kinds Mermaid can't express. Only populated for 'candlestick': {'candles': [Candle, ...]}."
+          },
+          "grounded": {
+            "type": "boolean",
+            "title": "Grounded",
+            "description": "True when retrieval found tenant context and every structural label passed the same ungrounded-reference check quiz questions do. False means the diagram is illustrative (e.g. a candlestick pattern with no corpus) -- still shown, just flagged so the UI can say it isn't from the tenant's own documents."
+          },
+          "repairs": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Repairs",
+            "description": "Deterministic salvage actions taken on the model's raw output before rendering (e.g. a dangling edge dropped) -- never a fabrication, only a removal. Empty when the model's output needed no repair."
+          },
+          "sources": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Sources",
+            "description": "Retrieved document sources, when grounded"
           }
         },
         "type": "object",
         "required": [
-          "language",
-          "turn"
+          "kind",
+          "kind_source",
+          "title",
+          "caption",
+          "grounded"
         ],
-        "title": "DemoRequest"
+        "title": "DiagramPayload",
+        "description": "A generated diagram, attached to ChatResponse when the turn's message\ntriggered app.services.diagrams.detect_diagram_intent. See\ndocs/architecture/diagram-generation.md."
       },
       "Domain": {
         "type": "string",
@@ -1109,6 +1193,18 @@
               }
             ],
             "title": "Page Count"
+          },
+          "pages_done": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pages Done",
+            "description": "Live progress while status='processing': pages attempted so far, out of page_count. NULL once ready/partial/error -- read chunk_count/page_count for the finished result instead."
           },
           "parser": {
             "anyOf": [

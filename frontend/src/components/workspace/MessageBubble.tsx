@@ -4,6 +4,7 @@ import { CircleAlert, FileText, Languages, User } from "lucide-react";
 import type { ChatMessage } from "../../hooks/useChatSessions";
 import { useApp } from "../../context/AppContext";
 import QuizCard from "./QuizCard";
+import DiagramCard from "./DiagramCard";
 
 // Gemini-style 4-point sparkle, drawn as flat geometry (no gradients).
 export function SparkleMark({ className }: { className?: string }) {
@@ -63,6 +64,17 @@ function SourcesRow({ sources }: { sources: string[] }) {
 function AssistantBody({ message }: { message: ChatMessage }) {
   if (message.quiz) {
     return <QuizCard quiz={message.quiz} />;
+  }
+
+  if (message.diagram) {
+    return (
+      <div className="space-y-1">
+        {message.content && (
+          <ReactMarkdown remarkPlugins={[remarkGfm]}>{message.content}</ReactMarkdown>
+        )}
+        <DiagramCard diagram={message.diagram} />
+      </div>
+    );
   }
 
   if (message.pending) {

@@ -10,6 +10,29 @@ class Settings(BaseSettings):
     ollama_base_url: str = "http://localhost:11434"
     ollama_model: str = "IBLOG_TUTOR:latest"
     ollama_model_fr: str = "iblog-tutor-fr:latest"
+    # How long Ollama keeps a model resident after a request. Ollama's own
+    # default is 5 minutes, and this deployment's tutor model is ~7.5GB:
+    # a demo with a pause longer than that in it paid a FULL cold model
+    # load on the next question -- minutes, indistinguishable from a hang
+    # from the user's side. "30m" covers a realistic session; set "-1" to
+    # pin the model for the process's whole lifetime, or "0" to unload
+    # immediately (useful on a card that must free VRAM for an OCR run
+    # between questions). Sent per-request by app.services.llm._post_ollama.
+    ollama_keep_alive: str = "30m"
+    # Per-request generation timeout. Was a hardcoded 180 in two places in
+    # app/services/llm.py; a cold model load on this laptop has been
+    # measured at 4-6 minutes, which is exactly the case a timeout should
+    # survive rather than turn into a failed request, so it needs to be
+    # tunable per deployment instead of a literal.
+    ollama_timeout_seconds: int = 300
+    # Context window requested per call, overriding each Modelfile's 4096
+    # default. Ollama truncates from the FRONT when the window is exceeded,
+    # i.e. it silently eats the system block holding the retrieved RAG
+    # context first -- so this must stay comfortably above
+    # max_context_length (app/services/retrieval.py) plus the history
+    # window plus the response. Was duplicated as a literal 8192 in both
+    # of llm.py's request builders, which could drift apart.
+    ollama_num_ctx: int = 8192
     default_tenant_id: str = "company_abc"
     default_user_id: str = "default_user"
     # Tier-3 fallback for app.services.routing's domain router when tier 1
@@ -50,6 +73,16 @@ class Settings(BaseSettings):
     # point it at this setting.
     embedding_model: str = "BAAI/bge-m3"
     embedding_dim: int = 1024
+    # Chunks per forward pass in app.services.ingestion.embed_chunks. 32,
+    # not the 64 that was hardcoded there before: that number predates the
+    # 2026-08-13 bge-m3 migration, which raised CHUNK_SIZE from 400 to
+    # 2000 characters without revisiting it -- a 64-chunk batch is now a
+    # 5x larger activation spike than when 64 was chosen, on a card that
+    # is simultaneously holding the Ollama tutor model and (mid-upload)
+    # the resident OCR worker. embed_chunks halves this and retries on a
+    # CUDA OOM rather than failing the document, so this is a throughput
+    # knob, not a correctness one -- raise it on a box with spare VRAM.
+    embedding_batch_size: int = 32
 
     # Cosine-similarity floor for a retrieved chunk to be usable
     # (app.services.search / app.services.retrieval) and for a chunk to
@@ -118,16 +151,48 @@ class Settings(BaseSettings):
     # launches that script via this interpreter rather than importing
     # paddleocr into this process. Only read when ocr_engine="paddleocr".
     ocr_venv_python: str = "./.ocr_venv/Scripts/python.exe"
-    # Which pipeline app.services.ocr.PaddleOcrEngine's resident worker
-    # (scripts/ocr_worker_resident.py) runs: "vl" (PaddleOCR-VL, the 3B
-    # vision-language pipeline -- highest fidelity, slowest, the only one
-    # with a proven ground-truth recovery on this corpus as of the
-    # scripts/ocr_bakeoff.py run this default was set from), "structure"
-    # (PPStructureV3, layout+table recognition -- lighter), or "classic"
-    # (PaddleOCR/PP-OCRv5 -- lightest, no table/layout structure at all).
-    # See scripts/ocr_bakeoff.py's docstring for the measured wall-clock
-    # and ground-truth-token-survival numbers each was chosen from.
+    # The HEAVY tier: which pipeline app.services.ocr.PaddleOcrEngine's
+    # resident worker (scripts/ocr_worker_resident.py) runs for a page with
+    # no usable text layer at all. "vl" (PaddleOCR-VL, the 3B
+    # vision-language pipeline -- highest fidelity, slowest, and the only
+    # engine measured to recover this corpus's formula constants),
+    # "structure" (PPStructureV3, layout+table recognition), or "classic"
+    # (PaddleOCR/PP-OCRv5 -- no layout/table structure at all).
+    # See scripts/ocr_bakeoff.py for the measured numbers behind this.
     ocr_paddle_engine: str = "vl"
+    # The LIGHT tier, used for OCR_PREFERRED pages when ocr_two_tier is on.
+    # Measured warm on arabic_test.pdf: 5.5s/page vs "vl"'s 52.5s (~10x),
+    # scoring 4/5 on p15's CAD-layer table -- its only miss there
+    # (0.999600) comes from the page's native text layer anyway, which
+    # _parse_pdf merges in. It scores 0/4 on p51's formulas, which is
+    # exactly why formula-bearing pages must not silently land here; see
+    # ocr_two_tier below.
+    ocr_light_engine: str = "classic"
+    # Two-tier page routing (app.services.ingestion._ocr_pdf_page):
+    #   OCR_REQUIRED  -> ocr_paddle_engine (heavy). No native text exists
+    #                    to fall back on, so fidelity outranks speed.
+    #   OCR_PREFERRED -> ocr_light_engine (light), because the page's
+    #                    native text is already being merged in and OCR is
+    #                    only being asked for the embedded table/figure.
+    #                    Escalates to the heavy engine when the light
+    #                    engine's output looks numerically empty (see
+    #                    ingestion._classic_ocr_looks_incomplete).
+    # Set False to send every OCR page to ocr_paddle_engine, the pre-
+    # 2026-08-19 behaviour -- slower, and the fallback if the light tier
+    # is ever found to drop content on a real tenant document.
+    ocr_two_tier: bool = True
+    # Seconds of no OCR call before app.services.ocr._ResidentOcrWorker
+    # kills its subprocess to free VRAM, restarting (cold-loading again)
+    # on the next call. 0 disables release -- the pre-2026-08-23 behaviour,
+    # where the worker held VRAM for this app process's whole remaining
+    # lifetime once started. Measured consequence of that: with the worker
+    # resident, the 7.5GB Darija tutor model could not fit alongside it on
+    # an 8GB card and Ollama loaded it 31% CPU / 69% GPU, slow enough that
+    # a live chat request exceeded its 180s client timeout. 120s matches
+    # ingest_queue's single-worker design (one document at a time, likely
+    # idle between uploads) without releasing so eagerly that back-to-back
+    # pages within one document's OCR pass keep re-paying the cold-load.
+    ocr_worker_idle_release_seconds: float = 120.0
 
     # Tenant document uploads (app/routers/ingest.py).
     upload_dir: str = "./data/uploads"
@@ -139,6 +204,27 @@ class Settings(BaseSettings):
     # can reach the port can otherwise wipe the tenant's corpus. Gates
     # POST/PATCH/DELETE on the ingest router with a 403; GET is unaffected.
     uploads_read_only: bool = False
+
+    # Diagram generation (app/services/diagrams.py). Kill-switch first: a
+    # chat turn falling back to prose on a stuck Ollama/GPU is much less
+    # visible than every diagram request failing loudly, so this can be
+    # flipped off without touching code if diagram generation ever needs to
+    # be pulled from a live deployment quickly.
+    diagrams_enabled: bool = True
+    # Language every STRUCTURAL diagram label (node/edge/participant/slice/
+    # axis text) must be written in, regardless of the turn's own response
+    # language -- the caption alone follows response_lang. "fr" is the only
+    # value app.services.diagrams's language gate currently implements
+    # (Latin-script-only enforcement); this is a knob, not a hardcode,
+    # because the platform is multilingual and a future tenant may want a
+    # different structural-label language without a code change.
+    diagram_label_language: str = "fr"
+    # Node-count ceiling per diagram (flowchart/sequence/mindmap nodes, pie
+    # slices, xy points, candlesticks) enforced by the heal tier
+    # (app.services.diagrams's per-kind heal functions) -- keeps a diagram
+    # legible in the chat panel and keeps a single Ollama call's JSON output
+    # bounded. Excess items are truncated, not rejected outright.
+    diagram_max_nodes: int = 14
 
     model_config = {
         "env_file": ".env",

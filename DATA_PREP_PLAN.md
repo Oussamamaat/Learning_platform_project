@@ -319,7 +319,7 @@ raw/
 
 ### Infrastructure
 ```
-docker-compose.yml             # pgvector + Ollama + Redis + FastAPI
+config/docker-compose.yml      # pgvector + Ollama + FastAPI
 Dockerfile                     # Python 3.11-slim + uvicorn
 requirements.txt               # Dependencies
 ```

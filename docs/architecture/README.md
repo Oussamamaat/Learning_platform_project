@@ -22,6 +22,13 @@ cover the question.
 - [serving.md](serving.md) — what's deployed today vs. the documented target architecture
 - [video-generation-interface.md](video-generation-interface.md) — contract with the
   explanatory-video feature (separate contributor, separate model)
+- [diagram-generation.md](diagram-generation.md) — Mermaid + candlestick diagrams
+  generated from a chat message: JSON spec from the model, deterministic rendering,
+  the heal/gate/retry pipeline, and the real-parser CI gate
+- [cloud-scaling-plan.md](cloud-scaling-plan.md) — **target, not built**: how ingestion and
+  serving change off the single-laptop deployment. Unlike every other file here it
+  describes what does *not* exist yet, so read it as a migration brief; its "today" figures
+  are measured and its cloud figures are labelled estimates
 
 ## Not architecture
 

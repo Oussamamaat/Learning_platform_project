@@ -3,12 +3,12 @@
     "label": "arabic_test.pdf / French (cross-lingual)",
     "document_hint": "arabic_test.pdf",
     "requested_language": "fr",
-    "session_id": "eval-c2dda3e82656",
+    "session_id": "eval-e42532637dfe",
     "turns": [
       {
         "turn": 1,
         "learner_message": "Quelle est la surface maximale constructible sur le front de mer, et quelle distance de retrait faut-il respecter par rapport a la ligne de remblai ?",
-        "response": "Selon l'article 35 du document fourni, il y a une zone tampon obligatoire d'au moins 40 mètres entre la ligne de remblai et les constructions. La surface maximale constructible sur le front de mer n'est pas spécifiée dans ce document.  Pourriez-vous me dire si vous avez compris cette information ?",
+        "response": "Selon l'article 5.5.3 du document fourni, il n'est pas permis de construire des bâtiments à plus d'un étage ou dépassant une hauteur maximale de 10 mètres sur le front de mer.  En ce qui concerne la distance de retrait, elle est définie comme suit : « Toutes les constructions et bâtiments doivent être reculés d'une distance minimale de 40 mètres du remblai le long du terrain ».",
         "sources": [
           "arabic_test.pdf"
         ],
@@ -17,22 +17,22 @@
         "language_reported": "fr",
         "cross_language": false,
         "degraded": false,
-        "elapsed_seconds": 24.7,
+        "elapsed_seconds": 169.8,
         "scores": {
           "language_ok": true,
           "arabic_chars": 0,
-          "latin_chars": 233,
+          "latin_chars": 283,
           "explains_before_asking": true,
-          "question_count": 1,
-          "ends_with_exactly_one_question": true,
-          "char_count": 298,
+          "question_count": 0,
+          "ends_with_exactly_one_question": false,
+          "char_count": 380,
           "nonempty": true
         }
       },
       {
         "turn": 2,
         "learner_message": "Donc si je comprends bien, la limite est de 50% de la surface totale qui peut etre construite ?",
-        "response": "Non, la limite n'est pas fixée à 50%. L'article 35 stipule qu'il faut respecter une distance de retrait d'au moins 40 mètres par rapport à la ligne de remblai.  En plus de cela, il y a des règles spécifiques pour les zones frontalières avec le littoral qui peuvent limiter encore plus la construction.",
+        "response": "Non, ce n'est pas exactement ça. La limitation concerne plutôt la hauteur et l'emplacement des constructions par rapport à la ligne de remblai.  La superficie constructible dépendra du type d'utilisation prévue pour le site (résidentiel, commercial...) et sera définie dans les articles 5.2 et suivants du document.",
         "sources": [
           "arabic_test.pdf"
         ],
@@ -41,19 +41,19 @@
         "language_reported": "fr",
         "cross_language": false,
         "degraded": false,
-        "elapsed_seconds": 18.2,
+        "elapsed_seconds": 13.9,
         "scores": {
           "language_ok": true,
           "arabic_chars": 0,
-          "latin_chars": 225,
+          "latin_chars": 245,
           "explains_before_asking": true,
           "question_count": 0,
           "ends_with_exactly_one_question": false,
-          "char_count": 301,
+          "char_count": 315,
           "nonempty": true,
           "reaction": {
             "turn2_word_count": 26,
-            "new_content_word_ratio": 0.81,
+            "new_content_word_ratio": 0.77,
             "note": "Lexical-overlap proxy only. Read the transcript to judge whether the tutor actually corrected the learner's wrong answer in turn 2, vs. silently agreeing with it -- no automated check here does that."
           }
         }
@@ -61,7 +61,7 @@
       {
         "turn": 3,
         "learner_message": "Et concernant la hauteur maximale des batiments dans cette zone, quelle est la regle ?",
-        "response": "La hauteur maximale n'est pas spécifiée dans l'article 35.  Il faudrait consulter d'autres articles ou documents pour obtenir ces informations. Par exemple, le document mentionne que les règles spécifiques peuvent limiter encore plus la construction en bord de mer.",
+        "response": "La règle stipule que la hauteur maximale autorisée pour les bâtiments sur le front de mer ne doit pas dépasser 10 mètres.  Il faut également tenir compte des distances de retrait obligatoires définies par l'article 5.5.3 du document, qui varient selon le type d'utilisation prévue (par exemple, une distance de retrait plus importante est requise pour les zones commerciales).",
         "sources": [
           "arabic_test.pdf"
         ],
@@ -70,15 +70,15 @@
         "language_reported": "fr",
         "cross_language": false,
         "degraded": false,
-        "elapsed_seconds": 20.6,
+        "elapsed_seconds": 54.7,
         "scores": {
           "language_ok": true,
           "arabic_chars": 0,
-          "latin_chars": 213,
+          "latin_chars": 294,
           "explains_before_asking": true,
           "question_count": 0,
           "ends_with_exactly_one_question": false,
-          "char_count": 265,
+          "char_count": 376,
           "nonempty": true
         }
       }
@@ -88,7 +88,7 @@
     "label": "french_test.pdf / French",
     "document_hint": "french_test.pdf",
     "requested_language": "fr",
-    "session_id": "eval-8efb1702ac47",
+    "session_id": "eval-7e72b918f97e",
     "turns": [
       {
         "turn": 1,
@@ -102,7 +102,7 @@
         "language_reported": "fr",
         "cross_language": false,
         "degraded": false,
-        "elapsed_seconds": 143.9,
+        "elapsed_seconds": 28.2,
         "scores": {
           "language_ok": true,
           "arabic_chars": 0,
@@ -117,7 +117,7 @@
       {
         "turn": 2,
         "learner_message": "Donc remplacer n'importe quelle piece, meme a l'identique, compte toujours comme une modification ?",
-        "response": "Non, pas forcément. Le guide précise que le remplacement d'un élément dans une machine ou un ensemble de machines ne constitue une modification que si les caractéristiques ou références du nouvel élément diffèrent de ceux indiqués dans la notice d'instructions ou dans la documentation du fabricant.  Par exemple, changer un bloc de freinage par un bloc ayant des caractéristiques différentes qui réduit le temps de freinage serait considéré comme une modification.",
+        "response": "Non, pas nécessairement. Le remplacement à l'identique ne constitue généralement pas une modification.  Par exemple, si vous remplacez un boulon usé par un nouveau boulon du même type et des mêmes caractéristiques, cela n'est pas considéré comme une modification. Mais si le remplacement implique un changement de performance ou de type de composant, alors c'est une modification.",
         "sources": [
           "french_test.pdf"
         ],
@@ -126,27 +126,46 @@
         "language_reported": "fr",
         "cross_language": false,
         "degraded": false,
-        "elapsed_seconds": 44.0,
+        "elapsed_seconds": 12.9,
         "scores": {
           "language_ok": true,
           "arabic_chars": 0,
-          "latin_chars": 371,
+          "latin_chars": 302,
           "explains_before_asking": true,
           "question_count": 0,
           "ends_with_exactly_one_question": false,
-          "char_count": 465,
+          "char_count": 380,
           "nonempty": true,
           "reaction": {
-            "turn2_word_count": 32,
-            "new_content_word_ratio": 0.78,
+            "turn2_word_count": 24,
+            "new_content_word_ratio": 0.71,
             "note": "Lexical-overlap proxy only. Read the transcript to judge whether the tutor actually corrected the learner's wrong answer in turn 2, vs. silently agreeing with it -- no automated check here does that."
           }
         }
       },
       {
         "turn": 3,
-        "message": "Et le simple deplacement d'un composant de securite, sans le remplacer, est-ce aussi considere comme une modification ?",
-        "error": "ReadTimeout: HTTPConnectionPool(host='127.0.0.1', port=8000): Read timed out. (read timeout=180)"
+        "learner_message": "Et le simple deplacement d'un composant de securite, sans le remplacer, est-ce aussi considere comme une modification ?",
+        "response": "Oui, même le déplacement d’un composant de sécurité peut être considéré comme une modification.  Le guide précise que « Le changement d’implantation d’un composant de sécurité est considéré comme une modification ». Par exemple, si vous déplacez un barrage immatériel plus près ou plus loin du périmètre à protéger, cela modifie son efficacité et doit donc être pris en compte.",
+        "sources": [
+          "french_test.pdf"
+        ],
+        "domain": "industrial",
+        "domain_source": "retrieval",
+        "language_reported": "fr",
+        "cross_language": false,
+        "degraded": false,
+        "elapsed_seconds": 26.9,
+        "scores": {
+          "language_ok": true,
+          "arabic_chars": 0,
+          "latin_chars": 285,
+          "explains_before_asking": true,
+          "question_count": 0,
+          "ends_with_exactly_one_question": false,
+          "char_count": 377,
+          "nonempty": true
+        }
       }
     ]
   },
@@ -154,12 +173,12 @@
     "label": "arabic_test.pdf / Darija",
     "document_hint": "arabic_test.pdf",
     "requested_language": "ar-MA",
-    "session_id": "eval-9988e56c797c",
+    "session_id": "eval-95cceb668a4e",
     "turns": [
       {
         "turn": 1,
         "learner_message": "شحال كيبان الحمل الكهربائي اللي كيوجب توفير محطة رئيسية؟",
-        "response": "حسب الجدول رقم 8، إلى كان مجموع الأحمال الكهربائية أكثر من 12,000 KVA، خاصك توفر محطة كهرباء رئيسية. واش عندك شي سؤال آخر على هاد الموضوع؟",
+        "response": "حسب الجدول رقم، إلى كان مجموع الأحمال الكهربائية أكثر من KVA 12,000 خاصك توفر محطة كهرباء رئيسية. واش عندك شي سؤال آخر على هاد الموضوع؟",
         "sources": [
           "arabic_test.pdf"
         ],
@@ -168,22 +187,22 @@
         "language_reported": "darija",
         "cross_language": true,
         "degraded": false,
-        "elapsed_seconds": 79.4,
+        "elapsed_seconds": 41.7,
         "scores": {
           "language_ok": true,
-          "arabic_chars": 102,
+          "arabic_chars": 101,
           "latin_chars": 3,
           "explains_before_asking": true,
           "question_count": 1,
           "ends_with_exactly_one_question": true,
-          "char_count": 138,
+          "char_count": 135,
           "nonempty": true
         }
       },
       {
         "turn": 2,
         "learner_message": "يعني إلا وصل الحمل ديال البناية ل 10000 كيلوفولط أمبير خاصنا نديرو محطة رئيسية؟",
-        "response": "لا، حسب الجدول رقم 8، إلى كان مجموع الأحمال الكهربائية أكثر من 12,000 KVA، خاصك توفر محطة كهرباء رئيسية. واش عندك شي سؤال آخر على هاد الموضوع؟",
+        "response": "صحيح، حسب الجدول رقم، إلى كان مجموع الأحمال الكهربائية أكثر من KVA 12,000 خاصك توفر محطة كهرباء رئيسية. واش عندك شي سؤال آخر على هاد الموضوع؟",
         "sources": [
           "arabic_test.pdf"
         ],
@@ -192,19 +211,19 @@
         "language_reported": "darija",
         "cross_language": true,
         "degraded": false,
-        "elapsed_seconds": 24.3,
+        "elapsed_seconds": 21.3,
         "scores": {
           "language_ok": true,
-          "arabic_chars": 105,
+          "arabic_chars": 106,
           "latin_chars": 3,
           "explains_before_asking": true,
           "question_count": 1,
           "ends_with_exactly_one_question": true,
-          "char_count": 142,
+          "char_count": 141,
           "nonempty": true,
           "reaction": {
-            "turn2_word_count": 14,
-            "new_content_word_ratio": 0.0,
+            "turn2_word_count": 15,
+            "new_content_word_ratio": 0.07,
             "note": "Lexical-overlap proxy only. Read the transcript to judge whether the tutor actually corrected the learner's wrong answer in turn 2, vs. silently agreeing with it -- no automated check here does that."
           }
         }
@@ -212,7 +231,7 @@
       {
         "turn": 3,
         "learner_message": "وشحال كتكون المساحة اللي خاصها برج الاتصالات؟",
-        "response": "حسب الجدول رقم 9، إلى كان مجموع الأحمال الكهربائية أكثر من 12,000 KVA، خاصك توفر محطة كهرباء رئيسية. واش عندك شي سؤال آخر على هاد الموضوع؟",
+        "response": "حسب الجدول رقم، إلى كان مجموع الأحمال الكهربائية أكثر من KVA 12,000 خاصك توفر محطة كهرباء رئيسية. واش عندك شي سؤال آخر على هاد الموضوع؟",
         "sources": [
           "arabic_test.pdf"
         ],
@@ -221,15 +240,15 @@
         "language_reported": "darija",
         "cross_language": true,
         "degraded": false,
-        "elapsed_seconds": 22.4,
+        "elapsed_seconds": 14.2,
         "scores": {
           "language_ok": true,
-          "arabic_chars": 102,
+          "arabic_chars": 101,
           "latin_chars": 3,
           "explains_before_asking": true,
           "question_count": 1,
           "ends_with_exactly_one_question": true,
-          "char_count": 138,
+          "char_count": 135,
           "nonempty": true
         }
       }
@@ -239,12 +258,12 @@
     "label": "french_test.pdf / Darija (cross-lingual)",
     "document_hint": "french_test.pdf",
     "requested_language": "ar-MA",
-    "session_id": "eval-13d9424a7c66",
+    "session_id": "eval-1884639d3287",
     "turns": [
       {
         "turn": 1,
         "learner_message": "شنو كيقول هاد الدليل على تبديل مكون السلامة ديال الآلة، فأي حالة كيتعتبر تعديل؟",
-        "response": "حسب دليل التعديلات فالصفحة 13، إلا كان المكون الجديد عندو خصائص مختلفة ولا نوع مختلف على القديم، راه كيتعتبر تعديل. مثلا، تبديل قفل ثنائي بواحد غير مرئي هو تعديل. واش فهمتي هادشي؟",
+        "response": "حسب دليل التعديلات فالصفحة 13، إلا كان التبديل هو مكون جديد عندو خصائص مختلفة ولا نوع مختلف على المكون الأصلي، هادشي كيعتابر تعديل. مثلا، تبديل حاجز ثنائي بواحد غير مرئي كيتعتبر تعديل.",
         "sources": [
           "french_test.pdf"
         ],
@@ -253,22 +272,22 @@
         "language_reported": "darija",
         "cross_language": true,
         "degraded": false,
-        "elapsed_seconds": 23.4,
+        "elapsed_seconds": 19.7,
         "scores": {
           "language_ok": true,
-          "arabic_chars": 144,
+          "arabic_chars": 149,
           "latin_chars": 0,
           "explains_before_asking": true,
-          "question_count": 1,
-          "ends_with_exactly_one_question": true,
-          "char_count": 179,
+          "question_count": 0,
+          "ends_with_exactly_one_question": false,
+          "char_count": 184,
           "nonempty": true
         }
       },
       {
         "turn": 2,
         "learner_message": "يعني كيفما بدلتي شي جزء، حتى إلا كان نفسو بالضبط، كيتعتبر دايما تعديل؟",
-        "response": "لا، ماشي كل تبديل ديال جزء كيولي تعديل. حسب الدليل فالصفحة 13، التبديل غير كيتعتبر تعديل إلا كان المكون الجديد عندو خصائص مختلفة ولا نوع مختلف على القديم. واش فهمتي هادشي؟",
+        "response": "لا، ماشي كل تغيير هو تعديل. حسب دليل التعديلات فالصفحة 13، غير ملي كتبدل مكون السلامة بمكون جديد عندو خصائص مختلفة ولا نوع مختلف على المكون الأصلي، هادشي كيعتابر تعديل. مثلا، تبديل حاجز ثنائي بواحد غير مرئي كيتعتبر تعديل.",
         "sources": [
           "french_test.pdf"
         ],
@@ -277,19 +296,19 @@
         "language_reported": "darija",
         "cross_language": true,
         "degraded": false,
-        "elapsed_seconds": 17.0,
+        "elapsed_seconds": 15.9,
         "scores": {
           "language_ok": true,
-          "arabic_chars": 137,
+          "arabic_chars": 178,
           "latin_chars": 0,
           "explains_before_asking": true,
-          "question_count": 1,
-          "ends_with_exactly_one_question": true,
-          "char_count": 171,
+          "question_count": 0,
+          "ends_with_exactly_one_question": false,
+          "char_count": 221,
           "nonempty": true,
           "reaction": {
-            "turn2_word_count": 18,
-            "new_content_word_ratio": 0.33,
+            "turn2_word_count": 26,
+            "new_content_word_ratio": 0.19,
             "note": "Lexical-overlap proxy only. Read the transcript to judge whether the tutor actually corrected the learner's wrong answer in turn 2, vs. silently agreeing with it -- no automated check here does that."
           }
         }
@@ -297,7 +316,7 @@
       {
         "turn": 3,
         "learner_message": "وإلا غير بدلتي بلاصة المكون ديال السلامة من غير ما تبدلوه، واش هادشي كيتعتبر تعديل؟",
-        "response": "آه، حسب الدليل فالصفحة 13، تغيير مكان مكون السلامة حتى هو كيتعتبر تعديل. مثلا، تحريك قفل ثنائي لجهة أخرى ديال الآلة كيولي تعديل. واش فهمتي هادشي؟",
+        "response": "آه، حسب دليل التعديلات فالصفحة 13، تغيير مكان مكون السلامة هو تاني تعديل. مثلا، تحريك حاجز ثنائي قريب ولا بعيد على المنطقة اللي خاصو يحميها كيتعتبر تعديل.",
         "sources": [
           "french_test.pdf"
         ],
@@ -306,15 +325,15 @@
         "language_reported": "darija",
         "cross_language": true,
         "degraded": false,
-        "elapsed_seconds": 20.5,
+        "elapsed_seconds": 14.8,
         "scores": {
           "language_ok": true,
-          "arabic_chars": 116,
+          "arabic_chars": 124,
           "latin_chars": 0,
           "explains_before_asking": true,
-          "question_count": 1,
-          "ends_with_exactly_one_question": true,
-          "char_count": 145,
+          "question_count": 0,
+          "ends_with_exactly_one_question": false,
+          "char_count": 154,
           "nonempty": true
         }
       }
