@@ -29,6 +29,11 @@ cover the question.
   serving change off the single-laptop deployment. Unlike every other file here it
   describes what does *not* exist yet, so read it as a migration brief; its "today" figures
   are measured and its cloud figures are labelled estimates
+- [voice-assistant.md](voice-assistant.md) — **code scaffolding built, not vendor-validated**:
+  the open-mic voice pipeline (VAD → STT → RAG/LLM → TTS over a WebSocket). Read this
+  before touching `app/routers/voice.py`, `app/services/stt.py`/`tts.py`/`vad.py`/`turn.py`,
+  or `frontend/src/hooks/useVoiceSession.ts` — it records exactly what's tested vs. still
+  unverified (no STT/TTS vendor selected yet) and why
 
 ## Not architecture
 

@@ -31,5 +31,16 @@ Pillow==11.0.0
 # unsloth -- install with Week 3
 # accelerate -- install with Week 3
 
-# Audio (Week 6)
-# openai-whisper -- install with Week 6
+# Voice pipeline (app/services/stt.py, app/services/tts.py,
+# app/routers/voice.py) -- superseded the placeholder "openai-whisper /
+# Week 6" line that used to be here. Still commented out: no vendor is
+# selected (settings.stt_engine/tts_engine default to "none") until the
+# Phase 0 bake-off (scripts/eval_stt.py / eval_tts.py,
+# docs/architecture/voice-assistant.md) actually runs -- it needs a rented
+# GPU this laptop's 8GB card cannot spare alongside the resident tutor
+# model. Uncomment the winners once that decision is made; do not install
+# both faster-whisper AND a torch-based candidate speculatively.
+# faster-whisper -- CTranslate2 Whisper, Phase 0 STT candidate (French)
+# transformers, torchaudio -- SeamlessM4T-v2, Phase 0 STT candidate (Darija "ary")
+# piper-tts -- ONNX TTS, MIT-licensed (see app/services/tts.py's module
+#   docstring for why Piper over XTTS-v2/MMS-TTS, both non-commercial)

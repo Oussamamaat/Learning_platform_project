@@ -1,6 +1,7 @@
-import { useRef, useState } from "react";
-import { Loader2, Paperclip, Send } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { Loader2, Mic, MicOff, Paperclip, Send } from "lucide-react";
 import { useApp } from "../../context/AppContext";
+import { useVoiceSession } from "../../hooks/useVoiceSession";
 import type { Domain, Language } from "../../types/api";
 
 const QUICK_PROMPTS: Record<Domain, Record<Language, string[]>> = {
@@ -60,11 +61,38 @@ const QUICK_PROMPTS: Record<Domain, Record<Language, string[]>> = {
 const UPLOAD_ACCEPT = ".txt,.md,.pdf,.docx,.pptx,.xlsx,.csv,.png,.jpg,.jpeg,.tiff,.tif";
 
 export default function InputArea() {
-  const { sendMessage, isSending, isModelSwapping, activeDomain, activeLanguage, viewMode, uploadFiles } =
-    useApp();
+  const {
+    sendMessage,
+    isSending,
+    isModelSwapping,
+    activeDomain,
+    activeLanguage,
+    viewMode,
+    uploadFiles,
+    activeSessionId,
+    toastError,
+  } = useApp();
   const [text, setText] = useState("");
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const voice = useVoiceSession({
+    sessionId: activeSessionId ?? undefined,
+    domain: activeDomain,
+  });
+  const voiceActive = voice.status !== "idle" && voice.status !== "error";
+
+  useEffect(() => {
+    if (voice.errorMessage) toastError(voice.errorMessage);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [voice.errorMessage]);
+
+  useEffect(() => {
+    // Stop the mic if the component unmounts mid-session (route change,
+    // panel close) rather than leaking an open WebSocket + microphone.
+    return () => voice.stop();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const canSend = text.trim().length > 0 && !isSending && !isModelSwapping;
 
@@ -94,6 +122,23 @@ export default function InputArea() {
   return (
     <div className="shrink-0 px-4 pb-4 sm:px-6">
       <div className="mx-auto w-full max-w-3xl">
+        {voiceActive && (
+          <div className="mb-2 rounded-xl border border-edge bg-surface px-3 py-2 text-[12px] text-ink-dim">
+            <div className="flex items-center gap-1.5 font-medium text-brand-deep">
+              <span className="relative flex h-2 w-2">
+                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-brand opacity-75" />
+                <span className="relative inline-flex h-2 w-2 rounded-full bg-brand" />
+              </span>
+              {voice.status === "listening" && "Listening…"}
+              {voice.status === "connecting" && "Connecting…"}
+              {voice.status === "thinking" && "Thinking…"}
+              {voice.status === "speaking" && "Speaking…"}
+            </div>
+            {voice.transcript && <p className="mt-1 text-ink">“{voice.transcript}”</p>}
+            {voice.answerText && <p className="mt-1 text-ink-dim">{voice.answerText}</p>}
+          </div>
+        )}
+
         <div className="mb-2 flex gap-1.5 overflow-x-auto pb-0.5">
           {QUICK_PROMPTS[activeDomain][activeLanguage].map((prompt) => (
             <button
@@ -147,6 +192,25 @@ export default function InputArea() {
             }
             className="max-h-[200px] min-h-[36px] flex-1 resize-none bg-transparent px-1.5 py-1.5 text-[13.5px] leading-relaxed text-ink placeholder:text-ink-faint outline-none disabled:cursor-not-allowed"
           />
+          <button
+            type="button"
+            onClick={() => (voiceActive ? voice.stop() : void voice.start())}
+            disabled={isModelSwapping}
+            className={`press-icon flex h-9 w-9 shrink-0 items-center justify-center rounded-xl disabled:cursor-not-allowed disabled:opacity-40 ${
+              voiceActive
+                ? "bg-red-500 text-white hover:bg-red-600"
+                : "text-ink-faint hover:bg-surface-3 hover:text-ink"
+            }`}
+            aria-label={voiceActive ? "Stop voice session" : "Start voice session"}
+          >
+            {voice.status === "connecting" ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : voiceActive ? (
+              <MicOff className="h-4 w-4" />
+            ) : (
+              <Mic className="h-4 w-4" />
+            )}
+          </button>
           <button
             type="button"
             onClick={handleSend}

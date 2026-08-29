@@ -3,7 +3,7 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from app.config import get_settings, get_tenant_id
-from app.routers import chat, audio, quiz, ingest, video
+from app.routers import chat, audio, quiz, ingest, video, voice
 from app.errors import AppError
 from app.models.db import dispose_engine
 from app.services.ingestion import close_db_pools, load_embedding_model
@@ -53,6 +53,7 @@ app.include_router(audio.router)
 app.include_router(quiz.router)
 app.include_router(ingest.router)
 app.include_router(video.router)
+app.include_router(voice.router)
 
 
 @app.on_event("startup")

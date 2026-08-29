@@ -205,6 +205,55 @@ class Settings(BaseSettings):
     # POST/PATCH/DELETE on the ingest router with a 403; GET is unaffected.
     uploads_read_only: bool = False
 
+    # Speech (voice pipeline: app/routers/voice.py, app/services/stt.py,
+    # app/services/tts.py). Both default to "none" -- 2026-08-25's bake-off
+    # (scripts/eval_stt.py / eval_tts.py, docs/architecture/voice-assistant.md)
+    # has not been RUN yet (needs a rented GPU; this laptop's 8GB card
+    # cannot hold an STT model alongside the tutor -- see
+    # docs/architecture/cloud-scaling-plan.md), so no vendor is selected.
+    # "none" makes that an honest, loud failure (SttUnavailableError /
+    # TtsUnavailableError) instead of a mounted endpoint that silently does
+    # nothing, matching app.services.ocr's NullOcrEngine precedent.
+    stt_engine: str = "none"  # "none" | "whisper" | "seamless"
+    # Which STT model the "whisper" engine's resident worker loads --
+    # candidate names only until the bake-off picks one. faster-whisper
+    # naming convention (e.g. "large-v3-turbo"); a Darija-specific
+    # community checkpoint's HF repo id is expected to win for Arabic per
+    # the blueprint's bake-off plan, at which point this becomes two
+    # settings (per-language) rather than one -- not built yet because
+    # nothing depends on it until Phase 0 reports a result.
+    stt_model: str = "large-v3-turbo"
+    # Path to the DEDICATED venv's interpreter for the STT resident worker
+    # (scripts/speech_worker_resident.py), same reasoning as
+    # settings.ocr_venv_python: STT deps (ctranslate2, onnxruntime, or
+    # SeamlessM4T's torch pin) are expected to conflict with .gguf_venv's
+    # own torch pin, so they get their own venv rather than sharing it.
+    # Only read when stt_engine="whisper" or "seamless".
+    stt_venv_python: str = "./.speech_venv/Scripts/python.exe"
+    # Seconds of no STT call before the resident worker releases its VRAM,
+    # same idle-release contract as settings.ocr_worker_idle_release_seconds
+    # (see that setting's comment) -- an open-mic voice session is bursty,
+    # not continuous, and STT must not permanently steal VRAM the tutor
+    # model needs to stay resident.
+    speech_worker_idle_release_seconds: float = 120.0
+    tts_engine: str = "none"  # "none" | "piper"
+    # Piper voice models (ONNX, downloaded separately -- see
+    # app.services.tts.PiperEngine's docstring for why Piper was chosen
+    # over XTTS-v2/MMS-TTS: CPU-only, ~zero VRAM contention with the
+    # resident tutor model, and MIT-licensed where the higher-quality
+    # alternatives are non-commercial). ar_JO is Jordanian Arabic, the
+    # closest off-the-shelf Piper voice to Moroccan Darija at MVP time --
+    # intelligible but noticeably not native Darija prosody; a Piper voice
+    # fine-tuned on atlasia/DODa-audio-dataset is the tracked follow-up
+    # (docs/architecture/voice-assistant.md), not built yet.
+    tts_voice_fr: str = "fr_FR-siwis-medium"
+    tts_voice_ar: str = "ar_JO-kareem-medium"
+    # Directory holding each voice's downloaded {name}.onnx + {name}.onnx.json
+    # pair (Piper's model format) -- Piper voices are not bundled with the
+    # pip package and must be fetched separately per
+    # app.services.tts.PiperEngine's docstring.
+    tts_voice_dir: str = "./data/tts_voices"
+
     # Diagram generation (app/services/diagrams.py). Kill-switch first: a
     # chat turn falling back to prose on a stuck Ollama/GPU is much less
     # visible than every diagram request failing loudly, so this can be

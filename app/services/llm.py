@@ -10,7 +10,7 @@ import logging
 import time
 import urllib.request
 import urllib.error
-from typing import Optional
+from typing import Iterator, Optional
 from app.config import get_settings
 from app.errors import OllamaConnectionError, GenerationError
 from app.services.citations import (
@@ -762,6 +762,99 @@ def _call_ollama_chat(
     return result
 
 
+def _stream_ollama_chat(
+    model: str,
+    messages: list[dict],
+    *,
+    timeout: Optional[int] = None,
+) -> Iterator[str]:
+    """POST to Ollama's /api/chat with stream=true and yield each token
+    delta (message.content fragment) as Ollama emits it.
+
+    Streaming sibling of _call_ollama_chat, deliberately NOT built on
+    _post_ollama: that helper reads and JSON-decodes one complete response
+    body, which a streaming NDJSON response never produces. No retry here
+    either -- _post_ollama's retry replays the whole request, which is safe
+    before any byte has reached the caller; once this generator has already
+    yielded tokens to a caller that may have spoken/displayed them, silently
+    replaying the request from scratch would duplicate output the caller
+    already committed to the user. A caller wanting retry-on-cold-start
+    should keep the target model warm (settings.ollama_keep_alive) rather
+    than rely on this to recover mid-stream.
+
+    Uses stdlib urllib exactly like the rest of this module (see
+    _post_ollama's docstring for why) -- urlopen's returned file object
+    iterates line-by-line over the HTTP body, which is exactly Ollama's
+    streaming NDJSON shape (one JSON object per line).
+    """
+    settings = get_settings()
+    url = f"{settings.ollama_base_url.rstrip('/')}/api/chat"
+    payload = {
+        "model": model,
+        "messages": messages,
+        "stream": True,
+        "options": _ollama_options(),
+        "keep_alive": settings.ollama_keep_alive,
+    }
+    data = json.dumps(payload).encode("utf-8")
+    effective_timeout = timeout if timeout is not None else settings.ollama_timeout_seconds
+
+    req = urllib.request.Request(
+        url, data=data, headers={"Content-Type": "application/json"}, method="POST",
+    )
+    try:
+        response = urllib.request.urlopen(req, timeout=effective_timeout)
+    except urllib.error.HTTPError as e:
+        body = ""
+        try:
+            body = e.read().decode("utf-8", errors="replace")[:500]
+        except Exception:
+            pass
+        logger.error("Ollama returned HTTP %s for /api/chat (stream): %s", e.code, body)
+        if e.code == 404:
+            raise GenerationError(
+                f"Ollama has no model named {model!r} (HTTP 404). Check "
+                f"settings.ollama_model / ollama_model_fr."
+            ) from e
+        raise GenerationError(f"Ollama HTTP {e.code}: {body}") from e
+    except urllib.error.URLError as e:
+        logger.error("Ollama connection failed (stream): %s", e)
+        raise OllamaConnectionError(model, settings.ollama_base_url) from e
+
+    got_any = False
+    try:
+        with response:
+            for raw_line in response:
+                line = raw_line.decode("utf-8", errors="replace").strip()
+                if not line:
+                    continue
+                try:
+                    chunk = json.loads(line)
+                except json.JSONDecodeError:
+                    logger.warning(
+                        "Skipping malformed NDJSON line from Ollama stream: %r", line[:200]
+                    )
+                    continue
+                if chunk.get("error"):
+                    raise GenerationError(f"Ollama stream error: {chunk['error']}")
+                delta = chunk.get("message", {}).get("content", "")
+                if delta:
+                    got_any = True
+                    yield delta
+                if chunk.get("done"):
+                    break
+    except (urllib.error.URLError, ConnectionError, TimeoutError) as e:
+        if got_any:
+            # Mid-stream drop after real content already reached the
+            # caller -- surface it as a distinct, honest failure rather
+            # than silently truncating the answer.
+            raise GenerationError(f"Ollama stream dropped mid-response: {e}") from e
+        raise OllamaConnectionError(model, settings.ollama_base_url) from e
+
+    if not got_any:
+        raise GenerationError("Ollama returned an empty stream")
+
+
 def generate_llm_response(
     query: str,
     context: str,
@@ -822,3 +915,50 @@ def generate_llm_response(
         target_script = "french" if language == "fr" else detect_target_script(result)
         result = inject_citations(result, citations, target_script)
     return result
+
+
+def stream_llm_response(
+    query: str,
+    context: str,
+    domain: str = "industrial",
+    system_prompt_override: str = None,
+    language: Optional[str] = None,
+    history: Optional[list[dict]] = None,
+) -> Iterator[str]:
+    """Streaming sibling of generate_llm_response -- same routing and
+    prompt construction, but yields text deltas as Ollama produces them
+    instead of blocking for the whole answer. Built for the voice pipeline
+    (app/routers/voice.py), where time-to-first-audio depends on
+    time-to-first-token, not total generation time.
+
+    Deliberate divergence from generate_llm_response: citations are NOT
+    injected into the streamed text. inject_citations (below) is a
+    post-hoc rewrite over the COMPLETE answer -- it looks for citation
+    markers anywhere in the finished text and can move or rewrite them,
+    which has no incremental equivalent that wouldn't require buffering
+    the whole stream (defeating the point of streaming) or risking a
+    rewrite that clobbers text already spoken to the user. Voice callers
+    get clean prose here and should send extract_citations(context) to the
+    client as a separate, UI-only field instead of expecting citations
+    woven into the spoken text -- see app/routers/voice.py. Text chat
+    (generate_llm_response) is completely unaffected by this function.
+
+    Yields text deltas; the caller accumulates the full string itself if
+    it needs one (e.g. app.services.history.append_exchange).
+    """
+    settings = get_settings()
+    language = language or detect_query_language(query)
+    system_prompt = system_prompt_override or _build_system_prompt(
+        domain, context, language
+    )
+    model = settings.ollama_model_fr if language == "fr" else settings.ollama_model
+
+    messages = [{"role": "system", "content": system_prompt}]
+    messages.extend(history or [])
+    messages.append({"role": "user", "content": query})
+
+    logger.info(
+        "Streaming Ollama model=%s domain=%s language=%s history_turns=%d",
+        model, domain, language, len(history or []),
+    )
+    yield from _stream_ollama_chat(model, messages)

@@ -707,18 +707,31 @@ def test_an_ungrounded_diagram_is_marked_not_refused():
 # ===========================================================================
 
 
-def test_tts_has_no_code_surface_yet():
-    """Report item 2 (voice/TTS), flagged MVP-critical and "needs a decision
-    early this week". No vendor was selected and no integration point
-    exists. This test PASSES on that absence -- it exists so the day a TTS
-    module lands, this file is the thing that reminds someone to score the
-    deliverable. Delete it then."""
-    services = {p.name for p in (REPO_ROOT / "app" / "services").glob("*.py")}
-    assert not {s for s in services if "tts" in s or "speech" in s or "voice" in s}
+def test_tts_vendor_is_still_undecided():
+    """Successor to test_tts_has_no_code_surface_yet (deleted per its own
+    instruction: "the day a TTS module lands ... delete it then" -- that
+    day is 2026-08-25, docs/architecture/voice-assistant.md).
 
-    from app.models.schemas import ChatResponse
+    The code surface now exists (app/services/stt.py, app/services/tts.py,
+    app/services/vad.py, app/routers/voice.py) -- but the report's actual
+    ask, a scored vendor decision, is still open: settings.stt_engine and
+    settings.tts_engine both default to "none" because the Phase 0
+    bake-off (scripts/eval_stt.py / eval_tts.py) has not been RUN (needs a
+    rented GPU this laptop's 8GB card cannot spare alongside the resident
+    tutor model). This test pins that the defaults stay honest about that
+    rather than someone flipping them to a guess -- delete or update it
+    once the bake-off has actually run and a real default is chosen."""
+    from app.config import Settings
 
-    assert not {f for f in ChatResponse.model_fields if "audio" in f or "tts" in f}
+    defaults = Settings(_env_file=None)
+    assert defaults.stt_engine == "none", (
+        "no STT vendor has been bake-off-validated yet -- see "
+        "docs/architecture/voice-assistant.md Phase 0"
+    )
+    assert defaults.tts_engine == "none", (
+        "no TTS vendor has been bake-off-validated yet -- see "
+        "docs/architecture/voice-assistant.md Phase 0"
+    )
 
 
 def test_video_integration_still_has_no_authentication():
