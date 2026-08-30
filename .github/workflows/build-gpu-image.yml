@@ -1,0 +1,68 @@
+# Builds config/Dockerfile.gpu and pushes straight to GHCR.
+#
+# Deliberately NOT built on the dev laptop: the image is ~20GB, and Docker's
+# WSL2 backend needs ~100GB of vhdx to hold it (build snapshots + content
+# store + unpacked snapshots, all at once) -- see docs/deploy/akash-rtx5090-runbook.md.
+# `--push` here streams layers straight to the registry: no local image store,
+# no unpack, so the runner never needs that much disk either.
+name: Build GPU image
+
+on:
+  workflow_dispatch: {}
+  push:
+    branches: [main]
+    paths:
+      - config/Dockerfile.gpu
+      - config/requirements.txt
+      - config/requirements-speech.txt
+      - config/requirements-ocr-paddle.txt
+      - config/models/*.Modelfile
+      - app/**
+      - scripts/**
+      - raw/**
+      - .github/workflows/build-gpu-image.yml
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - name: Free runner disk space
+        uses: jlumbroso/free-disk-space@v1.3.1
+        with:
+          tool-cache: false
+          android: true
+          dotnet: true
+          haskell: true
+          large-packages: false
+          docker-images: false
+          swap-storage: false
+
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: config/Dockerfile.gpu
+          push: true
+          platforms: linux/amd64
+          provenance: false
+          tags: ghcr.io/oussamamaat/iblog-tutor:gpu
+          cache-from: type=registry,ref=ghcr.io/oussamamaat/iblog-tutor:buildcache
+          cache-to: type=registry,ref=ghcr.io/oussamamaat/iblog-tutor:buildcache,mode=max

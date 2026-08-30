@@ -74,7 +74,11 @@ services:
       - STT_ENGINE=none          # none | whisper | seamless
       - TTS_ENGINE=none          # none | piper
       - STT_MODEL=large-v3
-      - OCR_ENGINE=paddleocr     # set to "none" if paddle didn't build (Blackwell)
+      # Boot with "none" first: a successful paddle install does NOT prove
+      # Blackwell (sm_120) kernel support (observed installing a CUDA 12.6
+      # wheel on a card needing 12.8, which can fail at first launch, not
+      # import). Flip to "paddleocr" only after bench_ocr.py passes (runbook §7).
+      - OCR_ENGINE=none          # paddleocr | none
       # ── 32 GB relaxations (entrypoint also defaults these) ──────────────
       - OLLAMA_KEEP_ALIVE=-1
       - OCR_KEEP_RESIDENT=true

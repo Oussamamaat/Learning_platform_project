@@ -7,6 +7,16 @@ all the things the 8 GB laptop can't run at once.
 **What you build once, reuse every session:** a GPU image with the three venvs,
 embeddings (bge-m3), TTS voices, and the STT engines baked in.
 
+**The image is built in GitHub Actions, never on the dev laptop.** The image is
+~20 GB, and Docker's WSL2 backend needs ~100 GB of vhdx to hold it (build
+snapshots + content store + unpacked snapshots, all at once) — this filled the
+laptop's disk twice during development. `.github/workflows/build-gpu-image.yml`
+builds with `docker/build-push-action` and `push: true`, which streams layers
+straight to GHCR with no local image store and no unpack, so the runner never
+needs that disk either. Push to `main` (paths: `config/Dockerfile.gpu`,
+`config/requirements*.txt`, `app/`, `scripts/`, `raw/`) or run it manually from
+the **Actions** tab (`workflow_dispatch`).
+
 **The two tutor GGUFs are NOT in the image** — at ~5.5 GB each they blew out the
 build host's disk, so they live in a private HuggingFace repo and the entrypoint
 downloads them on first boot onto the persistent `/models` volume. That download
@@ -20,19 +30,23 @@ your Keplr/Leap wallet + AKT). Every signing step is called out.
 
 ## 0. Prerequisites (one-time)
 
-- **Docker** on the dev laptop (the machine that already has the models in Ollama).
+- **Docker** on the dev laptop, but only for step 1 (extracting GGUFs out of
+  Ollama's blob store) — the laptop never builds or holds the GPU image itself.
 - **Ollama models present locally** — verify:
   ```
   ollama list        # must show IBLOG_TUTOR:latest and iblog-tutor-fr:latest
   ```
 - **A container registry.** This repo is wired for **GHCR**:
   `ghcr.io/oussamamaat/iblog-tutor:gpu` (lowercase is a registry requirement).
-  You need a **GitHub PAT (classic) with `write:packages`** to push
-  (<https://github.com/settings/tokens>).
+  No PAT needed — the workflow pushes with the repo's own `GITHUB_TOKEN`
+  (`permissions: packages: write` in the workflow file). If the push step
+  403s, the repo's default is capped read-only: **Settings → Actions →
+  General → Workflow permissions → Read and write permissions.**
   The package **must end up Public** — an Akash SDL has no `imagePullSecrets`, so
   providers pull anonymously and a private package simply fails to deploy. The
   image holds no secrets and no tenant uploads (`raw/` is public regulatory
-  explainer text), so publishing it is safe.
+  explainer text), so publishing it is safe. This is a one-time manual step
+  (§3) — GitHub does not auto-publish a package pushed by Actions.
 - **A HuggingFace READ token** for the boot-time GGUF download
   (<https://huggingface.co/settings/tokens>). Make it **fine-grained, read-only,
   scoped to `Oussamamaat/iblog-tutor-gguf`** — Akash providers can read SDL env
@@ -40,7 +54,8 @@ your Keplr/Leap wallet + AKT). Every signing step is called out.
 - **An Akash wallet** with a few AKT + a 0.5 AKT deposit per deployment
   (Keplr/Leap), and either the **Akash Console** (console.akash.network) or the
   `provider-services` CLI.
-- Disk: ~15 GB free locally for the extracted GGUFs + image build.
+- Disk: ~15 GB free locally for the extracted GGUFs (step 1 only — nothing else
+  in this runbook touches local disk).
 
 ---
 
@@ -90,49 +105,49 @@ print([s.rfilename for s in HfApi(token=get_token()).repo_info('Oussamamaat/iblo
 
 ---
 
-## 2. Build the GPU image
+## 2. Build the GPU image (GitHub Actions, not local)
 
-From the **repo root** (build context = `.`):
+Push commits touching `config/Dockerfile.gpu`, `config/requirements*.txt`,
+`app/`, `scripts/`, or `raw/` to `main`, **or** trigger it manually:
+github.com → repo → **Actions** → **Build GPU image** → **Run workflow**.
 
-```
-docker build -f config/Dockerfile.gpu -t ghcr.io/oussamamaat/iblog-tutor:gpu .
-```
+Watch it in the Actions tab. `docker/build-push-action` with `push: true`
+streams each layer to GHCR as it's built — there is no final "docker push"
+step and no point where the whole 20 GB sits on the runner's disk at once.
 
 Notes:
 - First build is long (three venvs incl. CUDA torch, + a ~2.2 GB embedding
-  pre-download). Later builds after only code changes reuse the cached model/dep
-  layers and are fast.
+  pre-download; budget up to the workflow's 180 min timeout). A registry-backed
+  buildx cache (`ghcr.io/oussamamaat/iblog-tutor:buildcache`) means later builds
+  after only code changes reuse the cached model/dep layers and are fast.
 - If `paddlepaddle-gpu` has no Blackwell wheel, the build **prints a warning and
   continues** — you'll run with `OCR_ENGINE=none` (chat/voice/embeddings
-  unaffected). This is expected "OCR best-effort".
+  unaffected). This is expected "OCR best-effort". As observed: paddle can also
+  install successfully from a CUDA 12.6 wheel index on a card that needs 12.8 —
+  a clean install does **not** prove Blackwell support. Boot the first deploy
+  with `OCR_ENGINE=none` regardless, and only flip to `paddleocr` after
+  `bench_ocr.py` (§7) passes on the leased GPU.
 
 ---
 
-## 3. Push to GHCR
+## 3. Make the package Public (one-time per package)
 
-Log in with the **PAT** (`write:packages`) — not your GitHub password:
+Actions pushes the image, but a package it creates is **Private** by default —
+GitHub does not auto-publish it. Do this once, after the first successful run:
 
-```
-echo <YOUR_PAT> | docker login ghcr.io -u Oussamamaat --password-stdin
-docker push ghcr.io/oussamamaat/iblog-tutor:gpu
-```
-
-The push is large the first time (~20–25 GB). Subsequent code-only pushes send
-just the thin top layer.
-
-**Then make the package Public** (required — Akash pulls anonymously):
 github.com → your profile → **Packages** → `iblog-tutor` → **Package settings** →
 *Danger Zone* → **Change visibility → Public**.
 
 Confirm an anonymous pull works, which is exactly what the provider will do:
 
 ```
-docker logout ghcr.io
 docker manifest inspect ghcr.io/oussamamaat/iblog-tutor:gpu > /dev/null && echo "publicly pullable"
 ```
 
-If that errors, the provider will fail the same way and the lease will sit in
-`pending` — fix visibility before deploying.
+(Run that from a shell that has never `docker login`'d to ghcr.io, or `docker
+logout ghcr.io` first — otherwise a cached credential can mask a still-Private
+package.) If it errors, the provider will fail the same way and the lease will
+sit in `pending` — fix visibility before deploying.
 
 ---
 
@@ -150,8 +165,9 @@ Postgres password (substituted in `POSTGRES_PASSWORD` *and* `DATABASE_URL`, whic
 must always match) and your HF read token, then fails loudly if any placeholder
 survived. **Deploy the `.local.yaml`.**
 
-Leave `STT_ENGINE=none`/`TTS_ENGINE=none`/`OCR_ENGINE=paddleocr` for the first
-deploy (bring voice up in step 7). Set `OCR_ENGINE=none` if paddle didn't build.
+Leave `STT_ENGINE=none`/`TTS_ENGINE=none`/`OCR_ENGINE=none` for the first deploy
+(bring voice up and flip OCR on in step 7, once `bench_ocr.py` confirms paddle
+actually runs on Blackwell — a successful install doesn't prove that).
 
 ---
 
@@ -284,9 +300,9 @@ Every run appends to `benchmark_report.md` and writes `benchmark_*.json`, includ
 | Entrypoint logs `download of 'IBLOG_TUTOR' failed` / HTTP 401 | `HF_TOKEN` missing, expired, or not scoped to `Oussamamaat/iblog-tutor-gguf` (the repo is private). Re-render the SDL via `make-local-sdl.sh`. |
 | Entrypoint logs `is missing and $..._GGUF_URL is not set` | You deployed the **template** instead of `akash-deploy.local.yaml`. |
 | Lease stays `pending`, provider never pulls | The GHCR package is still Private. Akash has no `imagePullSecrets` — make it Public (step 3). |
-| Local build hangs mid-download at a fixed % | Seen repeatedly on the ollama tarball: the connection dies but `curl` waits forever (0 B/s at the NIC while the process looks alive). The Dockerfile now uses `--speed-limit/--speed-time` to turn that hang into a retryable error, plus `-C -` to resume. If another step hangs the same way, add the same flags. |
+| Actions build hangs mid-download at a fixed % | Seen repeatedly on the ollama tarball: the connection dies but `curl` waits forever (0 B/s at the NIC while the process looks alive). The Dockerfile uses `--speed-limit/--speed-time` to turn that hang into a retryable error, plus `-C -` to resume. If another step hangs the same way, add the same flags. |
+| Actions push step fails with 403 | Repo's default `GITHUB_TOKEN` permissions are read-only and override the workflow's `packages: write` block in some org configs — set **Settings → Actions → General → Workflow permissions → Read and write**. |
 | No bids for the deployment | No free RTX 5090; raise the price ceiling or uncomment a fallback GPU model in the SDL. |
-| Image push painfully slow | Build on a cloud VM near your registry; or split rarely-changing base layers into a separate pushed base image. |
 | App reachable but you're nervous about exposure | It has **no auth** and CORS `*`. `UPLOADS_READ_ONLY=true` is already set; don't share the URI, and close the lease when done. |
 
 ---
@@ -297,13 +313,14 @@ Every run appends to `benchmark_report.md` and writes `benchmark_*.json`, includ
 |---|---|
 | `scripts/docker/prepare_models.py` | Extract GGUFs+Modelfiles from local Ollama (run first, local) |
 | `scripts/docker/upload_models_hf.py` | Upload those GGUFs to the private HF repo (step 1b) |
+| `.github/workflows/build-gpu-image.yml` | Builds + pushes the image to GHCR (step 2) — never run locally |
 | `deploy/make-local-sdl.sh` | Render the secret-bearing `akash-deploy.local.yaml` from the template |
 | `config/Dockerfile.gpu` | Blackwell CUDA image: 3 venvs + embeddings + voices (GGUFs fetched at boot) |
 | `config/requirements-speech.txt` | `.speech_venv`: faster-whisper + SeamlessM4T |
 | `config/requirements-ocr-paddle.txt` | `.ocr_venv`: PaddleOCR (best-effort) |
 | `scripts/docker/entrypoint.sh` | Boots Ollama, registers models, inits DB, launches uvicorn |
 | `deploy/akash-deploy.yaml` | Akash SDL: db (CPU) + app (1× rtx5090) |
-| `deploy/akash.env` | Every env override, documented |
+| `deploy/akash.env.example` | Every env override, documented (gitignored `akash.env` is the real, secret-bearing copy) |
 | `scripts/benchmark/bench_gpu.py` | GPU/CUDA/VRAM sanity |
 | `scripts/benchmark/bench_llm.py` | Latency + language-switch + raw tok/s |
 | `scripts/benchmark/bench_voice.py` | WS voice end-to-end latency |
