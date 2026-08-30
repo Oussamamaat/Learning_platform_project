@@ -1,0 +1,157 @@
+# syntax=docker/dockerfile:1
+# ─────────────────────────────────────────────────────────────────────────────
+# IBLOG Tutor — GPU image for a rented RTX 5090 (Blackwell / sm_120).
+#
+# Build context = REPO ROOT (not config/):
+#     python scripts/docker/prepare_models.py          # once, on the dev laptop
+#     docker build -f config/Dockerfile.gpu -t <registry>/iblog-tutor:gpu .
+#
+# Everything the app, both tutor models, the voice STT/TTS engines, and
+# (best-effort) PaddleOCR need is baked in, so a fresh Akash lease boots with
+# ZERO downloads — see docs/deploy/akash-rtx5090-runbook.md.
+#
+# Layer order is deliberate: the ~14 GB model + dependency layers sit BELOW the
+# app-code COPY, so editing app/ re-pushes only a thin top layer.
+#
+# RTX 5090 is Blackwell (compute capability 12.0). It REQUIRES CUDA 12.8+ and a
+# PyTorch built for sm_120 (the cu128 wheels). An older CUDA base will not run.
+# ─────────────────────────────────────────────────────────────────────────────
+FROM nvidia/cuda:12.8.0-cudnn-runtime-ubuntu24.04
+
+# PIP_NO_CACHE_DIR is deliberately NOT set: each pip step mounts a BuildKit pip
+# cache instead, so a retry after a dropped connection reuses already-downloaded
+# wheels (torch cu128 alone is ~2.5 GB per venv) rather than starting over. A
+# cache mount is not part of any layer, so the image stays the same size.
+ENV DEBIAN_FRONTEND=noninteractive \
+    PYTHONUNBUFFERED=1 \
+    # HF cache location so the bge-m3 pre-download (below) is found at runtime.
+    HF_HOME=/root/.cache/huggingface \
+    # cu128 = CUDA 12.8 PyTorch wheels for Blackwell/sm_120.
+    TORCH_CUDA_INDEX=https://download.pytorch.org/whl/cu128
+
+WORKDIR /app
+
+# ── System dependencies ──────────────────────────────────────────────────────
+# python3.12 ships with Ubuntu 24.04 (matches CLAUDE.md's 3.12 target).
+# gcc/libpq-dev: psycopg2-binary build. ffmpeg/libsndfile1: torchaudio + wav I/O
+# for the STT worker. curl/ca-certificates: Ollama install + healthchecks.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        python3.12 python3.12-venv python3.12-dev python3-pip \
+        gcc libpq-dev ffmpeg libsndfile1 \
+        curl ca-certificates git postgresql-client zstd \
+    && rm -rf /var/lib/apt/lists/*
+
+# ── Ollama (LLM serving) ─────────────────────────────────────────────────────
+# Recent Ollama bundles its own CUDA runtime and supports Blackwell. Installed
+# as a static binary; served in the background by the entrypoint.
+# NOT `curl https://ollama.com/install.sh | sh`: that script pipes a ~1.5 GB
+# download through a plain curl with no timeout, and this endpoint stalls
+# mid-transfer (observed dying at 3 different percentages, 0 B/s at the NIC
+# while curl still looked alive — it then waits forever and hangs the build).
+# Fetch the tarball directly instead, with a stall detector and resume:
+#   --speed-limit/--speed-time : under 10 KB/s for 60s is an ERROR, not a hang
+#   --retry-all-errors + -C -  : retry and RESUME rather than restart at 0%
+# ollama.com/download 307s to GitHub releases anyway; go straight there (two
+# fewer redirects) and PIN the version so the image is reproducible. 1356 MB.
+# The tarball lands in a BuildKit cache mount, NOT /tmp: a failed RUN layer is
+# never cached, so a /tmp download is thrown away on every retry (measured: 67
+# minutes to reach 83%, all of it lost). The cache mount survives failed builds,
+# so `-C -` resumes from wherever the last attempt died. The file is
+# deliberately not deleted, and the mount never ends up in the image.
+# `curl --progress-bar` is NOT used: its redraws pushed this step past BuildKit's
+# 2 MiB per-step log cap ("output clipped"), after which the build emits nothing
+# and any log-based liveness check concludes the build has hung. A 30s heartbeat
+# printing real downloaded bytes stays tiny and is a truthful progress signal.
+ARG OLLAMA_VERSION=v0.33.2
+RUN --mount=type=cache,target=/dlcache,sharing=locked \
+    F="/dlcache/ollama-${OLLAMA_VERSION}.tar.zst"; \
+    ( while :; do sleep 30; \
+        echo "[dl] $(stat -c %s "$F" 2>/dev/null || echo 0) / 1422262024 bytes"; \
+      done ) & HB=$!; \
+    curl -fL -sS \
+        --connect-timeout 20 --speed-limit 10240 --speed-time 60 \
+        --retry 20 --retry-delay 5 --retry-all-errors -C - \
+        -o "$F" \
+        "https://github.com/ollama/ollama/releases/download/${OLLAMA_VERSION}/ollama-linux-amd64.tar.zst"; \
+    rc=$?; kill "$HB" 2>/dev/null; \
+    [ "$rc" -eq 0 ] || exit "$rc"; \
+    echo "[dl] complete: $(stat -c %s "$F") bytes"; \
+    tar -I zstd -C /usr/local -xf "$F" \
+    && test -x /usr/local/bin/ollama
+
+# ── venv 1/3: .gguf_venv — the FastAPI app ───────────────────────────────────
+# torch first from the cu128 index so sentence-transformers picks up the
+# Blackwell build instead of pulling a default wheel. Then the app deps, then
+# Piper (CPU/ONNX TTS, lives in the app venv per app/services/tts.py).
+COPY config/requirements.txt config/requirements.txt
+RUN --mount=type=cache,target=/root/.cache/pip,sharing=locked \
+    python3.12 -m venv /app/.gguf_venv \
+    && /app/.gguf_venv/bin/pip install --upgrade pip \
+    && /app/.gguf_venv/bin/pip install torch --index-url ${TORCH_CUDA_INDEX} \
+    && /app/.gguf_venv/bin/pip install -r config/requirements.txt \
+    && /app/.gguf_venv/bin/pip install piper-tts
+
+# ── venv 2/3: .speech_venv — STT bake-off (faster-whisper + SeamlessM4T) ──────
+# Separate venv: ctranslate2 / SeamlessM4T torch pins conflict with the app's.
+# torch + torchaudio from the cu128 index for Blackwell.
+COPY config/requirements-speech.txt config/requirements-speech.txt
+RUN --mount=type=cache,target=/root/.cache/pip,sharing=locked \
+    python3.12 -m venv /app/.speech_venv \
+    && /app/.speech_venv/bin/pip install --upgrade pip \
+    && /app/.speech_venv/bin/pip install torch torchaudio --index-url ${TORCH_CUDA_INDEX} \
+    && /app/.speech_venv/bin/pip install -r config/requirements-speech.txt
+
+# ── venv 3/3: .ocr_venv — PaddleOCR-VL (BEST-EFFORT on Blackwell) ─────────────
+# paddlepaddle-gpu may not ship an sm_120 wheel yet; `|| true` keeps a failed
+# paddle install from aborting the whole image. If it fails, run with
+# OCR_ENGINE=none — chat/voice/embeddings are unaffected. Swap the wheel index
+# for the CUDA build that matches this base (see requirements-ocr-paddle.txt).
+COPY config/requirements-ocr-paddle.txt config/requirements-ocr-paddle.txt
+RUN --mount=type=cache,target=/root/.cache/pip,sharing=locked \
+    python3.12 -m venv /app/.ocr_venv \
+    && /app/.ocr_venv/bin/pip install --upgrade pip \
+    && ( /app/.ocr_venv/bin/pip install paddlepaddle-gpu \
+           -i https://www.paddlepaddle.org.cn/packages/stable/cu126/ \
+         && /app/.ocr_venv/bin/pip install -r config/requirements-ocr-paddle.txt \
+       || echo "WARNING: PaddleOCR/paddlepaddle-gpu install failed — run with OCR_ENGINE=none" )
+
+# ── Pre-download the embedding model (bge-m3, ~2.2 GB) into the HF cache ──────
+# app/main.py's startup preloads it; baking it in means the first request pays
+# no download. Uses the app venv's sentence-transformers.
+RUN /app/.gguf_venv/bin/python -c \
+    "from sentence_transformers import SentenceTransformer; SentenceTransformer('BAAI/bge-m3')"
+
+# ── Pre-download the two Piper TTS voices into settings.tts_voice_dir ─────────
+# fr_FR-siwis-medium (French) + ar_JO-kareem-medium (Darija approximation).
+# Piper voices are NOT bundled with the pip package (app/services/tts.py).
+RUN mkdir -p /app/data/tts_voices /app/data/uploads \
+    && BASE=https://huggingface.co/rhasspy/piper-voices/resolve/main \
+    && CURL="curl -fsSL --connect-timeout 20 --speed-limit 2048 --speed-time 60 \
+             --retry 10 --retry-delay 3 --retry-all-errors" \
+    && for V in \
+         "fr/fr_FR/siwis/medium/fr_FR-siwis-medium" \
+         "ar/ar_JO/kareem/medium/ar_JO-kareem-medium" ; do \
+         NAME=$(basename "$V") ; \
+         $CURL "$BASE/$V.onnx"      -o "/app/data/tts_voices/$NAME.onnx" && \
+         $CURL "$BASE/$V.onnx.json" -o "/app/data/tts_voices/$NAME.onnx.json" \
+         || echo "WARNING: could not fetch Piper voice $NAME — download into data/tts_voices before enabling TTS" ; \
+       done
+
+# ── Model Modelfiles only (the GGUFs are fetched at startup) ─────────────────
+# The multi-GB .gguf blobs are NOT baked in (too large for the build host's
+# disk); entrypoint.sh downloads them onto a persistent /models volume on first
+# boot and runs `ollama create`. Only the tiny .Modelfile files ship in the
+# image so the create has its template/params. mkdir keeps /models present even
+# before the volume mounts.
+RUN mkdir -p /models
+COPY config/models/*.Modelfile /models/
+
+# ── Application code (last — changes most often) ─────────────────────────────
+COPY app/ /app/app/
+COPY scripts/ /app/scripts/
+COPY raw/ /app/raw/
+COPY config/requirements-ocr.txt config/requirements-ocr.txt
+
+EXPOSE 8000
+# Invoked via bash so a Windows checkout's missing exec bit doesn't matter.
+ENTRYPOINT ["bash", "/app/scripts/docker/entrypoint.sh"]

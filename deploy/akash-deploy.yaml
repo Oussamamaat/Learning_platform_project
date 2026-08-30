@@ -1,0 +1,158 @@
+---
+# ═════════════════════════════════════════════════════════════════════════════
+# Akash SDL — IBLOG Tutor full-stack GPU deployment (RTX 5090 / Blackwell)
+# ═════════════════════════════════════════════════════════════════════════════
+# One deployment (lease), two services:
+#   db  — Postgres/pgvector, CPU only, persistent volume (corpus survives restart)
+#   app — the GPU image (FastAPI + Ollama + STT/TTS/OCR workers all on ONE 5090)
+#
+# Why everything GPU is in ONE service: Akash allocates GPUs per-service, and
+# this is a single physical 5090. Co-locating Ollama + embeddings + the STT/OCR
+# workers in the `app` container is what "all models loaded, emulating
+# production" means on one card (32 GB fits them all — the point of the deploy).
+#
+# THIS FILE IS THE COMMITTED TEMPLATE — it must stay free of real secrets.
+# Deploy from deploy/akash-deploy.local.yaml (gitignored), which carries the
+# real Postgres password and the HF READ token. Generate/refresh it with:
+#     bash deploy/make-local-sdl.sh
+#
+# BEFORE DEPLOYING:
+#   1. The image must be PUBLIC on GHCR — Akash SDL has no imagePullSecrets, so
+#      providers pull anonymously; a private package fails to deploy.
+#   2. Put a HuggingFace READ token in HF_TOKEN (the GGUF repo is private).
+#      Akash providers can read SDL env, so scope it read-only to that one repo
+#      and NEVER paste the write token used for the upload.
+#   3. Set STT_ENGINE/TTS_ENGINE/OCR_ENGINE to what you want benchmarked.
+# See docs/deploy/akash-rtx5090-runbook.md for the full workflow.
+# ═════════════════════════════════════════════════════════════════════════════
+
+version: "2.0"
+
+services:
+  db:
+    image: pgvector/pgvector:pg16
+    env:
+      - POSTGRES_USER=assistant
+      - POSTGRES_PASSWORD=CHANGE_ME_strong_password
+      - POSTGRES_DB=iblog_assistant
+      # Point Postgres at the persistent mount (see params below).
+      - PGDATA=/var/lib/postgresql/data/pgdata
+    params:
+      storage:
+        dbdata:
+          mount: /var/lib/postgresql/data
+    expose:
+      - port: 5432
+        to:
+          - service: app   # internal only — never global
+
+  app:
+    # GHCR path is lowercase (registry requirement) even though the GitHub user
+    # is "Oussamamaat". Package visibility must be Public — see header note 1.
+    image: ghcr.io/oussamamaat/iblog-tutor:gpu
+    env:
+      # ── wiring ──────────────────────────────────────────────────────────
+      - DATABASE_URL=postgresql://assistant:CHANGE_ME_strong_password@db:5432/iblog_assistant
+      - OLLAMA_BASE_URL=http://localhost:11434
+      - OLLAMA_MODEL=IBLOG_TUTOR:latest
+      - OLLAMA_MODEL_FR=iblog-tutor-fr:latest
+      # ── model weights: fetched at boot onto the /models volume (once) ───
+      # Hosted on the private repo Oussamamaat/iblog-tutor-gguf. The filenames
+      # must match the .Modelfile stems that ship in the image, so these URLs
+      # are fixed; entrypoint.sh derives the var name from the stem.
+      - IBLOG_TUTOR_GGUF_URL=https://huggingface.co/Oussamamaat/iblog-tutor-gguf/resolve/main/IBLOG_TUTOR.gguf
+      - IBLOG_TUTOR_FR_GGUF_URL=https://huggingface.co/Oussamamaat/iblog-tutor-gguf/resolve/main/iblog-tutor-fr.gguf
+      # REQUIRED because the repo above is private: entrypoint.sh sends this as
+      # `Authorization: Bearer`. Without it both downloads 401 and neither tutor
+      # model registers. Use a fine-grained READ token, not the write token.
+      - HF_TOKEN=PASTE_A_READ_ONLY_HF_TOKEN
+      # ── Linux venv interpreters (override the Windows defaults) ──────────
+      - OCR_VENV_PYTHON=/app/.ocr_venv/bin/python
+      - STT_VENV_PYTHON=/app/.speech_venv/bin/python
+      # ── which heavy modules to enable/benchmark ─────────────────────────
+      # Flip STT/TTS off "none" to run the voice pipeline + bake-off.
+      - STT_ENGINE=none          # none | whisper | seamless
+      - TTS_ENGINE=none          # none | piper
+      - STT_MODEL=large-v3
+      - OCR_ENGINE=paddleocr     # set to "none" if paddle didn't build (Blackwell)
+      # ── 32 GB relaxations (entrypoint also defaults these) ──────────────
+      - OLLAMA_KEEP_ALIVE=-1
+      - OCR_KEEP_RESIDENT=true
+      - OCR_WORKER_IDLE_RELEASE_SECONDS=0
+      - SPEECH_WORKER_IDLE_RELEASE_SECONDS=0
+      - EMBEDDING_BATCH_SIZE=128
+      # ── safety on a publicly-reachable, auth-less app ───────────────────
+      - UPLOADS_READ_ONLY=true
+      - WARM_MODELS=1
+    params:
+      storage:
+        models:
+          mount: /models          # GGUFs cached here survive container restarts
+    expose:
+      - port: 8000
+        as: 80
+        to:
+          - global: true   # needed so the benchmark harness can reach it
+
+profiles:
+  compute:
+    db:
+      resources:
+        cpu:
+          units: 2
+        memory:
+          size: 4Gi
+        storage:
+          - size: 8Gi                 # ephemeral root
+          - name: dbdata              # persistent corpus/embeddings
+            size: 20Gi
+            attributes:
+              persistent: true
+              class: beta3
+    app:
+      resources:
+        cpu:
+          units: 16
+        memory:
+          size: 64Gi
+        gpu:
+          units: 1
+          attributes:
+            vendor:
+              nvidia:
+                - model: rtx5090
+                # ── Fallbacks if no 5090 provider bids (all run the full
+                #    stack; 24–48 GB). Uncomment one and re-check the image's
+                #    CUDA compat — <sm_120 cards work with any CUDA 12.x wheel:
+                # - model: rtx4090
+                # - model: a6000
+                # - model: l40s
+                # - model: h100
+        storage:
+          - size: 80Gi                # ephemeral root: image (~24 GB unpacked,
+                                       # models NOT baked) + venvs + headroom
+          - name: models              # persistent: GGUFs fetched once at boot
+            size: 20Gi                 # (2 × 5.4 GB + headroom)
+            attributes:
+              persistent: true
+              class: beta3
+  placement:
+    dcloud:
+      pricing:
+        db:
+          denom: uakt
+          amount: 1000
+        app:
+          # Ceiling bid (uakt/block). Raise if no provider bids; lower to save.
+          denom: uakt
+          amount: 1000000
+
+deployment:
+  db:
+    dcloud:
+      profile: db
+      count: 1
+  app:
+    dcloud:
+      profile: app
+      count: 1

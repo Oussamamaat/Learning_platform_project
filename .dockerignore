@@ -1,0 +1,51 @@
+# Keep the Docker build context small: config/Dockerfile.gpu only COPYs
+# config/requirements*.txt, config/models/, app/, scripts/, raw/. Everything
+# excluded here would otherwise be tar'd and sent to the daemon for nothing
+# (and some of it — the venvs, _archive's GGUF — is many GB).
+
+# Local venvs (rebuilt inside the image)
+.gguf_venv/
+.ocr_venv/
+.speech_venv/
+
+# Model GGUFs are NOT baked into the image (too large for this build host's
+# disk) -- they are fetched at container startup onto a persistent volume
+# (see scripts/docker/entrypoint.sh). The tiny .Modelfile files ARE kept in
+# context so `ollama create` has them; only the multi-GB .gguf blobs are excluded.
+config/models/*.gguf
+
+# Version control / editor / caches
+.git/
+.pytest_cache/
+**/__pycache__/
+*.pyc
+*.pyo
+
+# Superseded exports/datasets incl. a 5.4 GB archived GGUF (CLAUDE.md)
+_archive/
+
+# Frontend build artifacts and deps (the GPU image serves the API, not the SPA)
+frontend/node_modules/
+frontend/dist/
+
+# Runtime data & generated outputs (not build inputs)
+data/uploads/
+out/
+full_run_export/
+incident_export/
+benchmark_report.md
+benchmark_*.json
+
+# Kaggle notebooks and raw run logs — large, not needed at serve time
+*.ipynb
+nb_dump.txt
+*.pdf
+
+# Docs & tests are not needed inside the serving image
+docs/
+tests/
+
+# The env template is not baked in (secrets come from the SDL env)
+deploy/akash.env
+.env
+.env.*

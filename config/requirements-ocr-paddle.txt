@@ -1,0 +1,22 @@
+# PaddleOCR (heavy GPU OCR) stage -- installed into a DEDICATED .ocr_venv, never
+# into .gguf_venv. app/services/ocr.py's PaddleOcrEngine launches
+# scripts/ocr_worker_resident.py under settings.ocr_venv_python (this venv's
+# interpreter) as a persistent subprocess. See app/services/ocr.py's module
+# docstring and config/requirements-ocr.txt for why this is isolated.
+#
+# BEST-EFFORT on RTX 5090 / Blackwell (sm_120): as of this writing paddlepaddle-gpu
+# may not ship an sm_120 wheel matching CUDA 12.8. config/Dockerfile.gpu installs
+# this with `|| true` so a paddle build failure does NOT fail the whole image --
+# the deployment then runs with OCR_ENGINE=none (chat/voice/embeddings unaffected)
+# until a Blackwell-capable paddle wheel exists. This is the "OCR best-effort"
+# decision recorded in the runbook.
+#
+# The Dockerfile selects the paddlepaddle-gpu wheel index for the installed CUDA
+# (see https://www.paddlepaddle.org.cn/en/install/quick). If the CUDA-12.x wheel
+# refuses to load on Blackwell, try the nightly/develop channel there before
+# giving up on GPU OCR.
+
+paddleocr>=3.0.0
+# paddlepaddle-gpu is installed separately in the Dockerfile with the correct
+# CUDA wheel index and `|| true`, so a missing Blackwell wheel degrades to
+# OCR_ENGINE=none instead of aborting the build.

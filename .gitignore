@@ -8,6 +8,23 @@ __pycache__/
 # OCR engines pin their own incompatible torch/paddle runtimes, so they get a
 # dedicated venv rather than sharing .gguf_venv (see config/requirements-ocr.txt)
 .ocr_venv/
+# STT engines (faster-whisper/SeamlessM4T) likewise get a dedicated venv
+# (see config/requirements-speech.txt)
+.speech_venv/
+
+# GGUF weights extracted for baking into the GPU image
+# (scripts/docker/prepare_models.py) -- multi-GB build inputs, not source.
+# The tiny .Modelfile text files ARE tracked: config/Dockerfile.gpu's
+# `COPY config/models/*.Modelfile /models/` needs them present in CI checkouts,
+# which never run prepare_models.py.
+config/models/*
+!config/models/*.Modelfile
+
+# Benchmark harness outputs (scripts/benchmark/, scripts/eval_*.py)
+benchmark_report.md
+benchmark_*.json
+scripts/eval_stt_results.json
+scripts/eval_tts_results.json
 
 # Environment / secrets
 .env
@@ -34,6 +51,12 @@ Inter,JetBrains_Mono,Outfit,Plus_Jakarta_Sans/
 
 # Editor/agent local-only state
 .claude/settings.local.json
+
+# Deployment secrets. akash.env and the *.local.yaml SDL carry the real Postgres
+# password and the HuggingFace READ token used to fetch the GGUFs at boot; only
+# the placeholder template (deploy/akash-deploy.yaml) belongs in git.
+deploy/akash.env
+deploy/*.local.yaml
 
 # OS
 Thumbs.db

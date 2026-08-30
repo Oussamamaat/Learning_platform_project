@@ -1,0 +1,34 @@
+# Speech (STT) stage -- installed into a DEDICATED .speech_venv, never into
+# .gguf_venv (the app's own venv). Reason: faster-whisper (ctranslate2) and
+# SeamlessM4T-v2 (transformers/torch) each pin CUDA/torch builds that conflict
+# with the app's own torch pin -- same reasoning as config/requirements-ocr.txt's
+# PaddleOCR isolation. app/services/stt.py's _ResidentSttEngine launches
+# scripts/speech_worker_resident.py under settings.stt_venv_python (this venv's
+# interpreter) as a persistent subprocess rather than importing these here.
+#
+# Both Phase 0 bake-off candidates are installed so scripts/eval_stt.py can
+# actually rank them on the rented GPU (the whole reason for the deploy) --
+# see docs/architecture/voice-assistant.md. torch must be the cu128 (CUDA 12.8)
+# build for RTX 5090 / Blackwell sm_120; install it from the CUDA index in the
+# Dockerfile, NOT from PyPI's default CPU wheel:
+#     pip install torch torchaudio --index-url https://download.pytorch.org/whl/cu128
+# (torch/torchaudio are intentionally NOT pinned here -- the Dockerfile passes
+# the cu128 --index-url; pinning a version here would fight that index.)
+
+# --- Candidate 1: faster-whisper (CTranslate2) ---------------------------------
+# scripts/speech_worker_resident.py:48 loads WhisperModel(device="cuda",
+# compute_type="int8_float16"). Needs a CTranslate2 build with Blackwell (sm_120)
+# support -- if the wheel below has none, the seamless candidate (pure torch
+# cu128) is the working fallback. Pinned floor, not exact, so pip can pick the
+# newest Blackwell-capable build available at image-build time.
+faster-whisper>=1.1.0
+ctranslate2>=4.5.0
+
+# --- Candidate 2: SeamlessM4T-v2-large -----------------------------------------
+# scripts/speech_worker_resident.py:66-91 loads facebook/seamless-m4t-v2-large
+# via transformers + torchaudio, the candidate that lists Moroccan Arabic "ary"
+# as a source language. transformers must be recent enough to expose
+# SeamlessM4Tv2Model.
+transformers>=4.44.0
+sentencepiece>=0.2.0
+# torch, torchaudio: installed separately in the Dockerfile from the cu128 index.
