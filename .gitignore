@@ -68,3 +68,8 @@ Thumbs.db
 out/
 
 *.pdf
+# Exception: the OCR bench/ingest-timing fixture used by the Akash test plan
+# (docs/deploy/lease-03-phase3.sh) -- git-cloned into the lease container since
+# it isn't baked into the image. Every other *.pdf (tenant uploads etc.) stays
+# ignored.
+!/arabic_test.pdf
