@@ -1,20 +1,37 @@
 ---
 # ═════════════════════════════════════════════════════════════════════════════
-# Akash SDL — IBLOG Tutor full-stack GPU deployment (RTX 5090 / Blackwell)
+# Akash SDL — IBLOG Tutor full-stack GPU deployment
 # ═════════════════════════════════════════════════════════════════════════════
 # One deployment (lease), two services:
-#   db  — Postgres/pgvector, CPU only, persistent volume (corpus survives restart)
-#   app — the GPU image (FastAPI + Ollama + STT/TTS/OCR workers all on ONE 5090)
+#   db  — Postgres/pgvector, CPU only, ephemeral (corpus re-seeded each lease —
+#         see docs/deploy/akash-rtx5090-runbook.md Part 2 of the test plan)
+#   app — the GPU image (FastAPI + Ollama + STT/TTS/OCR workers all on ONE card)
+#
+# GPU tier is chosen by real Akash bid price against the workload's actual VRAM
+# need (~23-29 GB: both 9B tutors + bge-m3 + whisper, +OCR), not by matching a
+# future production card — production is heading to AWS, not Akash:
+#   1 (primary)  rtx8000    48 GB  $0.21/hr starting — cheapest, ample margin
+#   2 (fallback) rtx5090    32 GB  $0.67/hr starting — tighter margin with OCR on
+#   3 (fallback) pro6000se  96 GB  $2.04/hr starting — priciest, most headroom
+# All three run the full stack; every GPU-touching component in the image
+# (torch cu128, Ollama, CTranslate2) has a sourced reason to work on Turing
+# through Blackwell — see the plan doc, not repeated here.
 #
 # Why everything GPU is in ONE service: Akash allocates GPUs per-service, and
-# this is a single physical 5090. Co-locating Ollama + embeddings + the STT/OCR
+# this is a single physical card. Co-locating Ollama + embeddings + the STT/OCR
 # workers in the `app` container is what "all models loaded, emulating
-# production" means on one card (32 GB fits them all — the point of the deploy).
+# production" means on one card.
+#
+# Ephemeral-only storage (both services) is deliberate, not a placeholder: Akash
+# persistent storage does not survive closing a lease, only container restarts
+# and env-var updates within one still-open lease. This plan seeds the corpus
+# and downloads model weights once per lease and keeps the lease open across all
+# test phases, which makes a persistent volume's one job (survive a close) moot.
 #
 # THIS FILE IS THE COMMITTED TEMPLATE — it must stay free of real secrets.
 # Deploy from deploy/akash-deploy.local.yaml (gitignored), which carries the
 # real Postgres password and the HF READ token. Generate/refresh it with:
-#     bash deploy/make-local-sdl.sh
+#     HF_READ_TOKEN=hf_xxx bash deploy/make-local-sdl.sh
 #
 # BEFORE DEPLOYING:
 #   1. The image must be PUBLIC on GHCR — Akash SDL has no imagePullSecrets, so
@@ -22,7 +39,10 @@
 #   2. Put a HuggingFace READ token in HF_TOKEN (the GGUF repo is private).
 #      Akash providers can read SDL env, so scope it read-only to that one repo
 #      and NEVER paste the write token used for the upload.
-#   3. Set STT_ENGINE/TTS_ENGINE/OCR_ENGINE to what you want benchmarked.
+#   3. All engines (STT/TTS/OCR) are ON from the start — see the plan doc for
+#      why staging them buys nothing (config is @lru_cache'd per-process, and
+#      48 GB fits everything at once). Flip to "none" only if you deliberately
+#      want to isolate a phase's VRAM footprint.
 # See docs/deploy/akash-rtx5090-runbook.md for the full workflow.
 # ═════════════════════════════════════════════════════════════════════════════
 
@@ -35,12 +55,7 @@ services:
       - POSTGRES_USER=assistant
       - POSTGRES_PASSWORD=CHANGE_ME_strong_password
       - POSTGRES_DB=iblog_assistant
-      # Point Postgres at the persistent mount (see params below).
       - PGDATA=/var/lib/postgresql/data/pgdata
-    params:
-      storage:
-        dbdata:
-          mount: /var/lib/postgresql/data
     expose:
       - port: 5432
         to:
@@ -56,7 +71,7 @@ services:
       - OLLAMA_BASE_URL=http://localhost:11434
       - OLLAMA_MODEL=IBLOG_TUTOR:latest
       - OLLAMA_MODEL_FR=iblog-tutor-fr:latest
-      # ── model weights: fetched at boot onto the /models volume (once) ───
+      # ── model weights: fetched at boot into the container's own filesystem ─
       # Hosted on the private repo Oussamamaat/iblog-tutor-gguf. The filenames
       # must match the .Modelfile stems that ship in the image, so these URLs
       # are fixed; entrypoint.sh derives the var name from the stem.
@@ -69,34 +84,36 @@ services:
       # ── Linux venv interpreters (override the Windows defaults) ──────────
       - OCR_VENV_PYTHON=/app/.ocr_venv/bin/python
       - STT_VENV_PYTHON=/app/.speech_venv/bin/python
-      # ── which heavy modules to enable/benchmark ─────────────────────────
-      # Flip STT/TTS off "none" to run the voice pipeline + bake-off.
-      - STT_ENGINE=none          # none | whisper | seamless
-      - TTS_ENGINE=none          # none | piper
+      # ── every engine ON from the start — see header note 3 ──────────────
+      - STT_ENGINE=whisper       # none | whisper | seamless
+      - TTS_ENGINE=piper         # none | piper
       - STT_MODEL=large-v3
-      # Boot with "none" first: a successful paddle install does NOT prove
-      # Blackwell (sm_120) kernel support (observed installing a CUDA 12.6
-      # wheel on a card needing 12.8, which can fail at first launch, not
-      # import). Flip to "paddleocr" only after bench_ocr.py passes (runbook §7).
-      - OCR_ENGINE=none          # paddleocr | none
-      # ── 32 GB relaxations (entrypoint also defaults these) ──────────────
+      - OCR_ENGINE=paddleocr     # paddleocr | none — lazy-loaded, won't block
+                                 # boot if the paddle install failed (verified:
+                                 # app/main.py's startup hooks only preload
+                                 # bge-m3, no eager OCR/STT init)
+      # ── relaxations for a card with VRAM to spare ────────────────────────
       - OLLAMA_KEEP_ALIVE=-1
       - OCR_KEEP_RESIDENT=true
       - OCR_WORKER_IDLE_RELEASE_SECONDS=0
       - SPEECH_WORKER_IDLE_RELEASE_SECONDS=0
       - EMBEDDING_BATCH_SIZE=128
+      # ── driver-constraint workaround — needed on every tier, not just ────
+      # Blackwell: the base image's NVIDIA_REQUIRE_CUDA stops at driver<566,
+      # but provider host drivers run newer regardless of GPU generation
+      # (confirmed via a provider's own advertised cuda-version:13 attribute
+      # on an rtx8000 host). Without this, a too-new host driver can refuse to
+      # start the container at all.
+      - NVIDIA_DISABLE_REQUIRE=true
       # ── safety on a publicly-reachable, auth-less app ───────────────────
       - UPLOADS_READ_ONLY=true
       - WARM_MODELS=1
-    params:
-      storage:
-        models:
-          mount: /models          # GGUFs cached here survive container restarts
     expose:
       - port: 8000
         as: 80
         to:
-          - global: true   # needed so the benchmark harness can reach it
+          - global: true   # needed so the benchmark harness (and the demo
+                            # frontend's VITE_API_BASE) can reach it
 
 profiles:
   compute:
@@ -107,39 +124,28 @@ profiles:
         memory:
           size: 4Gi
         storage:
-          - size: 8Gi                 # ephemeral root
-          - name: dbdata              # persistent corpus/embeddings
-            size: 20Gi
-            attributes:
-              persistent: true
-              class: beta3
+          - size: 30Gi                # ephemeral only — see header note
     app:
       resources:
         cpu:
-          units: 16
+          units: 8                    # was 16 — models sit on the GPU, OCR
+                                       # doesn't need many cores
         memory:
-          size: 64Gi
+          size: 32Gi                  # was 64Gi
         gpu:
           units: 1
           attributes:
             vendor:
               nvidia:
-                - model: rtx5090
-                # ── Fallbacks if no 5090 provider bids (all run the full
-                #    stack; 24–48 GB). Uncomment one and re-check the image's
-                #    CUDA compat — <sm_120 cards work with any CUDA 12.x wheel:
-                # - model: rtx4090
-                # - model: a6000
-                # - model: l40s
-                # - model: h100
+                - model: rtx8000      # tier 1 (primary) — see header table
+                - model: rtx5090      # tier 2 (fallback)
+                - model: pro6000se    # tier 3 (fallback)
         storage:
-          - size: 80Gi                # ephemeral root: image (~24 GB unpacked,
-                                       # models NOT baked) + venvs + headroom
-          - name: models              # persistent: GGUFs fetched once at boot
-            size: 20Gi                 # (2 × 5.4 GB + headroom)
-            attributes:
-              persistent: true
-              class: beta3
+          - size: 140Gi                # ephemeral only: unpacked image
+                                        # (~45-50 GB) + GGUFs (11.5 GB) +
+                                        # Ollama's own blob copies (11.5 GB)
+                                        # + STT weights on first use (3-9 GB)
+                                        # + headroom
   placement:
     dcloud:
       pricing:
@@ -147,9 +153,12 @@ profiles:
           denom: uakt
           amount: 1000
         app:
-          # Ceiling bid (uakt/block). Raise if no provider bids; lower to save.
+          # Ceiling bid (uakt/block), set from real bid floors — clears even
+          # the pro6000se tier ($2.04/hr starting) with margin. You still pick
+          # the cheapest bid manually in Console; this only caps what can
+          # appear in the list. Raise if no provider bids; lower to save.
           denom: uakt
-          amount: 1000000
+          amount: 12000
 
 deployment:
   db:
