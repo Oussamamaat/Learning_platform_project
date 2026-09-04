@@ -57,14 +57,18 @@ def _get_whisper_model():
     return model
 
 
+_WHISPER_LANG_MAP = {"ary": "ar", "darija": "ar"}
+
+
 def _transcribe_whisper(audio_path: str, language_hint) -> dict:
     model = _get_whisper_model()
-    # faster-whisper's own language codes: "fr", "ar" -- language_hint here
-    # is expected to already be one of those (app.services.stt maps this
-    # module's Protocol's "fr"/"darija" callers to whatever the winning
-    # engine's own codes are; that mapping is NOT written yet -- see this
-    # file's module docstring).
-    segments, info = model.transcribe(audio_path, language=language_hint, beam_size=5)
+    # faster-whisper only accepts ISO 639-1 codes ("fr", "ar") -- it has no
+    # "ary" (Moroccan Arabic, ISO 639-3) selector and raises ValueError on
+    # it. Map the Protocol's "ary"/"darija" hints down to generic "ar";
+    # faster-whisper still transcribes Darija-specific vocabulary within
+    # "ar" mode, it just won't accept "ary" as the language argument itself.
+    whisper_lang = _WHISPER_LANG_MAP.get(language_hint, language_hint)
+    segments, info = model.transcribe(audio_path, language=whisper_lang, beam_size=5)
     text = "".join(seg.text for seg in segments)
     return {"text": text.strip(), "language": info.language}
 
@@ -83,10 +87,18 @@ def _get_seamless_model():
 
 
 def _transcribe_seamless(audio_path: str, language_hint) -> dict:
-    import torchaudio
+    import numpy as np
+    import soundfile as sf
+    import torch
 
     processor, model = _get_seamless_model()
-    waveform, sample_rate = torchaudio.load(audio_path)
+    # torchaudio.load() delegates to the torchcodec backend on this
+    # torchaudio version, and torchcodec needs a system FFmpeg install this
+    # venv doesn't have (config/requirements-speech.txt never adds it) --
+    # load via soundfile instead, same workaround already used for the same
+    # torchcodec/FFmpeg gap in scripts/build_stt_eval_set.py.
+    data, sample_rate = sf.read(audio_path, dtype="float32", always_2d=False)
+    waveform = torch.from_numpy(np.asarray(data, dtype=np.float32)).unsqueeze(0)
     # SeamlessM4T-v2's source-language code for Moroccan Arabic is "ary"
     # (distinct from generic MSA "arb") -- this is the entire reason it is
     # a bake-off candidate; see app/services/stt.py's module docstring.

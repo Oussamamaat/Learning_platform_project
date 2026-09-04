@@ -31,4 +31,10 @@ ctranslate2>=4.5.0
 # SeamlessM4Tv2Model.
 transformers>=4.44.0
 sentencepiece>=0.2.0
+# torchaudio.load() delegates to torchcodec on recent torchaudio builds,
+# which needs a system FFmpeg install this venv doesn't have -- load audio
+# via soundfile instead (scripts/speech_worker_resident.py's
+# _transcribe_seamless). Small pure-C-extension wheel, bundles libsndfile,
+# no CUDA/torch pin to conflict with.
+soundfile>=0.12.1
 # torch, torchaudio: installed separately in the Dockerfile from the cu128 index.
