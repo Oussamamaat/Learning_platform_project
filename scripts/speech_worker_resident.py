@@ -73,6 +73,14 @@ def _transcribe_whisper(audio_path: str, language_hint) -> dict:
     return {"text": text.strip(), "language": info.language}
 
 
+_SEAMLESS_LANG_MAP = {
+    "fr": "fra",
+    "darija": "ary",
+    "ar": "arb",   # generic/MSA Arabic, NOT Moroccan -- kept distinct from ary
+    "en": "eng",
+}
+
+
 def _get_seamless_model():
     if "seamless" in _MODELS:
         return _MODELS["seamless"]
@@ -102,7 +110,10 @@ def _transcribe_seamless(audio_path: str, language_hint) -> dict:
     # SeamlessM4T-v2's source-language code for Moroccan Arabic is "ary"
     # (distinct from generic MSA "arb") -- this is the entire reason it is
     # a bake-off candidate; see app/services/stt.py's module docstring.
-    src_lang = language_hint or "ary"
+    # It takes ISO 639-3 throughout, so "fr" must become "fra" -- passing
+    # "fr" raises ValueError listing the supported set (confirmed live on
+    # the lease, where it failed all 8 French utterances).
+    src_lang = _SEAMLESS_LANG_MAP.get(language_hint, language_hint) or "ary"
     # transformers renamed AutoProcessor's audio kwarg audios -> audio at
     # some point after this file was written (see its own "UNVERIFIED
     # SCAFFOLDING" docstring note -- never run against a loaded model until
