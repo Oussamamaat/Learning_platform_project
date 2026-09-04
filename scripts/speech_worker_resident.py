@@ -103,7 +103,12 @@ def _transcribe_seamless(audio_path: str, language_hint) -> dict:
     # (distinct from generic MSA "arb") -- this is the entire reason it is
     # a bake-off candidate; see app/services/stt.py's module docstring.
     src_lang = language_hint or "ary"
-    inputs = processor(audios=waveform, sampling_rate=sample_rate, return_tensors="pt").to("cuda")
+    # transformers renamed AutoProcessor's audio kwarg audios -> audio at
+    # some point after this file was written (see its own "UNVERIFIED
+    # SCAFFOLDING" docstring note -- never run against a loaded model until
+    # this lease); confirmed live via the installed version's own
+    # deprecation error.
+    inputs = processor(audio=waveform, sampling_rate=sample_rate, return_tensors="pt").to("cuda")
     output_tokens = model.generate(**inputs, tgt_lang=src_lang, generate_speech=False)
     text = processor.decode(output_tokens[0].tolist()[0], skip_special_tokens=True)
     return {"text": text.strip(), "language": src_lang}
