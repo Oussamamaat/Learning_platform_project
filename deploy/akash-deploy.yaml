@@ -58,6 +58,13 @@ services:
       - PGDATA=/var/lib/postgresql/data/pgdata
     expose:
       - port: 5432
+        # `as` MUST be set explicitly: Akash defaults it to 80 when omitted,
+        # which publishes Postgres to the app as db:80 while DATABASE_URL
+        # below says db:5432 -- DNS resolves, the connection is refused, and
+        # every fail-open path quietly returns its "DB unreachable" sentinel
+        # instead of erroring. Cost a full deploy cycle to find; the db was
+        # healthy the whole time (pg_isready -h db -p 80 answered fine).
+        as: 5432
         to:
           - service: app   # internal only — never global
 
