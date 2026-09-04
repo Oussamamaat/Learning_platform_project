@@ -60,6 +60,9 @@ else
   echo "  -> tests/data/voice_eval/ not in the clone yet -- build it locally (plan Part 3.1),"
   echo "     commit+push, then re-run just this git-clone block (no need to redeploy the lease)."
 fi
+cp /tmp/repo_fixtures/tests/data/utterance.wav /app/tests/data/utterance.wav 2>/dev/null \
+  && echo "  -> /app/tests/data/utterance.wav ready (phase 2 end-to-end latency test)" \
+  || echo "  -> tests/data/utterance.wav not in the clone yet (commit+push it before phase 2's latency step)"
 
 echo
 echo "Proceed to lease-01-phase1.sh."
