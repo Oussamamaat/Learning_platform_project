@@ -75,7 +75,12 @@ def main() -> None:
     print("\n=== first example's raw schema -- verify before this writes anything ===")
     for k, v in first.items():
         preview = v if not isinstance(v, (bytes, dict)) else type(v).__name__
-        print(f"  {k!r}: {preview!r if not isinstance(preview, str) or len(str(preview)) < 80 else str(preview)[:80] + '...'}")
+        text = str(preview)
+        if isinstance(preview, str) and len(text) > 80:
+            text = repr(text[:80] + "...")
+        else:
+            text = repr(preview)
+        print(f"  {k!r}: {text}")
     print()
 
     audio_col = _pick_column(first, AUDIO_COL_CANDIDATES, "audio")
@@ -85,7 +90,8 @@ def main() -> None:
         if c in first:
             lang_col = c
             break
-    print(f"Using audio={audio_col!r} text={text_col!r} lang={lang_col!r or '(dataset is Darija-only, defaulting to ary)'}\n")
+    lang_col_desc = repr(lang_col) if lang_col else "(dataset is Darija-only, defaulting to ary)"
+    print(f"Using audio={audio_col!r} text={text_col!r} lang={lang_col_desc}\n")
 
     OUT_DIR.mkdir(parents=True, exist_ok=True)
     counts = {"ary": 0, "fr": 0}

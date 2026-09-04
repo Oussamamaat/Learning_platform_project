@@ -23,6 +23,27 @@ from app.routers.chat import _sources_look_cross_language, chat
 from app.services.llm import DOMAIN_LABELS_AR, DOMAIN_LABELS_FR
 
 
+@pytest.fixture(autouse=True)
+def _no_live_corpus_version_lookup():
+    """chat()'s corpus_version pin-invalidation check (app/routers/chat.py:182,
+    added alongside the tenant-upload API on 2026-08-13) hits a real Postgres
+    connection through app.services.sources.corpus_version -- a dependency this
+    file's tests predate and were never updated for. Without this, the first
+    such test in file order hangs forever on psycopg2.connect() with no
+    Postgres reachable (no timeout on that call), rather than failing fast;
+    confirmed live via `pytest --timeout=15`, which is what caught this.
+
+    Returning None matches corpus_version's own documented contract for a
+    genuinely unreachable Postgres (see its docstring: None means "unknown,
+    do not invalidate"), so this is the faithful mock for "no live DB" here,
+    not an arbitrary stub. Tests that specifically exercise corpus_version's
+    own value (e.g. test_corpus_version_is_not_re_queried_after_the_merged_
+    lookup) already patch it explicitly within their own `with` block, which
+    safely overrides this fixture for their duration."""
+    with patch("app.routers.chat.source_service.corpus_version", return_value=None):
+        yield
+
+
 def test_cross_language_detection():
     assert _sources_look_cross_language(["1.1_code_du_travail.md"], "darija") is True
     assert _sources_look_cross_language(["1.11_ar_code_travail.md"], "darija") is False
