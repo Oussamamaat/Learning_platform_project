@@ -28,7 +28,7 @@ from app.services.ingestion import ingest_directory
 r = ingest_directory('raw/shared', tenant_id='company_abc')
 print(len(r), 'files ingested')
 "
-echo "  -> expect '36 files ingested'. If it's 0, something about raw/'s layout changed — stop and check before benchmarking."
+echo "  -> expect '25 files ingested'. If it's 0, something about raw/'s layout changed — stop and check before benchmarking."
 echo
 
 echo "== verify with a real chat turn (must be grounded, not a refusal) =="
