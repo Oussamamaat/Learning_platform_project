@@ -33,6 +33,7 @@ stdout carries ONLY JSON response lines -- all diagnostics go to stderr,
 same convention as ocr_worker_resident.py.
 """
 import json
+import os
 import sys
 import traceback
 
@@ -43,9 +44,14 @@ def _get_whisper_model():
     if "whisper" in _MODELS:
         return _MODELS["whisper"]
     from faster_whisper import WhisperModel
-    from app.config import get_settings
 
-    model = WhisperModel(get_settings().stt_model, device="cuda", compute_type="int8_float16")
+    # Read STT_MODEL directly rather than importing app.config.get_settings():
+    # this script runs in .speech_venv, which deliberately never installs
+    # pydantic_settings (or the rest of the app's deps) -- see this module's
+    # docstring and config/requirements-speech.txt. Default matches
+    # app/config.py's Settings.stt_model default.
+    stt_model = os.environ.get("STT_MODEL", "large-v3-turbo")
+    model = WhisperModel(stt_model, device="cuda", compute_type="int8_float16")
     _MODELS["whisper"] = model
     print(f"[speech_worker_resident] loaded faster-whisper model", file=sys.stderr, flush=True)
     return model
