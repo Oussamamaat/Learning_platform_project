@@ -18,7 +18,7 @@ export STT_VENV_PYTHON="${STT_VENV_PYTHON:-/app/.speech_venv/bin/python}"
 export OLLAMA_BASE_URL="${OLLAMA_BASE_URL:-http://localhost:11434}"
 # Relaxations the 8 GB card could not afford (see app/config.py comments). A
 # 32 GB card holds both tutors + embeddings + OCR/STT resident at once.
-export OLLAMA_KEEP_ALIVE="${OLLAMA_KEEP_ALIVE:--1}"
+export OLLAMA_KEEP_ALIVE="${OLLAMA_KEEP_ALIVE:-24h}"
 export OCR_KEEP_RESIDENT="${OCR_KEEP_RESIDENT:-true}"
 export OCR_WORKER_IDLE_RELEASE_SECONDS="${OCR_WORKER_IDLE_RELEASE_SECONDS:-0}"
 export SPEECH_WORKER_IDLE_RELEASE_SECONDS="${SPEECH_WORKER_IDLE_RELEASE_SECONDS:-0}"

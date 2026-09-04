@@ -93,7 +93,7 @@ services:
                                  # app/main.py's startup hooks only preload
                                  # bge-m3, no eager OCR/STT init)
       # ── relaxations for a card with VRAM to spare ────────────────────────
-      - OLLAMA_KEEP_ALIVE=-1
+      - OLLAMA_KEEP_ALIVE=24h
       - OCR_KEEP_RESIDENT=true
       - OCR_WORKER_IDLE_RELEASE_SECONDS=0
       - SPEECH_WORKER_IDLE_RELEASE_SECONDS=0
