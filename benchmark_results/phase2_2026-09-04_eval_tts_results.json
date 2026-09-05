@@ -1,0 +1,54 @@
+{
+  "fr": [
+    {
+      "sentence": "Le port du casque est obligatoire dans cette zone.",
+      "ok": true,
+      "error": null,
+      "seconds": 2.34,
+      "rtf": 0.817,
+      "wav": "eval_tts_fr_0.wav"
+    },
+    {
+      "sentence": "Selon l'article 8, la consigne doit être vérifiée avant toute intervention.",
+      "ok": true,
+      "error": null,
+      "seconds": 0.87,
+      "rtf": 0.174,
+      "wav": "eval_tts_fr_1.wav"
+    },
+    {
+      "sentence": "Avant de commencer, assurez-vous que l'équipement est correctement isolé, que les vannes sont fermées, et que le permis de travail a été signé par le responsable.",
+      "ok": true,
+      "error": null,
+      "seconds": 0.93,
+      "rtf": 0.108,
+      "wav": "eval_tts_fr_2.wav"
+    }
+  ],
+  "darija": [
+    {
+      "sentence": "خصك تلبس الكاسك ديال الحماية.",
+      "ok": true,
+      "error": null,
+      "seconds": 2.79,
+      "rtf": 0.762,
+      "wav": "eval_tts_darija_0.wav"
+    },
+    {
+      "sentence": "على حساب المادة 8، خاصك تتأكد من العزلة قبل ما تبدا.",
+      "ok": true,
+      "error": null,
+      "seconds": 1.18,
+      "rtf": 0.163,
+      "wav": "eval_tts_darija_1.wav"
+    },
+    {
+      "sentence": "قبل ما تبدا الخدمة، تأكد أن التجهيزات معزولة مزيان وأن الترخيص ديال الخدمة موقع.",
+      "ok": true,
+      "error": null,
+      "seconds": 1.39,
+      "rtf": 0.144,
+      "wav": "eval_tts_darija_2.wav"
+    }
+  ]
+}

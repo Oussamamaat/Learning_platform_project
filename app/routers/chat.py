@@ -167,10 +167,13 @@ def _resolve_turn_context(
     whether the pin was reused), or "retrieval"/"tenant_default" (a fresh
     tier 2/3 decision) / "pinned" (the router's decision was abandoned in
     favour of stale-but-relevant pinned content, guard 3) when it wasn't.
-    `degraded` is only ever set by a real _retrieve_context call in this
-    turn (see that function) -- False when a guard short-circuits before
-    any retrieval happens. `corpus_version` is returned so chat() can pass
-    it to history.pin_context when (and only when) is_new_pin is True.
+    `degraded` is set by a real _retrieve_context call in this turn (see
+    that function), OR'd with routing_degraded when resolve_domain's own
+    tier-2 vote silently swallowed an exception (see resolve_domain's
+    docstring and this function's body) -- False when a guard
+    short-circuits before either can run. `corpus_version` is returned so
+    chat() can pass it to history.pin_context when (and only when)
+    is_new_pin is True.
     """
     pinned = history.get_pinned(session_id)
     # Supplied by chat() from the SAME query that produced `source_ids`
@@ -211,10 +214,24 @@ def _resolve_turn_context(
 
     if requested_domain is not None:
         domain, domain_source = requested_domain, "page_context"
+        routing_degraded = False
     else:
         domain, domain_source = resolve_domain(
             message, tenant_id=tenant_id, backend=get_settings().retrieval_backend,
             source_ids=source_ids,
+        )
+        # resolve_domain collapses two distinct causes into the same
+        # "tenant_default" string: the disk backend's deliberate tier-2
+        # skip, and a swallowed exception in the pgvector tier-2 vote (see
+        # that function's docstring). They're only distinguishable here,
+        # by backend: when backend == "pgvector", "tenant_default" is
+        # UNAMBIGUOUSLY the exception path (the disk skip can't produce it
+        # with that backend). Surfacing it as `degraded` -- rather than
+        # letting a routing failure masquerade as a legitimate
+        # tenant-default fallback -- was the fix for the 2026-09-04 finding
+        # that this failure mode is otherwise invisible in the response.
+        routing_degraded = (
+            domain_source == "tenant_default" and get_settings().retrieval_backend == "pgvector"
         )
 
     same_pin_scope = (
@@ -234,6 +251,7 @@ def _resolve_turn_context(
         retrieval_query, domain=domain, top_k=4, ui_lang=query_lang, tenant_id=tenant_id,
         source_ids=source_ids,
     )
+    degraded = degraded or routing_degraded
 
     if not same_pin_scope:
         new_segment_id = (pinned["segment_id"] + 1) if pinned else 1

@@ -33,6 +33,20 @@ class Settings(BaseSettings):
     # window plus the response. Was duplicated as a literal 8192 in both
     # of llm.py's request builders, which could drift apart.
     ollama_num_ctx: int = 8192
+    # Bounds concurrent in-flight Ollama requests (a threading.Semaphore in
+    # app.services.llm, gating chat/quiz/diagrams/voice uniformly -- all
+    # four ultimately run the blocking urllib call on a worker thread, see
+    # that module for why threading.Semaphore rather than asyncio.Semaphore
+    # is correct here). Previously there was NO limit at all: N concurrent
+    # users meant N concurrent Ollama requests, unmodelled
+    # (docs/architecture/cloud-scaling-plan.md #3). 4 is a conservative
+    # placeholder, not a measured value -- POST_LEASE_MVP_SPRINT_PLAN.md
+    # item 5 / ADR 0008 runs a real concurrency sweep (N=1/2/4/8 against
+    # the 32GB deployment) once the lease is back up and records the
+    # chosen limit against that curve; this default holds until then.
+    # Embeddings never touch Ollama (app.services.ingestion/search use an
+    # in-process SentenceTransformer), so this can never starve retrieval.
+    ollama_max_concurrent: int = 4
     default_tenant_id: str = "company_abc"
     default_user_id: str = "default_user"
     # Tier-3 fallback for app.services.routing's domain router when tier 1
@@ -236,6 +250,28 @@ class Settings(BaseSettings):
     # not continuous, and STT must not permanently steal VRAM the tutor
     # model needs to stay resident.
     speech_worker_idle_release_seconds: float = 120.0
+
+    # VAD (app.services.vad.EnergyEndpointer, app/routers/voice.py's open-
+    # mic session). Previously hardcoded constructor defaults with no
+    # override -- tuning required editing Python and a redeploy/rebuild.
+    # 500.0 is the value an offline sweep against tests/data/voice_eval/'s
+    # 30 real utterances (POST_LEASE_MVP_SPRINT_PLAN.md item 2,
+    # scripts/calibrate_vad.py) found fires speech_start on 30/30 files --
+    # NOT the cause of the 2026-09-04 lease's live mic-detection failure,
+    # which is why this default is unchanged, not lowered. Kept
+    # configurable regardless: the module's own docstring already says
+    # "tune per deployment", and a live-mic finding on a future lease
+    # should be a `VAD_THRESHOLD` env var + restart, not an image rebuild.
+    vad_threshold: float = 500.0
+    vad_hangover_ms: int = 400
+    vad_min_speech_ms: int = 200
+    # Logs, per inbound voice-session frame, byte length / computed RMS /
+    # session state / any endpointer event -- off by default (a chat
+    # session's audio stream is high-frequency and this is diagnostic-only,
+    # not something to run in normal operation). Turned on for the item-2
+    # live mic capture, POST_LEASE_MVP_SPRINT_PLAN.md Phase B.
+    vad_debug_log: bool = False
+
     tts_engine: str = "none"  # "none" | "piper"
     # Piper voice models (ONNX, downloaded separately -- see
     # app.services.tts.PiperEngine's docstring for why Piper was chosen

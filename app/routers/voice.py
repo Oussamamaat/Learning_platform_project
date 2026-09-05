@@ -39,7 +39,7 @@ from typing import Optional
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
-from app.config import get_tenant_id, get_user_id
+from app.config import get_settings, get_tenant_id, get_user_id
 from app.errors import AppError
 from app.services.citations import extract_citations
 from app.services.llm import stream_llm_response
@@ -68,6 +68,32 @@ class _State:
 
 async def _send_json(websocket: WebSocket, payload: dict) -> None:
     await websocket.send_text(json.dumps(payload))
+
+
+def _debug_push(
+    endpointer: EnergyEndpointer, frame: bytes, *, session_id: str, state: str, debug: bool,
+) -> Optional[str]:
+    """endpointer.push(frame), optionally logging per-frame diagnostics
+    first -- byte length, computed RMS, current session state, and
+    whatever event fires. Off by default (settings.vad_debug_log): a voice
+    session's audio stream is high-frequency, and this is diagnostic-only,
+    built for the item-2 live-mic capture (POST_LEASE_MVP_SPRINT_PLAN.md)
+    that couldn't be done with the closed 2026-09-04 lease -- the offline
+    sweep against tests/data/voice_eval/'s 30 real files found the
+    default threshold fires correctly on all of them, so the live failure
+    is more likely upstream (browser AGC/noise suppression, an unexpected
+    sample rate, a frame-size mismatch) than the threshold itself; this is
+    what turns a live run into a diagnosable trace instead of "it didn't
+    work" again."""
+    if debug:
+        level = EnergyEndpointer._rms(frame)
+        event = endpointer.push(frame)
+        logger.info(
+            "voice session %s: vad frame bytes=%d rms=%.1f state=%s event=%s",
+            session_id, len(frame), level, state, event,
+        )
+        return event
+    return endpointer.push(frame)
 
 
 def _split_ready_sentences(buffer: str) -> tuple[list[str], str]:
@@ -175,7 +201,12 @@ async def voice_session(
         await websocket.close()
         return
 
-    endpointer = EnergyEndpointer()
+    settings = get_settings()
+    endpointer = EnergyEndpointer(
+        threshold=settings.vad_threshold,
+        hangover_ms=settings.vad_hangover_ms,
+        min_speech_ms=settings.vad_min_speech_ms,
+    )
     state = _State.LISTENING
     # Set after the first successful (non-refusal) turn, then passed back
     # in as resolve_turn's explicit_language on every later turn in this
@@ -290,7 +321,10 @@ async def voice_session(
                     # sample-accurate flush is the client's job (a WebAudio
                     # scheduled buffer queue, not <audio>; see
                     # frontend/src/hooks/useVoiceSession.ts).
-                    event = endpointer.push(frame)
+                    event = _debug_push(
+                        endpointer, frame, session_id=session_id, state="speaking",
+                        debug=settings.vad_debug_log,
+                    )
                     if event == "speech_start":
                         cancel_flag.set()
                         if worker_task is not None:
@@ -300,7 +334,10 @@ async def voice_session(
                     continue
                 if state != _State.LISTENING:
                     continue
-                event = endpointer.push(frame)
+                event = _debug_push(
+                    endpointer, frame, session_id=session_id, state="listening",
+                    debug=settings.vad_debug_log,
+                )
                 if event == "speech_start":
                     await _send_json(websocket, {"type": "transcript.partial", "text": ""})
                 elif event == "speech_end":

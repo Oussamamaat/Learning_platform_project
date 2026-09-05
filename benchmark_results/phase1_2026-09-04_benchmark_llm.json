@@ -1,0 +1,56 @@
+{
+  "base_url": "http://localhost:8000",
+  "chat": {
+    "darija": [
+      {
+        "seconds": 2.57,
+        "chars": 253,
+        "resolved_lang": "darija"
+      },
+      {
+        "seconds": 2.64,
+        "chars": 239,
+        "resolved_lang": "darija"
+      },
+      {
+        "seconds": 2.69,
+        "chars": 251,
+        "resolved_lang": "darija"
+      }
+    ],
+    "french": [
+      {
+        "seconds": 2.0,
+        "chars": 228,
+        "resolved_lang": "fr"
+      },
+      {
+        "seconds": 2.32,
+        "chars": 282,
+        "resolved_lang": "fr"
+      },
+      {
+        "seconds": 3.06,
+        "chars": 405,
+        "resolved_lang": "fr"
+      }
+    ]
+  },
+  "language_switch": {
+    "alternating_seconds": [
+      3.29,
+      3.29,
+      2.67,
+      3.45,
+      3.01,
+      2.48
+    ],
+    "mean": 3.03
+  },
+  "ollama_raw": {
+    "ttft_s": 9.21,
+    "tokens": 86,
+    "total_s": 10.66,
+    "tokens_per_s": 8.1
+  }
+}

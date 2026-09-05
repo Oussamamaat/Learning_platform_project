@@ -51,6 +51,18 @@ class Document(Base):
     # ingest router already deletes documents before source_files.
     embedding = Column(Vector(get_settings().embedding_dim))
     source_file_id = Column(UUID(as_uuid=True), nullable=True, index=True)
+    # sha256("{tenant_id}|{source_file_id or source_name}|{content}"),
+    # hex digest -- the idempotency key for insert_documents (app.services.
+    # ingestion), added because chunk identity has no OTHER stable natural
+    # key: documents has no page_number/chunk_index (PDF page boundaries
+    # are flattened into markdown headings before chunking, and
+    # chunk_document packs adjacent sections together, so neither survives
+    # as a per-chunk identity -- see POST_LEASE_MVP_SPRINT_PLAN.md item 4).
+    # NULL on every pre-existing row (a genuine "never computed", not "no
+    # content") -- Postgres treats each NULL as distinct under a UNIQUE
+    # index, so legacy rows are silently exempt from the constraint rather
+    # than colliding with each other. New inserts always populate it.
+    content_hash = Column(String(64), nullable=True)
     metadata_ = Column("metadata", JSON, default=dict)
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
     updated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
@@ -72,6 +84,13 @@ class Document(Base):
         # and the source_ids retrieval filter both scope by tenant AND
         # source file.
         Index("ix_documents_tenant_source_file", "tenant_id", "source_file_id"),
+        # The idempotency constraint itself -- re-inserting the identical
+        # chunk (same tenant, same source, same content) for the same
+        # tenant is a no-op at the database level, not just at whatever
+        # call site happens to check first. Postgres UNIQUE indexes allow
+        # unlimited NULLs, so this never affects legacy rows where
+        # content_hash is NULL (see that column's comment).
+        UniqueConstraint("tenant_id", "content_hash", name="uq_documents_tenant_content_hash"),
     )
 
     def __repr__(self):

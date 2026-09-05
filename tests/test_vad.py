@@ -2,6 +2,7 @@
 Ollama/GPU dependency, safe to run on any machine including this laptop."""
 import array
 
+from app.config import get_settings
 from app.services.vad import EnergyEndpointer, FRAME_BYTES, SAMPLE_RATE
 
 
@@ -88,3 +89,33 @@ def test_two_separate_utterances_do_not_bleed_into_each_other():
 
     assert len(first) > 0
     assert len(second) > 0
+
+
+# --- settings-driven configuration (POST_LEASE_MVP_SPRINT_PLAN.md item 2) --
+
+def test_settings_expose_vad_tunables_matching_endpointer_defaults():
+    """app.config.Settings.vad_threshold/vad_hangover_ms/vad_min_speech_ms
+    must default to the exact values EnergyEndpointer's own constructor
+    defaults use -- app/routers/voice.py wires Settings values into the
+    constructor explicitly now (no longer bare `EnergyEndpointer()`), so a
+    drift between the two would silently change production behavior."""
+    settings = get_settings()
+    default_ep = EnergyEndpointer()
+    assert settings.vad_threshold == default_ep._threshold
+    assert settings.vad_hangover_ms == 400
+    assert settings.vad_min_speech_ms == 200
+
+
+def test_endpointer_constructed_from_settings_values_behaves_identically():
+    """The exact construction app/routers/voice.py now performs --
+    EnergyEndpointer(threshold=settings.vad_threshold, hangover_ms=...,
+    min_speech_ms=...) -- must behave the same as the bare default for a
+    real speech-shaped sequence."""
+    settings = get_settings()
+    ep = EnergyEndpointer(
+        threshold=settings.vad_threshold,
+        hangover_ms=settings.vad_hangover_ms,
+        min_speech_ms=settings.vad_min_speech_ms,
+    )
+    events = [ep.push(_loud_frame()) for _ in range(10)]
+    assert events[-1] == "speech_start"

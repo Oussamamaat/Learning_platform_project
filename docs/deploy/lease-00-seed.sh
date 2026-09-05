@@ -32,13 +32,34 @@ echo "  -> expect '25 files ingested'. If it's 0, something about raw/'s layout 
 echo
 
 echo "== verify with a real chat turn (must be grounded, not a refusal) =="
+# JSON body written to a FILE via this heredoc, then sent with
+# --data-binary @file -- deliberately NOT `curl -d '{"message": "..."}'`
+# with the Arabic text embedded directly as a command-line argument.
+# POST_LEASE_MVP_SPRINT_PLAN.md item 1 / ADR 0004 root-caused the
+# session's own reproduction of this exact bug shape (domain_source
+# falling to "no_match" and language misreported as "fr" for this exact
+# query) to precisely that: passing literal Arabic-script text as a shell
+# argv corrupts it into a run of literal '?' bytes before curl (a native
+# child process) ever sees it (confirmed via `curl --trace-ascii -`:
+# 82 garbage bytes sent instead of 116 correct UTF-8 bytes) -- a shell/
+# argv-encoding artifact, not an application or Postgres bug. A heredoc
+# redirected straight to a file is a plain byte-for-byte write, never
+# passed through argv marshalling, and sidesteps the whole class of
+# failure regardless of which shell or locale this runs under.
+cat > /tmp/seed_check_req.json <<'JSONEOF'
+{"message": "شنو هي معدات الحماية الشخصية الإجبارية؟", "tenant_id": "company_abc"}
+JSONEOF
 curl -sf -X POST http://localhost:8000/api/v1/chat/ \
   -H 'Content-Type: application/json' \
-  -d '{"message": "شنو هي معدات الحماية الشخصية الإجبارية؟", "tenant_id": "company_abc"}' \
+  --data-binary @/tmp/seed_check_req.json \
   | tee /tmp/seed_check.json
 echo
 echo "  -> read /tmp/seed_check.json: if it's the deterministic refusal, the DB is still empty and every"
 echo "     downstream benchmark number in phases 1-3 would be meaningless. Do not proceed until this is grounded."
+echo "  -> if it refuses with domain_source=no_match and language=fr specifically, suspect THIS SCRIPT'S OWN"
+echo "     curl invocation before suspecting the app -- re-run scripts/probe_language_routing.py (which already"
+echo "     guards sys.stdout.reconfigure(encoding='utf-8') for exactly this class of issue) or the equivalent"
+echo "     Python requests call to rule out shell/argv encoding before touching app code."
 echo
 echo "Seed + verification done."
 echo

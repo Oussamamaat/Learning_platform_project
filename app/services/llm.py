@@ -7,6 +7,7 @@ Supports multi-domain enterprise tutoring with Socratic methodology.
 
 import json
 import logging
+import threading
 import time
 import urllib.request
 import urllib.error
@@ -594,6 +595,29 @@ _RETRY_DELAYS_SECONDS = (0.5, 2.0)
 # doubles the time to a guaranteed failure.
 _RETRYABLE_STATUS = frozenset({502, 503, 504})
 
+# Bounds concurrent in-flight requests to Ollama -- see settings.
+# ollama_max_concurrent's comment for why. threading.Semaphore, not
+# asyncio.Semaphore: chat() and generate_quiz() (app/routers/chat.py,
+# quiz.py) are plain `def`, dispatched to FastAPI's worker threadpool;
+# voice's handler is `async def` but its own Ollama call runs inside
+# _answer_worker via asyncio.to_thread (app/routers/voice.py). All four
+# call surfaces (chat, quiz, diagrams, voice) end up on worker threads, so
+# one shared threading primitive gates all of them uniformly. Built lazily
+# (not at import time) so get_settings() -- itself lru_cache'd -- is read
+# after any test/deployment override has taken effect, same pattern as
+# app.services.ingestion._get_pool.
+_ollama_semaphore: Optional[threading.Semaphore] = None
+_ollama_semaphore_lock = threading.Lock()
+
+
+def _get_ollama_semaphore() -> threading.Semaphore:
+    global _ollama_semaphore
+    if _ollama_semaphore is None:
+        with _ollama_semaphore_lock:
+            if _ollama_semaphore is None:
+                _ollama_semaphore = threading.Semaphore(get_settings().ollama_max_concurrent)
+    return _ollama_semaphore
+
 
 def _ollama_options() -> dict:
     """Per-request options.
@@ -632,67 +656,75 @@ def _post_ollama(path: str, payload: dict, *, timeout: Optional[int] = None) -> 
        debugging a missing or misnamed model (settings.ollama_model /
        ollama_model_fr) looking at the network instead of at their model
        list.
+    4. Bounded concurrency: acquires app.services.llm's shared
+       threading.Semaphore (settings.ollama_max_concurrent) for the
+       full duration of this call, including retries -- see that
+       semaphore's own module-level comment.
     """
-    settings = get_settings()
-    url = f"{settings.ollama_base_url.rstrip('/')}{path}"
-    payload = {**payload, "keep_alive": settings.ollama_keep_alive}
-    data = json.dumps(payload).encode("utf-8")
-    effective_timeout = timeout if timeout is not None else settings.ollama_timeout_seconds
+    _get_ollama_semaphore().acquire()
+    try:
+        settings = get_settings()
+        url = f"{settings.ollama_base_url.rstrip('/')}{path}"
+        payload = {**payload, "keep_alive": settings.ollama_keep_alive}
+        data = json.dumps(payload).encode("utf-8")
+        effective_timeout = timeout if timeout is not None else settings.ollama_timeout_seconds
 
-    last_error: Optional[Exception] = None
-    for attempt in range(len(_RETRY_DELAYS_SECONDS) + 1):
-        req = urllib.request.Request(
-            url,
-            data=data,
-            headers={"Content-Type": "application/json"},
-            method="POST",
-        )
-        try:
-            with urllib.request.urlopen(req, timeout=effective_timeout) as response:
-                return json.loads(response.read().decode("utf-8"))
-        except urllib.error.HTTPError as e:
-            body = ""
+        last_error: Optional[Exception] = None
+        for attempt in range(len(_RETRY_DELAYS_SECONDS) + 1):
+            req = urllib.request.Request(
+                url,
+                data=data,
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
             try:
-                body = e.read().decode("utf-8", errors="replace")[:500]
-            except Exception:
-                pass
-            if e.code in _RETRYABLE_STATUS and attempt < len(_RETRY_DELAYS_SECONDS):
-                logger.warning(
-                    "Ollama returned HTTP %s (retryable); retrying in %.1fs",
-                    e.code, _RETRY_DELAYS_SECONDS[attempt],
-                )
-                last_error = e
-                time.sleep(_RETRY_DELAYS_SECONDS[attempt])
-                continue
-            logger.error("Ollama returned HTTP %s for %s: %s", e.code, path, body)
-            if e.code == 404:
-                raise GenerationError(
-                    f"Ollama has no model named {payload.get('model')!r} (HTTP 404). "
-                    f"Check settings.ollama_model / ollama_model_fr against the "
-                    f"models actually pulled on {settings.ollama_base_url}."
-                ) from e
-            raise GenerationError(f"Ollama HTTP {e.code}: {body}") from e
-        except urllib.error.URLError as e:
-            if attempt < len(_RETRY_DELAYS_SECONDS):
-                logger.warning(
-                    "Ollama connection failed (%s); retrying in %.1fs",
-                    e, _RETRY_DELAYS_SECONDS[attempt],
-                )
-                last_error = e
-                time.sleep(_RETRY_DELAYS_SECONDS[attempt])
-                continue
-            logger.error("Ollama connection failed: %s", e)
-            raise OllamaConnectionError(payload.get("model"), settings.ollama_base_url) from e
-        except json.JSONDecodeError as e:
-            logger.error("Invalid JSON from Ollama: %s", e)
-            raise GenerationError(f"Invalid JSON response: {e}") from e
-        except (OllamaConnectionError, GenerationError):
-            raise
-        except Exception as e:
-            logger.error("Unexpected LLM error: %s", e)
-            raise GenerationError(str(e)) from e
+                with urllib.request.urlopen(req, timeout=effective_timeout) as response:
+                    return json.loads(response.read().decode("utf-8"))
+            except urllib.error.HTTPError as e:
+                body = ""
+                try:
+                    body = e.read().decode("utf-8", errors="replace")[:500]
+                except Exception:
+                    pass
+                if e.code in _RETRYABLE_STATUS and attempt < len(_RETRY_DELAYS_SECONDS):
+                    logger.warning(
+                        "Ollama returned HTTP %s (retryable); retrying in %.1fs",
+                        e.code, _RETRY_DELAYS_SECONDS[attempt],
+                    )
+                    last_error = e
+                    time.sleep(_RETRY_DELAYS_SECONDS[attempt])
+                    continue
+                logger.error("Ollama returned HTTP %s for %s: %s", e.code, path, body)
+                if e.code == 404:
+                    raise GenerationError(
+                        f"Ollama has no model named {payload.get('model')!r} (HTTP 404). "
+                        f"Check settings.ollama_model / ollama_model_fr against the "
+                        f"models actually pulled on {settings.ollama_base_url}."
+                    ) from e
+                raise GenerationError(f"Ollama HTTP {e.code}: {body}") from e
+            except urllib.error.URLError as e:
+                if attempt < len(_RETRY_DELAYS_SECONDS):
+                    logger.warning(
+                        "Ollama connection failed (%s); retrying in %.1fs",
+                        e, _RETRY_DELAYS_SECONDS[attempt],
+                    )
+                    last_error = e
+                    time.sleep(_RETRY_DELAYS_SECONDS[attempt])
+                    continue
+                logger.error("Ollama connection failed: %s", e)
+                raise OllamaConnectionError(payload.get("model"), settings.ollama_base_url) from e
+            except json.JSONDecodeError as e:
+                logger.error("Invalid JSON from Ollama: %s", e)
+                raise GenerationError(f"Invalid JSON response: {e}") from e
+            except (OllamaConnectionError, GenerationError):
+                raise
+            except Exception as e:
+                logger.error("Unexpected LLM error: %s", e)
+                raise GenerationError(str(e)) from e
 
-    raise OllamaConnectionError(payload.get("model"), settings.ollama_base_url) from last_error
+        raise OllamaConnectionError(payload.get("model"), settings.ollama_base_url) from last_error
+    finally:
+        _get_ollama_semaphore().release()
 
 
 def _call_ollama_generate(
@@ -786,73 +818,83 @@ def _stream_ollama_chat(
     _post_ollama's docstring for why) -- urlopen's returned file object
     iterates line-by-line over the HTTP body, which is exactly Ollama's
     streaming NDJSON shape (one JSON object per line).
+
+    Also acquires app.services.llm's shared threading.Semaphore
+    (settings.ollama_max_concurrent) for the WHOLE lifetime of the
+    generator -- connect through final token -- released in a
+    finally so early abandonment (the caller stops iterating, e.g.
+    voice.py's cancel_flag) still frees the slot via GeneratorExit.
     """
-    settings = get_settings()
-    url = f"{settings.ollama_base_url.rstrip('/')}/api/chat"
-    payload = {
-        "model": model,
-        "messages": messages,
-        "stream": True,
-        "options": _ollama_options(),
-        "keep_alive": settings.ollama_keep_alive,
-    }
-    data = json.dumps(payload).encode("utf-8")
-    effective_timeout = timeout if timeout is not None else settings.ollama_timeout_seconds
-
-    req = urllib.request.Request(
-        url, data=data, headers={"Content-Type": "application/json"}, method="POST",
-    )
+    _get_ollama_semaphore().acquire()
     try:
-        response = urllib.request.urlopen(req, timeout=effective_timeout)
-    except urllib.error.HTTPError as e:
-        body = ""
+        settings = get_settings()
+        url = f"{settings.ollama_base_url.rstrip('/')}/api/chat"
+        payload = {
+            "model": model,
+            "messages": messages,
+            "stream": True,
+            "options": _ollama_options(),
+            "keep_alive": settings.ollama_keep_alive,
+        }
+        data = json.dumps(payload).encode("utf-8")
+        effective_timeout = timeout if timeout is not None else settings.ollama_timeout_seconds
+
+        req = urllib.request.Request(
+            url, data=data, headers={"Content-Type": "application/json"}, method="POST",
+        )
         try:
-            body = e.read().decode("utf-8", errors="replace")[:500]
-        except Exception:
-            pass
-        logger.error("Ollama returned HTTP %s for /api/chat (stream): %s", e.code, body)
-        if e.code == 404:
-            raise GenerationError(
-                f"Ollama has no model named {model!r} (HTTP 404). Check "
-                f"settings.ollama_model / ollama_model_fr."
-            ) from e
-        raise GenerationError(f"Ollama HTTP {e.code}: {body}") from e
-    except urllib.error.URLError as e:
-        logger.error("Ollama connection failed (stream): %s", e)
-        raise OllamaConnectionError(model, settings.ollama_base_url) from e
+            response = urllib.request.urlopen(req, timeout=effective_timeout)
+        except urllib.error.HTTPError as e:
+            body = ""
+            try:
+                body = e.read().decode("utf-8", errors="replace")[:500]
+            except Exception:
+                pass
+            logger.error("Ollama returned HTTP %s for /api/chat (stream): %s", e.code, body)
+            if e.code == 404:
+                raise GenerationError(
+                    f"Ollama has no model named {model!r} (HTTP 404). Check "
+                    f"settings.ollama_model / ollama_model_fr."
+                ) from e
+            raise GenerationError(f"Ollama HTTP {e.code}: {body}") from e
+        except urllib.error.URLError as e:
+            logger.error("Ollama connection failed (stream): %s", e)
+            raise OllamaConnectionError(model, settings.ollama_base_url) from e
 
-    got_any = False
-    try:
-        with response:
-            for raw_line in response:
-                line = raw_line.decode("utf-8", errors="replace").strip()
-                if not line:
-                    continue
-                try:
-                    chunk = json.loads(line)
-                except json.JSONDecodeError:
-                    logger.warning(
-                        "Skipping malformed NDJSON line from Ollama stream: %r", line[:200]
-                    )
-                    continue
-                if chunk.get("error"):
-                    raise GenerationError(f"Ollama stream error: {chunk['error']}")
-                delta = chunk.get("message", {}).get("content", "")
-                if delta:
-                    got_any = True
-                    yield delta
-                if chunk.get("done"):
-                    break
-    except (urllib.error.URLError, ConnectionError, TimeoutError) as e:
-        if got_any:
-            # Mid-stream drop after real content already reached the
-            # caller -- surface it as a distinct, honest failure rather
-            # than silently truncating the answer.
-            raise GenerationError(f"Ollama stream dropped mid-response: {e}") from e
-        raise OllamaConnectionError(model, settings.ollama_base_url) from e
+        got_any = False
+        try:
+            with response:
+                for raw_line in response:
+                    line = raw_line.decode("utf-8", errors="replace").strip()
+                    if not line:
+                        continue
+                    try:
+                        chunk = json.loads(line)
+                    except json.JSONDecodeError:
+                        logger.warning(
+                            "Skipping malformed NDJSON line from Ollama stream: %r", line[:200]
+                        )
+                        continue
+                    if chunk.get("error"):
+                        raise GenerationError(f"Ollama stream error: {chunk['error']}")
+                    delta = chunk.get("message", {}).get("content", "")
+                    if delta:
+                        got_any = True
+                        yield delta
+                    if chunk.get("done"):
+                        break
+        except (urllib.error.URLError, ConnectionError, TimeoutError) as e:
+            if got_any:
+                # Mid-stream drop after real content already reached the
+                # caller -- surface it as a distinct, honest failure rather
+                # than silently truncating the answer.
+                raise GenerationError(f"Ollama stream dropped mid-response: {e}") from e
+            raise OllamaConnectionError(model, settings.ollama_base_url) from e
 
-    if not got_any:
-        raise GenerationError("Ollama returned an empty stream")
+        if not got_any:
+            raise GenerationError("Ollama returned an empty stream")
+    finally:
+        _get_ollama_semaphore().release()
 
 
 def generate_llm_response(

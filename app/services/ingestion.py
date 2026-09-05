@@ -15,6 +15,7 @@ Usage:
 """
 
 import csv
+import hashlib
 import html
 import io
 import logging
@@ -1245,6 +1246,23 @@ def insert_documents(
     source_files row (app/routers/ingest.py's upload pipeline), which is
     what lets app.services.search's source_ids filter and the
     enable/disable toggle work per-upload.
+
+    Idempotent per (tenant_id, content_hash): a chunk hashed identically to
+    one already stored for this tenant is silently skipped (ON CONFLICT DO
+    NOTHING against documents' uq_documents_tenant_content_hash), not
+    re-inserted as a duplicate row. content_hash is
+    sha256(tenant_id + "|" + (source_file_id or source_name) + "|" +
+    chunk content) -- the natural key genuinely available at this point
+    (documents has no page_number/chunk_index; see the column's own
+    comment in app.models.database for why those aren't constructible).
+    Scoping the hash to source_file_id-or-source_name (not content alone)
+    is deliberate: identical boilerplate text appearing in two different
+    source documents must insert twice, not collide.
+
+    Returns the number of rows ACTUALLY inserted (post-dedup), not the
+    number of chunks passed in -- a caller re-ingesting an unchanged file
+    should see this drop to 0, not silently report the same count as a
+    fresh ingest.
     """
     if not metadata_list:
         metadata_list = [{} for _ in chunks]
@@ -1252,6 +1270,8 @@ def insert_documents(
     rows = []
     for chunk, embedding, meta in zip(chunks, embeddings, metadata_list):
         doc_id = str(uuid.uuid4())
+        identity_key = f"{tenant_id}|{source_file_id or source_name}|{chunk}"
+        content_hash = hashlib.sha256(identity_key.encode("utf-8")).hexdigest()
         rows.append((
             doc_id,
             tenant_id,
@@ -1267,12 +1287,15 @@ def insert_documents(
             to_vector_literal(embedding),
             json.dumps(meta),
             source_file_id,
+            content_hash,
         ))
 
     insert_query = """
         INSERT INTO documents
-            (id, tenant_id, content, source_name, source_type, domain, ingest_batch_id, language, embedding, metadata, source_file_id)
+            (id, tenant_id, content, source_name, source_type, domain, ingest_batch_id, language, embedding, metadata, source_file_id, content_hash)
         VALUES %s
+        ON CONFLICT (tenant_id, content_hash) DO NOTHING
+        RETURNING id
     """
 
     cursor = conn.conn.cursor() if hasattr(conn, "conn") else conn.cursor()
@@ -1281,9 +1304,14 @@ def insert_documents(
             cursor,
             insert_query,
             rows,
-            template="(%s::uuid, %s, %s, %s, %s, %s, %s, %s, %s::vector, %s::jsonb, %s::uuid)",
+            template="(%s::uuid, %s, %s, %s, %s, %s, %s, %s, %s::vector, %s::jsonb, %s::uuid, %s)",
             page_size=INSERT_PAGE_SIZE,
         )
+        # RETURNING id yields one row per statement actually inserted --
+        # ON CONFLICT DO NOTHING produces no row for a skipped duplicate --
+        # so len(fetchall()) is the true post-dedup insert count, not
+        # len(rows) (which would silently overstate it on a re-ingest).
+        inserted = len(cursor.fetchall())
         conn.commit()
     except Exception:
         # Explicit, because connections are POOLED now (get_db_connection):
@@ -1297,7 +1325,7 @@ def insert_documents(
         raise
     finally:
         cursor.close()
-    return len(rows)
+    return inserted
 
 
 def ingest_text(

@@ -1,0 +1,8 @@
+{
+  "source": "/app/ocr_test/arabic_test.pdf#p0",
+  "engine": "paddleocr",
+  "tier": "heavy",
+  "runs": [],
+  "ocr_available": false,
+  "reason": "resident OCR worker (engine='vl') error: RuntimeError: A dependency error occurred during pipeline creation. Please refer to the installation documentation to ensure all required dependencies are installed."
+}

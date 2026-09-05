@@ -1,0 +1,616 @@
+{
+  "whisper": {
+    "examples": [
+      {
+        "id": "codeswitch_00",
+        "ok": true,
+        "error": null,
+        "seconds": 10.47,
+        "rtf": 1.987,
+        "wer": 0.545,
+        "reference": "واش خاصني نلبس le casque ديال sécurité قبل ما ندخل للورشة؟",
+        "hypothesis": "واش خاصني لبس كاسك ديالا سيكوريتي قبل ما ندخل لورشة"
+      },
+      {
+        "id": "codeswitch_01",
+        "ok": true,
+        "error": null,
+        "seconds": 0.65,
+        "rtf": 0.134,
+        "wer": 0.667,
+        "reference": "شحال من jour خاصني نصيفط la déclaration ديال l'incident؟",
+        "hypothesis": "شحال من جور خاص ننصفت لا تكلاراسيون ديال الانسيدون"
+      },
+      {
+        "id": "codeswitch_02",
+        "ok": true,
+        "error": null,
+        "seconds": 0.63,
+        "rtf": 0.097,
+        "wer": 0.6,
+        "reference": "شنو هي الخطوات ديال la consignation قبل ما نصلحو الماكينة؟",
+        "hypothesis": "شناية الخطوات ديال الكونسيلياسيون قبل ما نصلحو ديال الماشين"
+      },
+      {
+        "id": "codeswitch_03",
+        "ok": true,
+        "error": null,
+        "seconds": 0.63,
+        "rtf": 0.126,
+        "wer": 0.75,
+        "reference": "واش le contrôle d'accès خاصو يكون فاعل ف كل الأبواب ديال المصنع؟",
+        "hypothesis": "واش الكنترول داكسي خاص يكون في جميع الأبواب"
+      },
+      {
+        "id": "codeswitch_04",
+        "ok": true,
+        "error": null,
+        "seconds": 0.59,
+        "rtf": 0.087,
+        "wer": 0.4,
+        "reference": "Est-ce que je dois porter le casque même si خاص ندير غير شي خدمة صغيرة؟",
+        "hypothesis": "Est-ce que je dois porter le casque même si Hasnindir Hishitash se gare ?"
+      },
+      {
+        "id": "codeswitch_05",
+        "ok": true,
+        "error": null,
+        "seconds": 0.67,
+        "rtf": 0.094,
+        "wer": 0.778,
+        "reference": "Est-ce que la loi 27-06 كتخص جميع الشركات الصناعية؟",
+        "hypothesis": "Est-ce que la loi 2706 cadresse jamais les chariquettes scénariennes ?"
+      },
+      {
+        "id": "doda_ary_00",
+        "ok": true,
+        "error": null,
+        "seconds": 0.51,
+        "rtf": 0.189,
+        "wer": 0.667,
+        "reference": "هوما مخبيين شي حاجة انا متيقن",
+        "hypothesis": "هم مخبين شي حاجة أنا امتقن"
+      },
+      {
+        "id": "doda_ary_01",
+        "ok": true,
+        "error": null,
+        "seconds": 0.49,
+        "rtf": 0.164,
+        "wer": 0.8,
+        "reference": "باينة هوما كيحاولو يبقاو مبردين",
+        "hypothesis": "بينهما كيحاولوا يبقوا مبردين"
+      },
+      {
+        "id": "doda_ary_02",
+        "ok": true,
+        "error": null,
+        "seconds": 0.53,
+        "rtf": 0.165,
+        "wer": 0.2,
+        "reference": "لوطيلات مبيناش فيهم مريحين بزاف",
+        "hypothesis": "الوطيلات مبيناش فيهم مريحين بزاف"
+      },
+      {
+        "id": "doda_ary_03",
+        "ok": true,
+        "error": null,
+        "seconds": 0.53,
+        "rtf": 0.196,
+        "wer": 0.8,
+        "reference": "غالبا غيجريو عليه من الخدمة",
+        "hypothesis": "غالباً سيجروا عليهم الخدمة"
+      },
+      {
+        "id": "doda_ary_04",
+        "ok": true,
+        "error": null,
+        "seconds": 0.49,
+        "rtf": 0.241,
+        "wer": 0.667,
+        "reference": "طبعا راه مكتئب",
+        "hypothesis": "طبعا نرى مكتاب"
+      },
+      {
+        "id": "doda_ary_05",
+        "ok": true,
+        "error": null,
+        "seconds": 0.44,
+        "rtf": 0.189,
+        "wer": 0.667,
+        "reference": "كيبان ليا غنمشي",
+        "hypothesis": "كيبليا غنمشي"
+      },
+      {
+        "id": "doda_ary_06",
+        "ok": true,
+        "error": null,
+        "seconds": 0.43,
+        "rtf": 0.216,
+        "wer": 1.0,
+        "reference": "ارا ليا داك الصاك",
+        "hypothesis": "أرى اليدك ساق"
+      },
+      {
+        "id": "doda_ary_07",
+        "ok": true,
+        "error": null,
+        "seconds": 0.38,
+        "rtf": 0.228,
+        "wer": 2.0,
+        "reference": "غنمرض",
+        "hypothesis": "غانم رد"
+      },
+      {
+        "id": "doda_ary_08",
+        "ok": true,
+        "error": null,
+        "seconds": 0.56,
+        "rtf": 0.194,
+        "wer": 0.167,
+        "reference": "كنت ديما عارف انها بغاتنا نموتو",
+        "hypothesis": "كنت ديما عارف انها بغتنا نموتو"
+      },
+      {
+        "id": "doda_ary_09",
+        "ok": true,
+        "error": null,
+        "seconds": 0.54,
+        "rtf": 0.145,
+        "wer": 0.889,
+        "reference": "بغيت نعرف شحال بقى ليا ديال الوقت باش نقرا",
+        "hypothesis": "نريد أن نعرف ما هي بقالية الوقت للقراءة"
+      },
+      {
+        "id": "doda_ary_10",
+        "ok": true,
+        "error": null,
+        "seconds": 0.55,
+        "rtf": 0.173,
+        "wer": 0.857,
+        "reference": "غيكون عندنا امتحان الى هادشي اللي قصدتي",
+        "hypothesis": "سيكون لدينا امتحان لذلك"
+      },
+      {
+        "id": "doda_ary_11",
+        "ok": true,
+        "error": null,
+        "seconds": 0.46,
+        "rtf": 0.189,
+        "wer": 0.25,
+        "reference": "السيمانة الجاية نهار الخميس",
+        "hypothesis": "سيمان الجاية نهار الخميس"
+      },
+      {
+        "id": "doda_ary_12",
+        "ok": true,
+        "error": null,
+        "seconds": 0.49,
+        "rtf": 0.159,
+        "wer": 0.833,
+        "reference": "غنغطيو كاع المواد تال التلات الجاي",
+        "hypothesis": "سنغطي المواد الثلاثة"
+      },
+      {
+        "id": "doda_ary_13",
+        "ok": true,
+        "error": null,
+        "seconds": 0.44,
+        "rtf": 0.218,
+        "wer": 0.75,
+        "reference": "ايوا بدا القراية بكري",
+        "hypothesis": "ابدأ القراءة بكري"
+      },
+      {
+        "id": "doda_ary_14",
+        "ok": true,
+        "error": null,
+        "seconds": 0.61,
+        "rtf": 0.111,
+        "wer": 0.5,
+        "reference": "واخا الى عندي اي سؤال واش نصيفطهم لك في الإيمايل",
+        "hypothesis": "واخا إلا عندي أي سؤال واش نصيفتهم لك في الآي مايل؟"
+      },
+      {
+        "id": "doda_ary_15",
+        "ok": true,
+        "error": null,
+        "seconds": 0.48,
+        "rtf": 0.147,
+        "wer": 0.6,
+        "reference": "ولكن غنجاوب عليهم فأوقات الخدمة",
+        "hypothesis": "ولكن سنجاوب عليهم في أوقات الخدمة"
+      },
+      {
+        "id": "french_00",
+        "ok": true,
+        "error": null,
+        "seconds": 0.54,
+        "rtf": 0.085,
+        "wer": 0.0,
+        "reference": "Quels sont les équipements de protection individuelle obligatoires selon le code du travail ?",
+        "hypothesis": "Quels sont les équipements de protection individuelle obligatoires selon le code du travail ?"
+      },
+      {
+        "id": "french_01",
+        "ok": true,
+        "error": null,
+        "seconds": 0.58,
+        "rtf": 0.106,
+        "wer": 0.231,
+        "reference": "Quelle est la procédure de consignation avant une intervention sur une machine ?",
+        "hypothesis": "Quelle est la procédure de conciliation avant une intervention sur une machine?"
+      },
+      {
+        "id": "french_02",
+        "ok": true,
+        "error": null,
+        "seconds": 0.51,
+        "rtf": 0.099,
+        "wer": 0.167,
+        "reference": "Que dit la loi 27-06 sur la protection des données personnelles ?",
+        "hypothesis": "Que dit la loi 2706 sur la protection de données personnelles ?"
+      },
+      {
+        "id": "french_03",
+        "ok": true,
+        "error": null,
+        "seconds": 0.52,
+        "rtf": 0.111,
+        "wer": 0.0,
+        "reference": "Quelles sont les étapes du contrôle d'accès dans un site industriel ?",
+        "hypothesis": "Quelles sont les étapes du contrôle d'accès dans un site industriel ?"
+      },
+      {
+        "id": "french_04",
+        "ok": true,
+        "error": null,
+        "seconds": 0.52,
+        "rtf": 0.108,
+        "wer": 0.2,
+        "reference": "Comment doit-on déclarer un incident de sécurité au travail ?",
+        "hypothesis": "Comment doit-on déclarer un incident de sécurité au travail?"
+      },
+      {
+        "id": "french_05",
+        "ok": true,
+        "error": null,
+        "seconds": 0.57,
+        "rtf": 0.093,
+        "wer": 0.4,
+        "reference": "Quels standards de l'IMANOR s'appliquent aux équipements de sécurité ?",
+        "hypothesis": "Quel standard de l'émanant s'appliquant aux équipements de sécurité ?"
+      },
+      {
+        "id": "french_06",
+        "ok": true,
+        "error": null,
+        "seconds": 0.57,
+        "rtf": 0.117,
+        "wer": 0.0,
+        "reference": "Qu'est-ce qu'un contrat intelligent dans le contexte de la blockchain ?",
+        "hypothesis": "Qu'est-ce qu'un contrat intelligent dans le contexte de la blockchain ?"
+      },
+      {
+        "id": "french_07",
+        "ok": true,
+        "error": null,
+        "seconds": 0.61,
+        "rtf": 0.086,
+        "wer": 0.273,
+        "reference": "Quelles sont les obligations de conformité AML/CFT pour une entreprise ?",
+        "hypothesis": "Quelles sont les obligations de conformité AML-CFT pour une entreprise?"
+      }
+    ],
+    "mean_wer": 0.555,
+    "mean_rtf": 0.208,
+    "failures": 0
+  },
+  "seamless": {
+    "examples": [
+      {
+        "id": "codeswitch_00",
+        "ok": true,
+        "error": null,
+        "seconds": 17.07,
+        "rtf": 3.239,
+        "wer": 0.455,
+        "reference": "واش خاصني نلبس le casque ديال sécurité قبل ما ندخل للورشة؟",
+        "hypothesis": "واش خاصني نلبس كاسك ديال \"لا سيكوريتي\" قبل ما ندخل الورشة؟"
+      },
+      {
+        "id": "codeswitch_01",
+        "ok": true,
+        "error": null,
+        "seconds": 1.16,
+        "rtf": 0.238,
+        "wer": 0.556,
+        "reference": "شحال من jour خاصني نصيفط la déclaration ديال l'incident؟",
+        "hypothesis": "شحال من جو خاصني نصيفط ديال لا ديكلراسيون ديال لانسيدون"
+      },
+      {
+        "id": "codeswitch_02",
+        "ok": true,
+        "error": null,
+        "seconds": 0.99,
+        "rtf": 0.152,
+        "wer": 0.3,
+        "reference": "شنو هي الخطوات ديال la consignation قبل ما نصلحو الماكينة؟",
+        "hypothesis": "شنو هي الخطوات ديال la conciliation قبل ما نصلحو la machine"
+      },
+      {
+        "id": "codeswitch_03",
+        "ok": true,
+        "error": null,
+        "seconds": 0.99,
+        "rtf": 0.198,
+        "wer": 0.75,
+        "reference": "واش le contrôle d'accès خاصو يكون فاعل ف كل الأبواب ديال المصنع؟",
+        "hypothesis": "واش الكونتروال د الوصول خاصو يكون في جميع الأبواب؟"
+      },
+      {
+        "id": "codeswitch_04",
+        "ok": true,
+        "error": null,
+        "seconds": 1.09,
+        "rtf": 0.162,
+        "wer": 0.467,
+        "reference": "Est-ce que je dois porter le casque même si خاص ندير غير شي خدمة صغيرة؟",
+        "hypothesis": "Est-ce que je dois porter le casque même si je dois faire quelque petite tâche ?"
+      },
+      {
+        "id": "codeswitch_05",
+        "ok": true,
+        "error": null,
+        "seconds": 1.14,
+        "rtf": 0.16,
+        "wer": 1.0,
+        "reference": "Est-ce que la loi 27-06 كتخص جميع الشركات الصناعية؟",
+        "hypothesis": "Est-ce que la loi vingt sept zéro six, comme toutes les entreprises industrielles."
+      },
+      {
+        "id": "doda_ary_00",
+        "ok": true,
+        "error": null,
+        "seconds": 0.75,
+        "rtf": 0.275,
+        "wer": 0.5,
+        "reference": "هوما مخبيين شي حاجة انا متيقن",
+        "hypothesis": "هما مخبين شي حاجة أنا متيقن"
+      },
+      {
+        "id": "doda_ary_01",
+        "ok": true,
+        "error": null,
+        "seconds": 0.79,
+        "rtf": 0.266,
+        "wer": 0.6,
+        "reference": "باينة هوما كيحاولو يبقاو مبردين",
+        "hypothesis": "باينة هما كايحاولو يبقاو باردين"
+      },
+      {
+        "id": "doda_ary_02",
+        "ok": true,
+        "error": null,
+        "seconds": 0.8,
+        "rtf": 0.247,
+        "wer": 0.8,
+        "reference": "لوطيلات مبيناش فيهم مريحين بزاف",
+        "hypothesis": "فالفنادق ما بيناش فيهم مريحين بزاف."
+      },
+      {
+        "id": "doda_ary_03",
+        "ok": true,
+        "error": null,
+        "seconds": 0.72,
+        "rtf": 0.267,
+        "wer": 0.2,
+        "reference": "غالبا غيجريو عليه من الخدمة",
+        "hypothesis": "غالبا غيجريو عليه من الخدمة."
+      },
+      {
+        "id": "doda_ary_04",
+        "ok": true,
+        "error": null,
+        "seconds": 0.65,
+        "rtf": 0.316,
+        "wer": 0.0,
+        "reference": "طبعا راه مكتئب",
+        "hypothesis": "طبعا راه مكتئب"
+      },
+      {
+        "id": "doda_ary_05",
+        "ok": true,
+        "error": null,
+        "seconds": 0.7,
+        "rtf": 0.302,
+        "wer": 0.0,
+        "reference": "كيبان ليا غنمشي",
+        "hypothesis": "كيبان ليا غنمشي"
+      },
+      {
+        "id": "doda_ary_06",
+        "ok": true,
+        "error": null,
+        "seconds": 0.66,
+        "rtf": 0.334,
+        "wer": 1.0,
+        "reference": "ارا ليا داك الصاك",
+        "hypothesis": "أرا ليه دك الشي"
+      },
+      {
+        "id": "doda_ary_07",
+        "ok": true,
+        "error": null,
+        "seconds": 0.6,
+        "rtf": 0.355,
+        "wer": 2.0,
+        "reference": "غنمرض",
+        "hypothesis": "غان مرض."
+      },
+      {
+        "id": "doda_ary_08",
+        "ok": true,
+        "error": null,
+        "seconds": 0.8,
+        "rtf": 0.278,
+        "wer": 0.333,
+        "reference": "كنت ديما عارف انها بغاتنا نموتو",
+        "hypothesis": "كنت دايما عارف بلي بغاتنا نموتو"
+      },
+      {
+        "id": "doda_ary_09",
+        "ok": true,
+        "error": null,
+        "seconds": 0.9,
+        "rtf": 0.24,
+        "wer": 0.111,
+        "reference": "بغيت نعرف شحال بقى ليا ديال الوقت باش نقرا",
+        "hypothesis": "بغيت نعرف شحال بقى ليا ديال الوقت باش نقرأ"
+      },
+      {
+        "id": "doda_ary_10",
+        "ok": true,
+        "error": null,
+        "seconds": 0.81,
+        "rtf": 0.253,
+        "wer": 0.429,
+        "reference": "غيكون عندنا امتحان الى هادشي اللي قصدتي",
+        "hypothesis": "غيكون عندنا امتحان إلى هاد الشي اللي قصدتي"
+      },
+      {
+        "id": "doda_ary_11",
+        "ok": true,
+        "error": null,
+        "seconds": 0.73,
+        "rtf": 0.298,
+        "wer": 1.0,
+        "reference": "السيمانة الجاية نهار الخميس",
+        "hypothesis": "في الأسبوع الجاي نهار الخميس."
+      },
+      {
+        "id": "doda_ary_12",
+        "ok": true,
+        "error": null,
+        "seconds": 0.89,
+        "rtf": 0.289,
+        "wer": 0.5,
+        "reference": "غنغطيو كاع المواد تال التلات الجاي",
+        "hypothesis": "غنغطيو قاع المواد تاع التلات جاي."
+      },
+      {
+        "id": "doda_ary_13",
+        "ok": true,
+        "error": null,
+        "seconds": 0.73,
+        "rtf": 0.363,
+        "wer": 0.75,
+        "reference": "ايوا بدا القراية بكري",
+        "hypothesis": "إيوا بدأ القراية بكري."
+      },
+      {
+        "id": "doda_ary_14",
+        "ok": true,
+        "error": null,
+        "seconds": 1.13,
+        "rtf": 0.203,
+        "wer": 0.5,
+        "reference": "واخا الى عندي اي سؤال واش نصيفطهم لك في الإيمايل",
+        "hypothesis": "واخا، إيلا عندي أي سؤال واش نصيفطهم ليك في الإيميل؟"
+      },
+      {
+        "id": "doda_ary_15",
+        "ok": true,
+        "error": null,
+        "seconds": 0.8,
+        "rtf": 0.243,
+        "wer": 0.6,
+        "reference": "ولكن غنجاوب عليهم فأوقات الخدمة",
+        "hypothesis": "ولكن غنجاوب عليهم في أوقات الخدمة."
+      },
+      {
+        "id": "french_00",
+        "ok": true,
+        "error": null,
+        "seconds": 0.98,
+        "rtf": 0.153,
+        "wer": 0.143,
+        "reference": "Quels sont les équipements de protection individuelle obligatoires selon le code du travail ?",
+        "hypothesis": "Quels sont les équipements de protection individuelle obligatoires selon le code du travail?"
+      },
+      {
+        "id": "french_01",
+        "ok": true,
+        "error": null,
+        "seconds": 0.92,
+        "rtf": 0.17,
+        "wer": 0.077,
+        "reference": "Quelle est la procédure de consignation avant une intervention sur une machine ?",
+        "hypothesis": "Quelle est la procédure de conciliation avant une intervention sur une machine ?"
+      },
+      {
+        "id": "french_02",
+        "ok": true,
+        "error": null,
+        "seconds": 0.98,
+        "rtf": 0.189,
+        "wer": 0.417,
+        "reference": "Que dit la loi 27-06 sur la protection des données personnelles ?",
+        "hypothesis": "Que dit la loi vingt-sept zéro six sur la protection des données personnelles?"
+      },
+      {
+        "id": "french_03",
+        "ok": true,
+        "error": null,
+        "seconds": 0.93,
+        "rtf": 0.199,
+        "wer": 0.0,
+        "reference": "Quelles sont les étapes du contrôle d'accès dans un site industriel ?",
+        "hypothesis": "Quelles sont les étapes du contrôle d'accès dans un site industriel ?"
+      },
+      {
+        "id": "french_04",
+        "ok": true,
+        "error": null,
+        "seconds": 0.86,
+        "rtf": 0.178,
+        "wer": 0.2,
+        "reference": "Comment doit-on déclarer un incident de sécurité au travail ?",
+        "hypothesis": "Comment doit-on déclarer un incident de sécurité au travail?"
+      },
+      {
+        "id": "french_05",
+        "ok": true,
+        "error": null,
+        "seconds": 1.04,
+        "rtf": 0.171,
+        "wer": 0.4,
+        "reference": "Quels standards de l'IMANOR s'appliquent aux équipements de sécurité ?",
+        "hypothesis": "Quels standards de lEmanor sappliquant aux équipements de sécurité?"
+      },
+      {
+        "id": "french_06",
+        "ok": true,
+        "error": null,
+        "seconds": 0.95,
+        "rtf": 0.195,
+        "wer": 0.0,
+        "reference": "Qu'est-ce qu'un contrat intelligent dans le contexte de la blockchain ?",
+        "hypothesis": "Qu'est-ce qu'un contrat intelligent dans le contexte de la blockchain ?"
+      },
+      {
+        "id": "french_07",
+        "ok": true,
+        "error": null,
+        "seconds": 1.05,
+        "rtf": 0.148,
+        "wer": 0.091,
+        "reference": "Quelles sont les obligations de conformité AML/CFT pour une entreprise ?",
+        "hypothesis": "Quelles sont les obligations de conformité AML-CFT pour une entreprise ?"
+      }
+    ],
+    "mean_wer": 0.473,
+    "mean_rtf": 0.336,
+    "failures": 0
+  }
+}

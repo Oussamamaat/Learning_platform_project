@@ -113,6 +113,21 @@ def init_db():
         # build; it cannot run inside a transaction block, so run these by
         # hand rather than adding them to this function.
         #
+        # Same again for documents.content_hash (added 2026-09-04, the
+        # ingestion idempotency key -- POST_LEASE_MVP_SPRINT_PLAN.md item
+        # 4 / app.services.ingestion.insert_documents): the column, THEN
+        # the unique index (CONCURRENTLY can't run inside the transaction
+        # that would validate a same-statement ADD CONSTRAINT ... UNIQUE),
+        # THEN backfill is deliberately skipped -- existing rows keep
+        # content_hash NULL forever, which is fine (NULLs are exempt from
+        # the uniqueness check) and correct (retroactively hashing rows
+        # ingested before this existed would claim a correctness guarantee
+        # for insert paths that never actually enforced one):
+        #
+        #   ALTER TABLE documents ADD COLUMN IF NOT EXISTS content_hash VARCHAR(64);
+        #   CREATE UNIQUE INDEX CONCURRENTLY IF NOT EXISTS uq_documents_tenant_content_hash
+        #     ON documents (tenant_id, content_hash);
+        #
         # A fresh database never hits any of this -- create_all builds the
         # full current model shape correctly the first time.
 

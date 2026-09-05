@@ -180,8 +180,19 @@ def _resolve_upload_domain(text_content: str, tenant_id: str) -> Optional[str]:
         candidates = search_similar_chunks(query=probe, tenant_id=tenant_id, top_k=10, domain=None)
         voted = vote_domain(candidates)
         return voted or get_settings().default_domain
-    except Exception:
-        logger.exception("domain vote failed for an uploaded file; falling back to tenant default")
+    except Exception as exc:
+        # Same swallowed-exception shape as app.services.routing.
+        # resolve_domain's tier-2 vote (2026-09-04 lease finding) --
+        # logging the exception type here too, for the same reason: a
+        # generic message alone doesn't say WHAT failed. Deliberately NOT
+        # given a routing_degraded-style signal like chat.py's: this path
+        # is cosmetic-only by design (badge display; retrieval never
+        # filters an upload by domain, see this function's docstring), so
+        # there is no response field this should surface through.
+        logger.exception(
+            "domain vote failed for an uploaded file (exc_type=%s); falling back to tenant default",
+            type(exc).__name__,
+        )
         return get_settings().default_domain
 
 

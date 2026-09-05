@@ -202,9 +202,22 @@ def resolve_domain(
             if voted:
                 return voted, "retrieval"
             return settings.default_domain, "no_match"
-        except Exception:
+        except Exception as exc:
+            # Log the exception TYPE and the query's script class, not just
+            # a generic message: this branch is indistinguishable from the
+            # disk-backend skip in its return value ("tenant_default"), and
+            # a 2026-09-04 live failure on a Darija query was lost entirely
+            # because logger.exception only ever reached stderr with no
+            # persisted handler -- the traceback that would have named the
+            # real cause is gone. When backend == "pgvector" (the only
+            # branch that reaches this except), "tenant_default" is
+            # unambiguously this exception path -- see
+            # app.routers.chat._resolve_turn_context's routing_degraded.
+            arabic_chars = sum(1 for c in query if "؀" <= c <= "ۿ")
+            script = "arabic" if arabic_chars > len(query) / 2 else "latin_or_mixed"
             logger.exception(
-                "tier-2 domain routing failed for tenant=%s; falling back to tenant default",
-                tenant_id,
+                "tier-2 domain routing failed for tenant=%s (exc_type=%s, query_script=%s); "
+                "falling back to tenant default",
+                tenant_id, type(exc).__name__, script,
             )
     return settings.default_domain, "tenant_default"
