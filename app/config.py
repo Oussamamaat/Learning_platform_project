@@ -118,6 +118,36 @@ class Settings(BaseSettings):
     similarity_threshold: float = 0.4
     domain_vote_threshold: float = 0.4
 
+    # Web-search fallback (app/services/web_search.py): "none" | "tavily".
+    # "none" is a no-op, byte-identical to pre-existing behaviour -- when
+    # chat.py's refusal gate finds no tenant context, it still refuses
+    # deterministically. "tavily" opts a tenant INTO answering out-of-corpus
+    # questions from a live web search instead of refusing, clearly marked
+    # as not from the tenant's own documents (see
+    # docs/architecture/rectified/adr/0010-web-search-fallback.md for why
+    # this is opt-in and why the answer is generated through a dedicated
+    # prompt rather than app.services.llm.generate_llm_response's citation
+    # path). Needs tavily_api_key set; falls back to "none" and logs a
+    # warning if the engine is selected without one (get_web_search_engine).
+    web_search_engine: str = "none"
+    tavily_api_key: Optional[str] = None
+    web_search_max_results: int = 3
+    web_search_timeout_seconds: float = 12.0
+    # Deliberately NOT ollama_model/ollama_model_fr (the fine-tuned tutors).
+    # Live-tested 2026-09-06 (scratchpad, not committed): asked to answer a
+    # plainly-out-of-domain question from a web snippet that stated the
+    # answer verbatim, iblog-tutor-fr FALSELY refused ("je n'ai pas cette
+    # information") in 4 of 5 runs despite an explicit system-prompt
+    # instruction to answer from the snippet -- reproduces the same
+    # refusal-register weld llm.py's SYSTEM_PROMPT_TEMPLATE docstring
+    # already documents for the ordinary refusal path, just surfacing here
+    # as a false refusal instead of a wrong refusal identity. gemma2:9b
+    # (already pulled locally, no fine-tune) answered correctly 3/3 in
+    # French and produced correct Arabic-script Darija with proper
+    # attribution on the same prompts -- see
+    # docs/architecture/rectified/adr/0010-web-search-fallback.md.
+    web_search_fallback_model: str = "gemma2:9b"
+
     # OCR: "none" | "tesseract" | "paddleocr" | "unlimited_ocr".
     #
     # "paddleocr" since 2026-08-18: scripts/verify_ocr_arabic.py now passes
@@ -272,7 +302,31 @@ class Settings(BaseSettings):
     # live mic capture, POST_LEASE_MVP_SPRINT_PLAN.md Phase B.
     vad_debug_log: bool = False
 
-    tts_engine: str = "none"  # "none" | "piper"
+    # Whether a voice session pins every turn to the first turn's detected
+    # response language (app/routers/voice.py's `pinned_language`). Default
+    # OFF: this pin was added to avoid the ~30s VRAM swap a mid-session
+    # French<->Darija flip costs when only one 9B tutor can be resident at
+    # once, but the 2026-09-04 lease's own Phase 1 benchmark measured that
+    # switch cost at near-zero (2.1-3.4s) when BOTH tutors are resident --
+    # which is this project's actual target deployment (docs/architecture/
+    # cloud-scaling-plan.md). Pinning ON is the wrong default for that
+    # target: it forces every utterance's STT language_hint AND
+    # resolve_turn's explicit_language to turn 1's language, making
+    # in-session language switching structurally impossible (confirmed
+    # 2026-09-06, not a hypothesis -- see ADR 0005's amendment). Flip to
+    # True only for a single-tutor-VRAM deployment where the swap cost is
+    # real and worth avoiding.
+    voice_language_pinning: bool = False
+
+    # When True, a voice session skips resolve_turn/RAG/the LLM entirely:
+    # transcript -> detect_query_language -> a canned reply in the detected
+    # language -> TTS. Lets the STT/VAD/TTS/WebSocket pipeline be exercised
+    # against a live browser mic with ZERO LLM VRAM loaded -- see
+    # POST_LEASE_MVP_SPRINT_PLAN.md's local-verification step. Never set
+    # True in a real tenant deployment; this is a diagnostic mode only.
+    voice_echo_mode: bool = False
+
+    tts_engine: str = "none"  # "none" | "piper" | "xtts_darija"
     # Piper voice models (ONNX, downloaded separately -- see
     # app.services.tts.PiperEngine's docstring for why Piper was chosen
     # over XTTS-v2/MMS-TTS: CPU-only, ~zero VRAM contention with the
@@ -289,6 +343,34 @@ class Settings(BaseSettings):
     # pip package and must be fetched separately per
     # app.services.tts.PiperEngine's docstring.
     tts_voice_dir: str = "./data/tts_voices"
+
+    # --- tts_engine="xtts_darija" only (app.services.tts.XttsDarijaEngine) ---
+    # `medmac01/darija_xtt_2.0`, an XTTS-v2 fine-tune on Moroccan Darija --
+    # the best-sounding Darija voice found (ADR 0006), and the reason these
+    # settings exist. NOT the default and must not become it without a
+    # licensing decision: the checkpoint declares no license of its own and
+    # so inherits XTTS-v2's CPML (non-commercial) -- the same wall that
+    # already rejected XTTS-v2 for this product once. Piper stays the
+    # commercially-safe default; this is opt-in per deployment.
+    #
+    # Dedicated venv for the same reason settings.stt_venv_python exists:
+    # coqui-tts pins transformers<5 and pulls in torchcodec, which must not
+    # be forced on .gguf_venv.
+    tts_xtts_venv_python: str = "./.tts_eval_venv/Scripts/python.exe"
+    # Directory holding config.json, vocab.json, model.pth and
+    # speaker_ref.wav (XTTS is a voice-CLONING model -- it needs a 4-5s
+    # reference clip, not a fixed built-in voice; the checkpoint ships one).
+    tts_xtts_model_dir: str = "./data/tts_eval_cache/darija_xtts"
+    tts_xtts_speaker_ref: str = ""  # defaults to <model_dir>/speaker_ref.wav
+    # Windows only: `bin` of an FFmpeg SHARED build, needed because
+    # coqui-tts imports torchcodec. Empty on Linux, where the Docker image
+    # installs FFmpeg via apt and the normal loader path finds it.
+    tts_xtts_ffmpeg_bin: str = ""
+    # Seconds of no synthesis before the resident TTS worker releases its
+    # VRAM -- same idle-release contract as speech_worker_idle_release_seconds.
+    # Longer than STT's 120s because reloading a 5.6GB checkpoint is far more
+    # expensive than reloading whisper.
+    tts_worker_idle_release_seconds: float = 300.0
 
     # Diagram generation (app/services/diagrams.py). Kill-switch first: a
     # chat turn falling back to prose on a stuck Ollama/GPU is much less

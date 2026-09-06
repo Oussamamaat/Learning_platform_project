@@ -129,10 +129,35 @@ class ChatRequest(BaseModel):
     )
 
 
+class ExternalSource(BaseModel):
+    """One web result behind a web-search-fallback answer
+    (app.services.web_search.WebResult). Kept out of `sources` deliberately
+    -- that field means "this came from the tenant's own documents"
+    everywhere else in the platform, and conflating the two would silently
+    misrepresent a web-fallback answer as tenant-grounded."""
+
+    title: str
+    url: str
+
+
 class ChatResponse(BaseModel):
     response: str = Field(..., description="AI assistant response")
     session_id: str = Field(..., description="Conversation session ID")
     sources: list[str] = Field(default_factory=list, description="Retrieved document sources")
+    answered_from_web: bool = Field(
+        False,
+        description=(
+            "True when tenant retrieval found nothing and this answer came from a live "
+            "web search instead (app.services.web_search, opt-in via settings."
+            "web_search_engine) rather than the deterministic refusal. `sources` is always "
+            "empty in this case -- see `external_sources` for what backs this answer, and "
+            "surface both distinctly: this is NOT grounded in the tenant's own documents."
+        ),
+    )
+    external_sources: list[ExternalSource] = Field(
+        default_factory=list,
+        description="Web results behind a web-search-fallback answer. Empty unless answered_from_web.",
+    )
     tokens_used: int = Field(0, description="Total tokens consumed")
     domain: str = Field(..., description="The domain this turn was actually answered in")
     domain_source: str = Field(

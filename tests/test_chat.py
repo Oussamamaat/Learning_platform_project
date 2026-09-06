@@ -184,6 +184,82 @@ def test_out_of_corpus_query_refuses_even_when_context_is_nonempty():
         assert response.response  # a real refusal, not an empty string
 
 
+def test_web_search_disabled_by_default_still_refuses():
+    """settings.web_search_engine defaults to 'none' -- get_web_search_engine()
+    returns NullWebSearchEngine, whose search() always returns [], so the
+    fallback block in chat.py is a no-op and the ORIGINAL refusal fires,
+    Ollama untouched. This is the byte-identical-by-default guarantee the
+    feature was built under."""
+    with patch("app.routers.chat._retrieve_context", side_effect=_empty_context), \
+         patch("app.services.llm.urllib.request.urlopen", side_effect=_fails_if_called):
+        response = chat(ChatRequest(message="How do I bake sourdough bread?"))
+        assert response.answered_from_web is False
+        assert response.external_sources == []
+        assert response.sources == []
+
+
+def test_web_search_fallback_answers_when_configured_and_results_found():
+    import json
+
+    from app.services.web_search import WebResult
+
+    fake_results = [WebResult(title="Sourdough Guide", url="https://example.com/sourdough", snippet="Mix flour and water.")]
+
+    class FakeOllamaResponse:
+        def __init__(self, body):
+            self._body = body
+
+        def read(self):
+            return json.dumps(self._body).encode("utf-8")
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+    fake_ollama = FakeOllamaResponse(
+        {"message": {"role": "assistant", "content": "Pour faire du pain au levain, melangez farine et eau."}}
+    )
+
+    class FakeEngine:
+        def search(self, query, *, max_results):
+            return fake_results
+
+    with patch("app.routers.chat._retrieve_context", side_effect=_empty_context), \
+         patch("app.routers.chat.get_web_search_engine", return_value=FakeEngine()), \
+         patch("app.services.llm.urllib.request.urlopen", return_value=fake_ollama):
+        response = chat(ChatRequest(message="How do I bake sourdough bread?"))
+
+    assert response.answered_from_web is True
+    assert response.sources == []  # never conflated with tenant-grounded sources
+    assert len(response.external_sources) == 1
+    assert response.external_sources[0].title == "Sourdough Guide"
+    assert response.external_sources[0].url == "https://example.com/sourdough"
+    assert "pain" in response.response
+    # The disclaimer is prepended in code, not left to the model -- see
+    # app.services.llm.generate_web_fallback_response's docstring.
+    assert response.response.startswith("[")
+
+
+def test_web_search_fallback_still_refuses_when_engine_finds_nothing():
+    """A configured engine that legitimately finds nothing (not a network
+    failure -- just no results) must fall through to the same deterministic
+    refusal, not a blank/broken answer."""
+    class EmptyEngine:
+        def search(self, query, *, max_results):
+            return []
+
+    with patch("app.routers.chat._retrieve_context", side_effect=_empty_context), \
+         patch("app.routers.chat.get_web_search_engine", return_value=EmptyEngine()), \
+         patch("app.services.llm.urllib.request.urlopen", side_effect=_fails_if_called):
+        response = chat(ChatRequest(message="How do I bake sourdough bread?"))
+
+    assert response.answered_from_web is False
+    assert response.external_sources == []
+    assert response.response  # still a real refusal, not empty
+
+
 def test_in_corpus_query_with_nonempty_context_is_unaffected_by_the_ood_gate():
     """Guards the other direction: a normally-routed query ("retrieval")
     must still reach the model. The OOD gate must not become a blanket

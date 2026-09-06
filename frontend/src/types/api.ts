@@ -103,6 +103,14 @@ export interface ChatResponse {
   // is still grounded in the built-in corpus, but any uploaded sources are
   // silently absent from it until Postgres recovers.
   degraded: boolean;
+  // True when tenant retrieval found nothing and this answer came from a
+  // live web search instead (opt-in server-side, app.services.web_search)
+  // rather than the deterministic refusal. `sources` is always [] in this
+  // case -- see `external_sources` for what backs this answer instead, and
+  // render it distinctly: this is NOT grounded in the tenant's own
+  // documents, unlike every other populated `sources` in this app.
+  answered_from_web: boolean;
+  external_sources: { title: string; url: string }[];
   // Set when the message's own text triggered diagram intent detection --
   // there is no separate diagram endpoint. `response` is the diagram's own
   // caption in that case. Undefined for every ordinary chat turn.

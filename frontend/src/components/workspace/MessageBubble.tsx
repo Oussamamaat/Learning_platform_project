@@ -1,6 +1,6 @@
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { CircleAlert, FileText, Languages, User } from "lucide-react";
+import { CircleAlert, FileText, Globe, Languages, User } from "lucide-react";
 import type { ChatMessage } from "../../hooks/useChatSessions";
 import { useApp } from "../../context/AppContext";
 import QuizCard from "./QuizCard";
@@ -57,6 +57,41 @@ function SourcesRow({ sources }: { sources: string[] }) {
           <span className="max-w-52 truncate">{source}</span>
         </span>
       ))}
+    </div>
+  );
+}
+
+// Deliberately distinct styling from SourcesRow (amber, not the neutral
+// surface-2 tenant-source chips) -- this answer is NOT grounded in the
+// tenant's own documents (ChatResponse.answered_from_web), and looking
+// identical to a normal grounded answer is exactly the misrepresentation
+// ADR 0010 built the server-side split (`sources` vs `external_sources`)
+// to avoid. Rendered instead of SourcesRow, never alongside it -- the two
+// are mutually exclusive server-side.
+function ExternalSourcesRow({ sources }: { sources: { title: string; url: string }[] }) {
+  return (
+    <div className="mt-2.5 border-t border-edge pt-2.5">
+      <div className="mb-1.5 flex items-center gap-1.5 text-[11px] font-medium text-amber-600 dark:text-amber-400">
+        <Globe className="h-3 w-3 shrink-0" />
+        <span>Answered from a web search, not your documents</span>
+      </div>
+      {sources.length > 0 && (
+        <div className="flex flex-wrap gap-1.5">
+          {sources.map((source, i) => (
+            <a
+              key={`${source.url}-${i}`}
+              href={source.url}
+              target="_blank"
+              rel="noreferrer noopener"
+              title={source.url}
+              className="inline-flex max-w-full items-center gap-1.5 rounded-full border border-amber-500/30 bg-amber-500/10 px-2.5 py-1 text-[10.5px] text-amber-700 hover:bg-amber-500/20 dark:text-amber-300"
+            >
+              <Globe className="h-3 w-3 shrink-0" />
+              <span className="max-w-52 truncate">{source.title || source.url}</span>
+            </a>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -123,8 +158,11 @@ export default function MessageBubble({ message }: { message: ChatMessage }) {
           <div dir={dir} className="min-w-0">
             <AssistantBody message={message} />
           </div>
-          {message.sources && message.sources.length > 0 && (
-            <SourcesRow sources={message.sources} />
+          {message.answeredFromWeb ? (
+            <ExternalSourcesRow sources={message.externalSources ?? []} />
+          ) : (
+            message.sources &&
+            message.sources.length > 0 && <SourcesRow sources={message.sources} />
           )}
           {message.crossLanguage && <CrossLanguageNote />}
         </div>

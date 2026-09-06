@@ -386,6 +386,139 @@ def deterministic_refusal(domain: str, language: str = "darija") -> str:
     return REFUSAL_TEMPLATE_DARIJA.format(domain=domain_label)
 
 
+# Web-search-fallback prompts -- app.services.web_search's opt-in answer to
+# "the tenant corpus has nothing" besides deterministic_refusal(). Separate
+# constants, not a variant of SYSTEM_PROMPT_TEMPLATE, on purpose:
+#
+# 1. SYSTEM_PROMPT_TEMPLATE / _FR are under test_generation_gates.py's
+#    byte-identical train/serve parity assertion -- this must never touch
+#    them.
+# 2. The instructions themselves are different in kind, not just content.
+#    SYSTEM_PROMPT_TEMPLATE tells the model to copy legal references
+#    character-for-character because they DO appear verbatim in tenant
+#    context; a web snippet has no such reference to copy, and instructing
+#    the model to invent one would recreate exactly the citation-fabrication
+#    failure mode this platform's fine-tune already has a documented history
+#    of (see docs/architecture/rectified -- the untouched base model refuses
+#    "not in the text" where the adapter fabricates a law number). So this
+#    template explicitly forbids article/law-style citation and asks for
+#    plain "according to <title>" attribution instead.
+# 3. generate_web_fallback_response() below deliberately skips
+#    extract_citations/inject_citations -- those pattern-match tenant legal
+#    citation shapes (app/services/citations.py) that cannot appear in web
+#    content, so running them here would either do nothing or, worse,
+#    "inject" a phantom citation into prose that never claimed one.
+#
+# The disclaimer that this answer is NOT from the tenant's own documents is
+# NOT left to the model to remember to say -- generate_web_fallback_response
+# prepends it in code, the same "don't trust the model for a hard invariant"
+# reasoning deterministic_refusal already applies to refusals.
+WEB_FALLBACK_PROMPT_TEMPLATE_FR = (
+    "Tu es un assistant qui repond a une question en te basant UNIQUEMENT sur "
+    "les extraits de recherche web fournis ci-dessous -- PAS sur les documents "
+    "internes du client, auxquels tu n'as pas acces ici. Ce n'est pas une "
+    "question de {domain} couverte par la documentation interne.\n"
+    "Reponds en francais, de maniere claire et concise, en te basant "
+    "strictement sur les extraits fournis. N'invente jamais un fait absent "
+    "des extraits.\n"
+    "N'utilise JAMAIS de citation au format juridique (pas de \"Article X\", "
+    "pas de numero de loi) -- ces extraits ne sont pas des textes "
+    "reglementaires. Pour attribuer une information, nomme le VRAI nom du "
+    "site ou du document indique entre crochets dans les extraits (par "
+    "exemple \"selon Service-Public.fr\" si c'est le nom reel de la source) "
+    "-- n'ecris jamais litteralement le mot \"titre\", c'est un exemple.\n"
+    "Si les extraits ne repondent pas non plus a la question, dis-le "
+    "clairement plutot que d'inventer une reponse.\n\n"
+    "EXTRAITS DE RECHERCHE WEB :\n"
+    "{context}"
+)
+
+WEB_FALLBACK_PROMPT_TEMPLATE_DARIJA = (
+    "You are an assistant answering a question based ONLY on the web search "
+    "snippets provided below -- NOT on the tenant's internal documents, which "
+    "you do not have access to here. This is not a {domain} question covered "
+    "by the internal documentation.\n"
+    "Answer in Moroccan Darija, written in Arabic script. Keep technical "
+    "vocabulary in French, Latin letters, exactly as a Moroccan professional "
+    "says it, same as always. Base your answer strictly on the snippets "
+    "provided. Never invent a fact absent from them.\n"
+    "NEVER use a legal-citation format (no \"Article X\", no law number) -- "
+    "these snippets are not regulatory text. To attribute information, name "
+    "the REAL site or document name shown in brackets in the snippets (e.g. "
+    "\"according to Le Monde\" if that is the actual source name) -- never "
+    "write the literal word \"title\", it is only an example.\n"
+    "If the snippets also don't answer the question, say so plainly instead "
+    "of inventing an answer.\n\n"
+    "WEB SEARCH SNIPPETS:\n"
+    "{context}"
+)
+
+WEB_FALLBACK_DISCLAIMER_FR = (
+    "[Reponse basee sur une recherche web -- pas sur vos documents internes.] "
+)
+WEB_FALLBACK_DISCLAIMER_DARIJA = (
+    "[هاد الجواب مبني على بحث فالانترنت، ماشي على الوثائق ديالكم.] "
+)
+
+
+def _format_web_context(results) -> str:
+    """`results`: list[app.services.web_search.WebResult]. Numbered so the
+    model's "according to <title>" attribution has something concrete to
+    reference; the URL is included for the disclaimer's benefit, not because
+    the model is expected to reproduce it."""
+    blocks = []
+    for i, r in enumerate(results, start=1):
+        blocks.append(f"[{i}] {r.title} ({r.url})\n{r.snippet}")
+    return "\n\n".join(blocks)
+
+
+def generate_web_fallback_response(
+    query: str,
+    web_results,
+    domain: str = "industrial",
+    language: Optional[str] = None,
+    history: Optional[list[dict]] = None,
+) -> str:
+    """Answer from live web-search results instead of tenant context --
+    app.services.web_search's fallback for chat.py's refusal gate.
+
+    `web_results`: list[app.services.web_search.WebResult], already fetched
+    by the caller (this function makes no network call of its own).
+
+    Deliberately NOT a codepath through generate_llm_response: no
+    extract_citations/inject_citations (wrong shape for web content, see
+    WEB_FALLBACK_PROMPT_TEMPLATE_FR's docstring above), and the disclaimer
+    is prepended here in code rather than trusted to the model.
+    """
+    settings = get_settings()
+    language = language or detect_query_language(query)
+    web_context = _format_web_context(web_results)
+
+    if language == "fr":
+        domain_label = DOMAIN_LABELS_FR.get(domain, DOMAIN_LABELS.get(domain, domain))
+        system_prompt = WEB_FALLBACK_PROMPT_TEMPLATE_FR.format(domain=domain_label, context=web_context)
+        disclaimer = WEB_FALLBACK_DISCLAIMER_FR
+    else:
+        domain_label = DOMAIN_LABELS_AR.get(domain, DOMAIN_LABELS.get(domain, domain))
+        system_prompt = WEB_FALLBACK_PROMPT_TEMPLATE_DARIJA.format(domain=domain_label, context=web_context)
+        disclaimer = WEB_FALLBACK_DISCLAIMER_DARIJA
+
+    # settings.web_search_fallback_model, NOT ollama_model_fr/ollama_model
+    # -- see that setting's own comment for the live-reproduced false-
+    # refusal defect that rules out the fine-tuned tutors here.
+    model = settings.web_search_fallback_model
+    messages = [{"role": "system", "content": system_prompt}]
+    messages.extend(history or [])
+    messages.append({"role": "user", "content": query})
+
+    logger.info(
+        "Calling Ollama (web fallback) model=%s domain=%s language=%s results=%d",
+        model, domain, language, len(web_results),
+    )
+    result = _call_ollama_chat(model, messages)
+    return disclaimer + result
+
+
 # Darija written in Latin letters. These must route to the Darija prompt, not
 # the French one — the user wants an Arabic-script answer, not French.
 _ARABIZI_MARKERS = (

@@ -4,7 +4,7 @@ from typing import Optional
 from fastapi import APIRouter
 from fastapi.responses import JSONResponse
 from app.config import get_settings, get_tenant_id, get_user_id
-from app.models.schemas import ChatRequest, ChatResponse
+from app.models.schemas import ChatRequest, ChatResponse, ExternalSource
 from app.services import history
 # Aliased -- chat() already uses the name `sources` locally for the list
 # of retrieved source-document names; importing the module under that
@@ -18,11 +18,13 @@ from app.services.search import build_rag_context
 from app.services.learner_state import get_learner_state
 from app.services.llm import (
     generate_llm_response,
+    generate_web_fallback_response,
     deterministic_refusal,
     condense_retrieval_query,
     is_anaphoric_followup,
     UI_LANG_TO_MODEL_LANG,
 )
+from app.services.web_search import get_web_search_engine
 from app.errors import AppError
 
 logger = logging.getLogger(__name__)
@@ -462,6 +464,66 @@ def chat(request: ChatRequest):
     #     only place that sees the whole corpus at once and can say "none of
     #     this is about that", so it is the honest place to refuse from.
     if domain_source == "no_match" or not context.strip():
+        # 3b. Web-search fallback (app.services.web_search), opt-in via
+        # settings.web_search_engine -- "none" (default) makes get_
+        # web_search_engine() return NullWebSearchEngine, whose search()
+        # always returns [], so this block is a no-op and behaviour is
+        # byte-identical to before this existed. Tried BEFORE refusing,
+        # never instead of refusing outright: a flaky/unconfigured engine
+        # must degrade to the ORIGINAL deterministic refusal, not a 500 or
+        # a silently worse answer.
+        #
+        # Not run through generate_llm_response / persisted the same way a
+        # grounded answer is -- see app.services.llm.generate_web_fallback_
+        # response's docstring for why a dedicated prompt+function exists,
+        # and docs/architecture/rectified/adr/0010-web-search-fallback.md
+        # for why this history turn carries no `sources` and pins nothing:
+        # there is no tenant context here to pin, and `sources` means
+        # "from the tenant's own documents" everywhere else this platform
+        # reads it (see ExternalSource's docstring in app/models/schemas.py).
+        web_results = get_web_search_engine().search(
+            request.message, max_results=get_settings().web_search_max_results
+        )
+        if web_results:
+            try:
+                web_reply = generate_web_fallback_response(
+                    query=request.message,
+                    web_results=web_results,
+                    domain=domain,
+                    language=response_lang,
+                )
+            except AppError as e:
+                logger.error("LLM error in web-fallback generation: %s", e.code)
+                return JSONResponse(
+                    status_code=e.status_code,
+                    content={"error": {"code": e.code, "message": e.message}},
+                )
+            history.append_exchange(
+                session_id,
+                tenant_id=tenant_id,
+                user_id=user_id,
+                domain=domain,
+                language=query_lang,
+                segment_id=segment_id,
+                user_content=request.message,
+                assistant_content=web_reply,
+                sources=[],
+                response_lang_override=lang.override_to_persist,
+                override_query_lang=lang.override_query_lang_to_persist,
+            )
+            return ChatResponse(
+                response=web_reply,
+                session_id=session_id,
+                sources=[],
+                tokens_used=0,
+                domain=domain,
+                domain_source=domain_source,
+                language=response_lang,
+                degraded=degraded,
+                answered_from_web=True,
+                external_sources=[ExternalSource(title=r.title, url=r.url) for r in web_results],
+            )
+
         return ChatResponse(
             response=deterministic_refusal(domain, response_lang),
             session_id=session_id,

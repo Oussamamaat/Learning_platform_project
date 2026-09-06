@@ -15,6 +15,12 @@ export interface ChatMessage {
   error?: boolean;
   crossLanguage?: boolean;
   priorQuestions?: string[];
+  // True when tenant retrieval found nothing and this answer came from a
+  // live web search instead of a refusal (ChatResponse.answered_from_web) --
+  // `sources` is always [] in that case; render `externalSources` instead,
+  // and distinctly, since this is NOT grounded in the tenant's own documents.
+  answeredFromWeb?: boolean;
+  externalSources?: { title: string; url: string }[];
 }
 
 export interface ChatSession {
