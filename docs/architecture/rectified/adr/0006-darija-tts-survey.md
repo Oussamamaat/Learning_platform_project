@@ -1,8 +1,10 @@
 # ADR 0006: Darija TTS Survey (Research Only, No Training This Session)
 
-**Status:** Survey complete; no candidate qualifies for immediate use; fine-tune plan identified
-pending eval criteria before any GPU spend
-**Date:** 2026-09-04
+**Status:** Survey complete 2026-09-04; two of its findings corrected and one new candidate added
+2026-09-06 (`HAMMALE/speecht5-darija` was wrong-listed as disqualified; Habibi-TTS's MAR checkpoint
+is more cleanly licensed than originally recorded). No candidate is wired into production. See
+**AMENDED (2026-09-06)** below.
+**Date:** 2026-09-04; amended 2026-09-06
 **Depends on:** `app/services/tts.py` (already-settled licensing constraints),
 `docs/architecture/voice-assistant.md`, `POST_LEASE_MVP_SPRINT_PLAN.md` item 3
 
@@ -97,3 +99,68 @@ The survey itself was free and local (web research, no GPU). The fine-tune plan 
 gated on GPU access resuming — nothing here commits lease time; Phase B executes it only if items
 1–2's evidence and this ADR's eval criteria are both in place first, per the sprint's own
 sequencing decision.
+
+## AMENDED (2026-09-06)
+
+Re-checked every disqualified/ranked candidate's actual current HF listing (not re-trusting the
+2026-09-04 survey's snapshot) before doing any implementation work. Two corrections:
+
+- **`HAMMALE/speecht5-darija` was wrong-listed as disqualified** ("no license, no complete/attached
+  model artifact"). As of 2026-09-06 it declares **MIT**, ships safetensors (SpeechT5, ~0.1B),
+  trained on `atlasia/DODa-audio-dataset`, and has a live demo Space
+  (https://huggingface.co/spaces/HAMMALE/speecht5-darija). **However it expects Darija in Latin
+  script (Arabizi)**, which conflicts directly with this project's Arabic-script-only invariant
+  (`CLAUDE.md`, `app/services/generate_training_data.py:1677`) — untested whether it accepts
+  Arabic-script input at all. This is the actual blocker, not licensing.
+- **Habibi-TTS's MAR checkpoint is Apache-2.0, not a CC-BY-NC-SA-restricted variant.** The original
+  survey ranked it #2 as a "warm-start" fine-tune target under an implied non-commercial base. The
+  restriction is real but narrower than recorded: `SWivid/Habibi-TTS`'s model card states the
+  unified/SAU/UAE checkpoints are CC-BY-NC-SA-4.0 (restricted by SADA/Mixat), while **ALG, EGY,
+  IRQ, MAR, and MSA are Apache-2.0**. MAR (Moroccan) is exactly the checkpoint this project needs —
+  demo at https://huggingface.co/spaces/chenxie95/Habibi-TTS (select dialect MAR). Worth testing
+  DIRECTLY (bucket a) before assuming a fine-tune (bucket b) is required, given the clean license.
+
+**A third candidate was evaluated at the user's request and explicitly rejected for production,
+kept for reference only:** `medmac01/darija_xtt_2.0` (an XTTS-v2 fine-tune, the model behind
+https://huggingface.co/spaces/medmac01/Darija-Arabic-TTS — input is Arabic script, which does fit
+the project's invariant, and outputs via 4-5s speaker-reference voice cloning rather than a fixed
+voice). Confirmed via the HF API: the checkpoint declares **no license of its own** (no `license`
+field, no README), so absent an override it inherits its base's — Coqui XTTS-v2, **CPML,
+non-commercial** — the exact license wall `app/services/tts.py`'s docstring already named as the
+reason XTTS-v2 was rejected once. A fine-tune does not launder a base model's license. Evaluated
+via `scripts/eval_darija_xtts.py` (a script, deliberately NOT a `TtsEngine` — see that file's
+docstring for why it is not wired into `_ENGINES` or `settings.tts_engine`) purely for a quality
+comparison against Piper on the same sentences; **not eligible to ship** regardless of how it
+sounds.
+
+**Ran successfully 2026-09-06** on the laptop's RTX 4060 (8GB), against `eval_tts.py`'s three
+existing Darija sentences, output in `scripts/eval_darija_xtts_*.wav` for listening:
+
+| sentence | synthesis time | RTF |
+|---|---|---|
+| 0 | 1.25s | 0.691 |
+| 1 | 2.27s | 0.389 |
+| 2 | 3.27s | 0.427 |
+
+Real-time capable but roughly **8x slower than Piper** (Piper measured 0.16–0.38s per sentence on
+CPU in the same session), and it needs a GPU where Piper needs none — a material cost for a voice
+pipeline whose whole latency budget assumes near-free TTS. That is a second, independent reason
+beyond licensing not to treat this as a drop-in, and it applies equally to any XTTS-architecture
+successor. Quality judgment is the user's, by listening, per this ADR's own methodology.
+
+*Setup friction worth recording so a re-run doesn't rediscover it* (all in a dedicated
+`.tts_eval_venv`, isolated for exactly these reasons): `coqui-tts` 0.27.5 declares
+`transformers>=4.57` with **no upper bound** and breaks against transformers 5.x
+(`ImportError: cannot import name 'isin_mps_friendly'`) — pin `transformers>=4.57,<5`. It then
+requires `torchcodec`, which needs FFmpeg **shared** libraries; the usual Windows
+WinGet/gyan.dev `full_build` is static and ships no DLLs, and putting a shared build on `PATH` is
+not enough because Python 3.8+ on Windows resolves extension-module DLLs with
+`LOAD_LIBRARY_SEARCH_DEFAULT_DIRS`, which excludes `PATH`. The script takes an
+`FFMPEG_SHARED_BIN` env var and registers it via `os.add_dll_directory()`.
+
+**Updated next step:** before scoping a fine-tune (bucket b, unchanged from the original survey),
+test bucket (a) again with the corrected information — Habibi-TTS MAR directly, and
+`HAMMALE/speecht5-darija` specifically to see whether Arabic-script input is silently transliterated,
+rejected, or mispronounced. Neither test requires a lease (`Habibi-TTS`/`speecht5-darija` demos run
+CPU/community-GPU on HF Spaces) and both are free next-session work, not gated on anything in this
+sprint.

@@ -89,7 +89,7 @@ RUN --mount=type=cache,target=/root/.cache/pip,sharing=locked \
     && /app/.gguf_venv/bin/pip install --upgrade pip \
     && /app/.gguf_venv/bin/pip install torch --index-url ${TORCH_CUDA_INDEX} \
     && /app/.gguf_venv/bin/pip install -r config/requirements.txt \
-    && /app/.gguf_venv/bin/pip install piper-tts
+    && /app/.gguf_venv/bin/pip install piper-tts==1.8.0
 
 # ── venv 2/3: .speech_venv — STT bake-off (faster-whisper + SeamlessM4T) ──────
 # Separate venv: ctranslate2 / SeamlessM4T torch pins conflict with the app's.
@@ -101,7 +101,23 @@ RUN --mount=type=cache,target=/root/.cache/pip,sharing=locked \
     && /app/.speech_venv/bin/pip install torch torchaudio --index-url ${TORCH_CUDA_INDEX} \
     && /app/.speech_venv/bin/pip install -r config/requirements-speech.txt
 
-# ── venv 3/3: .ocr_venv — PaddleOCR-VL (BEST-EFFORT on Blackwell) ─────────────
+# ── venv 3/4: .tts_venv — XTTS Darija (coqui-tts) ────────────────────────────
+# Only used when TTS_ENGINE=xtts_darija (app/services/tts.py's
+# XttsDarijaEngine, scripts/tts_worker_resident.py). Separate venv because
+# coqui-tts pins transformers<5 — it breaks on 5.x with
+# `ImportError: isin_mps_friendly` — and pulls in torchcodec, neither of which
+# the app venv should be forced to match. torchcodec needs FFmpeg, which the
+# system-deps layer above already installs.
+# NOTE the checkpoint itself (5.6 GB) is NOT baked in: entrypoint.sh fetches it
+# onto the persistent /models volume, same as the GGUFs.
+COPY config/requirements-tts.txt config/requirements-tts.txt
+RUN --mount=type=cache,target=/root/.cache/pip,sharing=locked \
+    python3.12 -m venv /app/.tts_venv \
+    && /app/.tts_venv/bin/pip install --upgrade pip \
+    && /app/.tts_venv/bin/pip install torch torchaudio --index-url ${TORCH_CUDA_INDEX} \
+    && /app/.tts_venv/bin/pip install -r config/requirements-tts.txt
+
+# ── venv 4/4: .ocr_venv — PaddleOCR-VL (BEST-EFFORT on Blackwell) ─────────────
 # paddlepaddle-gpu may not ship an sm_120 wheel yet; `|| true` keeps a failed
 # paddle install from aborting the whole image. If it fails, run with
 # OCR_ENGINE=none — chat/voice/embeddings are unaffected. Swap the wheel index

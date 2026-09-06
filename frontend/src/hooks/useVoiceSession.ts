@@ -110,7 +110,14 @@ export function useVoiceSession(options: VoiceSessionOptions = {}): UseVoiceSess
     activeSourcesRef.current.push(source);
   }, []);
 
-  const stop = useCallback(() => {
+  // Release the mic, socket and audio graph WITHOUT touching `status`.
+  // Kept separate from stop() because the failure paths below need to tear
+  // everything down and then report "error" -- when teardown owned the
+  // status it unconditionally overwrote that with "idle", so every failure
+  // looked identical to a normal hang-up: "Connecting..." for an instant,
+  // then the panel vanishes with nothing said. Whatever actually broke has
+  // to survive the cleanup that follows it.
+  const teardown = useCallback(() => {
     wsRef.current?.close();
     wsRef.current = null;
 
@@ -126,9 +133,12 @@ export function useVoiceSession(options: VoiceSessionOptions = {}): UseVoiceSess
     flushPlayback();
     void playbackContextRef.current?.close();
     playbackContextRef.current = null;
-
-    setStatus("idle");
   }, [flushPlayback]);
+
+  const stop = useCallback(() => {
+    teardown();
+    setStatus("idle");
+  }, [teardown]);
 
   const start = useCallback(async () => {
     setStatus("connecting");
@@ -143,10 +153,31 @@ export function useVoiceSession(options: VoiceSessionOptions = {}): UseVoiceSess
       });
       micStreamRef.current = micStream;
 
-      // 16kHz to match app/services/vad.py's SAMPLE_RATE / FRAME_BYTES
-      // contract exactly -- no server-side resampling.
-      const micContext = new AudioContext({ sampleRate: 16000 });
+      // Ask for 16kHz to match app/services/vad.py's SAMPLE_RATE /
+      // FRAME_BYTES contract, which avoids resampling entirely when the
+      // browser obliges. It often does not: `sampleRate` is a REQUEST, and
+      // Chrome on Windows (especially with echoCancellation on) commonly
+      // hands back the device's own 44100/48000 instead -- and some
+      // browser/driver combinations reject the option outright by THROWING
+      // from the constructor. Neither is a reason to refuse the session:
+      // pcm-worklet.js resamples to 16kHz from whatever rate it is handed,
+      // so both cases are handled rather than fatal.
+      let micContext: AudioContext;
+      try {
+        micContext = new AudioContext({ sampleRate: 16000 });
+      } catch {
+        micContext = new AudioContext();
+      }
       micContextRef.current = micContext;
+      if (micContext.sampleRate !== 16000) {
+        // Worth knowing about -- it is the difference between a no-op and a
+        // real resample on every 20ms frame -- but not worth blocking on.
+        console.info(
+          `[voice] microphone AudioContext is ${micContext.sampleRate}Hz; ` +
+            `pcm-worklet.js will resample to 16000Hz for the server.`,
+        );
+      }
+
       await micContext.audioWorklet.addModule(new URL("../audio/pcm-worklet.js", import.meta.url));
 
       const source = micContext.createMediaStreamSource(micStream);
@@ -163,6 +194,14 @@ export function useVoiceSession(options: VoiceSessionOptions = {}): UseVoiceSess
       const playbackContext = new AudioContext();
       playbackContextRef.current = playbackContext;
       nextPlayTimeRef.current = playbackContext.currentTime;
+      // The getUserMedia await above (plus its permission prompt) can break
+      // the browser's user-activation chain, leaving this context stuck in
+      // "suspended" -- source.start() on a suspended context throws nothing
+      // and plays nothing, so this must be forced explicitly rather than
+      // relying on autoplay-on-creation.
+      if (playbackContext.state === "suspended") {
+        await playbackContext.resume();
+      }
 
       const params = new URLSearchParams();
       if (options.tenantId) params.set("tenant_id", options.tenantId);
@@ -173,11 +212,21 @@ export function useVoiceSession(options: VoiceSessionOptions = {}): UseVoiceSess
       ws.binaryType = "arraybuffer";
       wsRef.current = ws;
 
+      // Set before the socket opens, not inside onopen: the worklet posts its
+      // one-off rate report from its constructor, which has already run by
+      // now. Frames captured before the socket is OPEN are dropped on
+      // purpose -- the server is not listening for them yet.
+      worklet.port.onmessage = (event: MessageEvent<ArrayBuffer | { type: string }>) => {
+        // The port carries two things: PCM frames (ArrayBuffer) and the
+        // worklet's rate report (a plain object). Forwarding the latter
+        // would put the string "[object Object]" on a socket whose text
+        // channel is strict JSON, so discriminate rather than assume.
+        if (!(event.data instanceof ArrayBuffer)) return;
+        if (ws.readyState === WebSocket.OPEN) ws.send(event.data);
+      };
+
       ws.onopen = () => {
         setStatus("listening");
-        worklet.port.onmessage = (event: MessageEvent<ArrayBuffer>) => {
-          if (ws.readyState === WebSocket.OPEN) ws.send(event.data);
-        };
       };
 
       ws.onmessage = (event: MessageEvent<string | ArrayBuffer>) => {
@@ -223,15 +272,35 @@ export function useVoiceSession(options: VoiceSessionOptions = {}): UseVoiceSess
         setErrorMessage("Voice connection failed.");
         setStatus("error");
       };
-      ws.onclose = () => {
-        if (wsRef.current === ws) stop();
+      ws.onclose = (event) => {
+        if (wsRef.current !== ws) return;
+        teardown();
+        // A close that nobody asked for is a failure, and saying "idle"
+        // about it hides it. wasClean covers a normal server-side close;
+        // code 1000/1005 covers our own stop() and a plain browser close.
+        if (event.wasClean || event.code === 1000 || event.code === 1005) {
+          setStatus((prev) => (prev === "error" ? prev : "idle"));
+          return;
+        }
+        setErrorMessage(
+          `Voice connection closed unexpectedly (code ${event.code}${event.reason ? `: ${event.reason}` : ""}).`,
+        );
+        setStatus("error");
       };
     } catch (err) {
-      setErrorMessage(err instanceof Error ? err.message : "Could not access the microphone.");
+      // teardown() BEFORE setStatus, and never stop(): stop() ends with
+      // setStatus("idle"), which is what previously swallowed every startup
+      // failure into a silent return to the idle button.
+      console.error("[voice] could not start the session:", err);
+      teardown();
+      setErrorMessage(
+        err instanceof Error
+          ? `Could not start the voice session: ${err.message}`
+          : "Could not access the microphone.",
+      );
       setStatus("error");
-      stop();
     }
-  }, [flushPlayback, options.domain, options.sessionId, options.tenantId, playChunk, stop]);
+  }, [flushPlayback, options.domain, options.sessionId, options.tenantId, playChunk, teardown]);
 
   return { status, transcript, answerText, citations, errorMessage, start, stop };
 }

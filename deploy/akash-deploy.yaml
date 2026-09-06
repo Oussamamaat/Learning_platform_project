@@ -91,10 +91,27 @@ services:
       # ── Linux venv interpreters (override the Windows defaults) ──────────
       - OCR_VENV_PYTHON=/app/.ocr_venv/bin/python
       - STT_VENV_PYTHON=/app/.speech_venv/bin/python
+      - TTS_XTTS_VENV_PYTHON=/app/.tts_venv/bin/python
       # ── every engine ON from the start — see header note 3 ──────────────
       - STT_ENGINE=whisper       # none | whisper | seamless
-      - TTS_ENGINE=piper         # none | piper
+      # xtts_darija = medmac01/darija_xtt_2.0, the Darija voice chosen on
+      # live listening (ADR 0006). NOT commercially licensed — it inherits
+      # XTTS-v2's CPML — so this is an EVALUATION deployment setting, not a
+      # shipping default. Switch back to `piper` for anything customer-facing.
+      # entrypoint.sh downloads its 5.6 GB checkpoint onto /models on first
+      # boot, and app/main.py warms it at startup (~51s) so the first spoken
+      # turn does not pay the load.
+      - TTS_ENGINE=xtts_darija   # none | piper | xtts_darija
+      - TTS_XTTS_MODEL_DIR=/models/darija_xtts
       - STT_MODEL=large-v3
+      # web_search_engine stays "none" (the default) for this lease -- no
+      # Tavily key has been exercised against the live API yet (see ADR
+      # 0010's "Open, for later"). To opt in: set WEB_SEARCH_ENGINE=tavily
+      # and TAVILY_API_KEY=<key> here, then update the deployment. Nothing
+      # else in this SDL needs to change -- app/services/web_search.py's
+      # NullWebSearchEngine keeps chat.py's refusal gate byte-identical to
+      # today's behaviour until this is flipped.
+      - WEB_SEARCH_ENGINE=none   # none | tavily
       - OCR_ENGINE=paddleocr     # paddleocr | none — lazy-loaded, won't block
                                  # boot if the paddle install failed (verified:
                                  # app/main.py's startup hooks only preload
@@ -149,9 +166,12 @@ profiles:
                 - model: pro6000se    # tier 3 (fallback)
         storage:
           - size: 140Gi                # ephemeral only: unpacked image
-                                        # (~45-50 GB) + GGUFs (11.5 GB) +
+                                        # (~50-55 GB, incl. .tts_venv's own
+                                        # torch) + GGUFs (11.5 GB) +
                                         # Ollama's own blob copies (11.5 GB)
                                         # + STT weights on first use (3-9 GB)
+                                        # + XTTS checkpoint (5.6 GB, only
+                                        # when TTS_ENGINE=xtts_darija)
                                         # + headroom
   placement:
     dcloud:

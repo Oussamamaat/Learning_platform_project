@@ -27,21 +27,19 @@ from app.services.turn import TurnContext
 
 
 class _FakeEndpointer:
-    """First push() -> speech_start, second push() -> speech_end, every
-    push after that -> None. Decouples these tests from real RMS timing
-    (already covered by tests/test_vad.py) so they test routing/state-
-    machine behavior instead."""
+    """Every odd push() -> speech_start, every even push() -> speech_end --
+    cycles indefinitely so a single test can drive MULTIPLE utterances
+    through one session (send 2 frames per utterance), not just one.
+    Decouples these tests from real RMS timing (already covered by
+    tests/test_vad.py) so they test routing/state-machine behavior
+    instead."""
 
     def __init__(self, *args, **kwargs):
         self._pushes = 0
 
     def push(self, frame):
         self._pushes += 1
-        if self._pushes == 1:
-            return "speech_start"
-        if self._pushes == 2:
-            return "speech_end"
-        return None
+        return "speech_start" if self._pushes % 2 == 1 else "speech_end"
 
     def take_utterance(self):
         return b"\x00" * 640
@@ -184,6 +182,207 @@ def test_refusal_path_never_calls_the_model():
 
     texts = [json.loads(m["text"]) for m in messages if "text" in m and m["text"] is not None]
     assert any(t["type"] == "answer.delta" and t["text"] == "Je ne peux pas répondre à cela." for t in texts)
+
+
+def test_tts_failure_other_than_unavailable_surfaces_error_and_recovers():
+    """A TTS engine raising anything OTHER than TtsUnavailableError (a
+    piper-tts API mismatch, a phonemizer failure, a bad ONNX load) used to
+    propagate uncaught out of _answer_worker's speak() and out of
+    run_and_persist -- the client still got audio.end and looked healthy
+    with no audio ever played, AND `state` never reset to LISTENING,
+    silently routing every later utterance to the barge-in branch instead
+    of transcription. This is the exact live-reported symptom ("no voice
+    is heard... doesn't detect when I talk"), confirmed live 2026-09-05/06
+    by reading app/routers/voice.py, not a hypothesis. Locks both halves
+    of the fix: an error event reaches the client, AND a second utterance
+    in the same session is still transcribed afterward."""
+    fake_stt = MagicMock()
+    fake_stt.transcribe.return_value = TranscriptChunk(
+        "Que dit le texte sur le casque ?", is_final=True, language="fr"
+    )
+    fake_tts = MagicMock()
+    fake_tts.synthesize.side_effect = RuntimeError("piper-tts API mismatch")
+    fake_tts.sample_rate = 22050
+    turn = _grounded_turn()
+
+    with patch("app.routers.voice.get_stt_engine", return_value=fake_stt), \
+         patch("app.routers.voice.get_tts_engine", return_value=fake_tts), \
+         patch("app.routers.voice.EnergyEndpointer", _FakeEndpointer), \
+         patch("app.routers.voice.resolve_turn", return_value=turn), \
+         patch("app.routers.voice.load_prior_turns", return_value=[]), \
+         patch("app.routers.voice.stream_llm_response",
+               side_effect=lambda **kwargs: iter(["Bonjour."])), \
+         patch("app.routers.voice.persist_turn"):
+        # side_effect (not return_value): return_value=iter([...]) hands
+        # EVERY call the same iterator, so the second turn would silently
+        # receive an already-exhausted one and generate nothing.
+
+        client = TestClient(app)
+        with client.websocket_connect("/api/v1/voice/session") as ws:
+            ws.send_bytes(b"\x00" * 640)
+            ws.send_bytes(b"\x00" * 640)
+
+            messages = _drain_until(ws, lambda m: _is_text_type(m, "audio.end"))
+            texts = [json.loads(m["text"]) for m in messages if "text" in m and m["text"] is not None]
+            error_events = [t for t in texts if t["type"] == "error"]
+            assert error_events, f"expected a tts_failed error event, got: {texts}"
+            assert error_events[0]["code"] == "tts_failed"
+            # No audio bytes made it through -- synthesize() raised every time.
+            assert not any("bytes" in m and m["bytes"] is not None for m in messages)
+
+            # The session must have recovered to LISTENING, not stuck in
+            # SPEAKING routing every frame to barge-in -- send a second
+            # utterance and confirm it is transcribed AND answered through
+            # to audio.end. Draining to audio.end (rather than stopping at
+            # transcript.final) is what makes this deterministic: it proves
+            # the second turn's worker actually ran, instead of racing the
+            # server's teardown.
+            ws.send_bytes(b"\x00" * 640)
+            ws.send_bytes(b"\x00" * 640)
+            messages2 = _drain_until(ws, lambda m: _is_text_type(m, "audio.end"))
+            assert any(_is_text_type(m, "transcript.final") for m in messages2)
+
+            ws.send_text(json.dumps({"type": "end"}))
+
+
+def test_language_pinning_off_by_default_stt_always_autodetects():
+    """Default settings.voice_language_pinning=False: STT's language_hint
+    must be None on EVERY utterance (never forced to a prior turn's
+    language), and resolve_turn's explicit_language must be None too --
+    both used to be unconditionally set to `pinned_language` after turn 1,
+    which force-decoded a later Darija utterance as French (whisper's
+    `language=` argument disables auto-detection, it does not just bias
+    it) and made resolve_language's precedence-0 explicit_language slot
+    short-circuit script/instruction detection. Confirmed live
+    2026-09-05/06, not a hypothesis."""
+    fake_stt = MagicMock()
+    fake_stt.transcribe.side_effect = [
+        TranscriptChunk("Bonjour.", is_final=True, language="fr"),
+        TranscriptChunk("خصك تلبس الكاسك.", is_final=True, language="ar"),
+    ]
+    fake_tts = MagicMock()
+    fake_tts.synthesize.return_value = b"AUDIO"
+    fake_tts.sample_rate = 22050
+    turn_fr = _grounded_turn(response_lang="fr")
+    turn_darija = _grounded_turn(response_lang="darija", query_lang="darija")
+
+    with patch("app.routers.voice.get_stt_engine", return_value=fake_stt), \
+         patch("app.routers.voice.get_tts_engine", return_value=fake_tts), \
+         patch("app.routers.voice.EnergyEndpointer", _FakeEndpointer), \
+         patch("app.routers.voice.resolve_turn", side_effect=[turn_fr, turn_darija]) as mock_resolve, \
+         patch("app.routers.voice.load_prior_turns", return_value=[]), \
+         patch("app.routers.voice.stream_llm_response", return_value=iter(["Ok."])), \
+         patch("app.routers.voice.persist_turn"):
+
+        client = TestClient(app)
+        with client.websocket_connect("/api/v1/voice/session") as ws:
+            for _ in range(2):
+                ws.send_bytes(b"\x00" * 640)
+                ws.send_bytes(b"\x00" * 640)
+                _drain_until(ws, lambda m: _is_text_type(m, "audio.end"))
+            ws.send_text(json.dumps({"type": "end"}))
+
+    assert fake_stt.transcribe.call_count == 2
+    for call in fake_stt.transcribe.call_args_list:
+        assert call.kwargs["language_hint"] is None
+    assert mock_resolve.call_count == 2
+    for call in mock_resolve.call_args_list:
+        assert call.kwargs["explicit_language"] is None
+
+
+def test_language_pinning_on_forces_response_language_but_stt_still_autodetects():
+    """settings.voice_language_pinning=True: after turn 1 resolves to
+    "fr", turn 2's resolve_turn call must receive explicit_language="fr"
+    (the deliberate VRAM-avoidance override this setting exists for) --
+    but the STT call must STILL pass language_hint=None on every turn,
+    since forcing the ANSWER language is a separate decision from
+    correctly transcribing what the user actually said."""
+    fake_stt = MagicMock()
+    fake_stt.transcribe.side_effect = [
+        TranscriptChunk("Bonjour.", is_final=True, language="fr"),
+        TranscriptChunk("خصك تلبس الكاسك.", is_final=True, language="ar"),
+    ]
+    fake_tts = MagicMock()
+    fake_tts.synthesize.return_value = b"AUDIO"
+    fake_tts.sample_rate = 22050
+    turn_fr = _grounded_turn(response_lang="fr")
+    turn_2 = _grounded_turn(response_lang="fr", query_lang="darija")
+
+    fake_settings = MagicMock()
+    fake_settings.voice_language_pinning = True
+    fake_settings.voice_echo_mode = False
+    fake_settings.vad_threshold = 500.0
+    fake_settings.vad_hangover_ms = 400
+    fake_settings.vad_min_speech_ms = 200
+    fake_settings.vad_debug_log = False
+
+    with patch("app.routers.voice.get_settings", return_value=fake_settings), \
+         patch("app.routers.voice.get_stt_engine", return_value=fake_stt), \
+         patch("app.routers.voice.get_tts_engine", return_value=fake_tts), \
+         patch("app.routers.voice.EnergyEndpointer", _FakeEndpointer), \
+         patch("app.routers.voice.resolve_turn", side_effect=[turn_fr, turn_2]) as mock_resolve, \
+         patch("app.routers.voice.load_prior_turns", return_value=[]), \
+         patch("app.routers.voice.stream_llm_response", return_value=iter(["Ok."])), \
+         patch("app.routers.voice.persist_turn"):
+
+        client = TestClient(app)
+        with client.websocket_connect("/api/v1/voice/session") as ws:
+            for _ in range(2):
+                ws.send_bytes(b"\x00" * 640)
+                ws.send_bytes(b"\x00" * 640)
+                _drain_until(ws, lambda m: _is_text_type(m, "audio.end"))
+            ws.send_text(json.dumps({"type": "end"}))
+
+    for call in fake_stt.transcribe.call_args_list:
+        assert call.kwargs["language_hint"] is None
+    assert mock_resolve.call_args_list[0].kwargs["explicit_language"] is None
+    assert mock_resolve.call_args_list[1].kwargs["explicit_language"] == "fr"
+
+
+def test_echo_mode_never_calls_resolve_turn_or_the_llm():
+    """settings.voice_echo_mode=True bypasses resolve_turn/RAG/the LLM
+    entirely -- this is what lets the STT/VAD/TTS/WebSocket pipeline be
+    exercised against a live browser mic with ZERO LLM VRAM loaded.
+    Confirms the bypass is real (resolve_turn/stream_llm_response never
+    called) and the reply comes back in the detected language."""
+    fake_stt = MagicMock()
+    fake_stt.transcribe.return_value = TranscriptChunk(
+        "خصك تلبس الكاسك.", is_final=True, language="ar"
+    )
+    fake_tts = MagicMock()
+    fake_tts.synthesize.return_value = b"ECHO-AUDIO"
+    fake_tts.sample_rate = 22050
+
+    fake_settings = MagicMock()
+    fake_settings.voice_language_pinning = False
+    fake_settings.voice_echo_mode = True
+    fake_settings.vad_threshold = 500.0
+    fake_settings.vad_hangover_ms = 400
+    fake_settings.vad_min_speech_ms = 200
+    fake_settings.vad_debug_log = False
+
+    with patch("app.routers.voice.get_settings", return_value=fake_settings), \
+         patch("app.routers.voice.get_stt_engine", return_value=fake_stt), \
+         patch("app.routers.voice.get_tts_engine", return_value=fake_tts), \
+         patch("app.routers.voice.EnergyEndpointer", _FakeEndpointer), \
+         patch("app.routers.voice.resolve_turn") as mock_resolve, \
+         patch("app.routers.voice.stream_llm_response") as mock_stream:
+
+        client = TestClient(app)
+        with client.websocket_connect("/api/v1/voice/session") as ws:
+            ws.send_bytes(b"\x00" * 640)
+            ws.send_bytes(b"\x00" * 640)
+            messages = _drain_until(ws, lambda m: _is_text_type(m, "audio.end"))
+            ws.send_text(json.dumps({"type": "end"}))
+
+    mock_resolve.assert_not_called()
+    mock_stream.assert_not_called()
+    fake_tts.synthesize.assert_called_once()
+    assert fake_tts.synthesize.call_args.kwargs["language"] == "darija"
+    texts = [json.loads(m["text"]) for m in messages if "text" in m and m["text"] is not None]
+    reply = next(t for t in texts if t["type"] == "answer.delta")
+    assert "خصك تلبس الكاسك." in reply["text"]
+    assert any("bytes" in m and m["bytes"] == b"ECHO-AUDIO" for m in messages)
 
 
 def test_stt_unavailable_sends_error_event_without_crashing_session():

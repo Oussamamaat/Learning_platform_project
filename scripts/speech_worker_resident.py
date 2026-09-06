@@ -37,6 +37,51 @@ import os
 import sys
 import traceback
 
+
+def _register_cuda_dll_dirs() -> None:
+    """Windows only: make this venv's pip-installed CUDA libraries loadable.
+
+    ctranslate2 bundles cudnn64_9.dll but NOT cublas64_12.dll, and it does
+    NOT add site-packages/nvidia/*/bin to the DLL search path itself. On
+    Linux (including config/Dockerfile.gpu's nvidia/cuda base image) cuBLAS
+    comes from the system and this is a no-op; on a Windows dev box with no
+    CUDA Toolkit installed, the `nvidia-cublas-cu12` wheel puts the DLL
+    somewhere nothing looks, and transcription fails with "Library
+    cublas64_12.dll is not found or cannot be loaded".
+
+    Worth knowing when debugging this: ctranslate2 loads cuBLAS LAZILY, so
+    WhisperModel(device="cuda") CONSTRUCTS fine and only the first real
+    transcribe() call fails -- a construction-only smoke test passes and
+    hides the problem entirely (confirmed 2026-09-06).
+
+    PATH is what actually fixes it; os.add_dll_directory() alone does NOT
+    (also confirmed 2026-09-06). add_dll_directory only affects DLLs the
+    loader resolves with the altered-search-path flags, and ctranslate2
+    resolves cuBLAS with a plain runtime LoadLibrary("cublas64_12.dll"),
+    which uses the standard search order -- PATH included, added
+    directories not. Both are set here: PATH for the lazy runtime load,
+    add_dll_directory for anything resolved as a link-time dependency.
+    """
+    if not hasattr(os, "add_dll_directory"):
+        return
+    for base in sys.path:
+        nvidia_root = os.path.join(base, "nvidia")
+        if not os.path.isdir(nvidia_root):
+            continue
+        for package in os.listdir(nvidia_root):
+            bin_dir = os.path.join(nvidia_root, package, "bin")
+            if not os.path.isdir(bin_dir):
+                continue
+            try:
+                os.add_dll_directory(bin_dir)
+            except OSError:
+                pass
+            if bin_dir not in os.environ.get("PATH", ""):
+                os.environ["PATH"] = bin_dir + os.pathsep + os.environ.get("PATH", "")
+
+
+_register_cuda_dll_dirs()
+
 _MODELS: dict = {}
 
 

@@ -11,6 +11,16 @@ __pycache__/
 # STT engines (faster-whisper/SeamlessM4T) likewise get a dedicated venv
 # (see config/requirements-speech.txt)
 .speech_venv/
+# XTTS-v2/Coqui-TTS pin their own torch/transformers build -- isolated the
+# same way, and non-default: CPML-derived, eval-only (scripts/eval_darija_xtts.py)
+.tts_eval_venv/
+
+# Piper TTS voice models (.onnx + .onnx.json) -- multi-MB binary artifacts,
+# downloaded by config/Dockerfile.gpu / this repo's local setup, not source.
+data/tts_voices/
+# Downloaded reference checkpoints/audio for one-off TTS candidate evaluation
+# (scripts/eval_darija_xtts.py) -- large binaries, not source.
+data/tts_eval_cache/
 
 # GGUF weights extracted for baking into the GPU image
 # (scripts/docker/prepare_models.py) -- multi-GB build inputs, not source.
@@ -25,6 +35,12 @@ benchmark_report.md
 benchmark_*.json
 scripts/eval_stt_results.json
 scripts/eval_tts_results.json
+scripts/eval_darija_xtts_results.json
+scripts/voice_selftest_results.json
+# Synthesized audio these harnesses write next to themselves for manual
+# listening (scripts/eval_tts.py, eval_darija_xtts.py, voice_selftest.py) --
+# regenerable output, not source.
+scripts/*.wav
 
 # Environment / secrets
 .env

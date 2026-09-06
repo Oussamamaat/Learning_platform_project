@@ -1,8 +1,10 @@
 # ADR 0005: VAD Calibration
 
-**Status:** Phase A complete (config knob, instrumentation, offline calibration, tests); root-cause
-diagnosis of the live mic failure deferred to a live-mic Phase B run
-**Date:** 2026-09-04
+**Status:** Phase A complete. The live-session failure the 2026-09-04 lease reported ("doesn't
+detect when I talk") was root-caused 2026-09-06, WITHOUT a lease, by reading `app/routers/voice.py`
+end to end — it was never the VAD threshold. See **AMENDED (2026-09-06)** below. The VAD threshold
+question this ADR was originally about remains correctly settled by the offline sweep (unchanged).
+**Date:** 2026-09-04; amended 2026-09-06
 **Depends on:** `benchmark_results/README.md`, `POST_LEASE_MVP_SPRINT_PLAN.md` item 2
 
 ## Problem
@@ -114,3 +116,81 @@ actual AGC/noise-suppression behavior and actual delivered sample rate cannot be
 committed `.wav` corpus, only from a real `getUserMedia` session reaching a real server. That is
 scoped narrowly to Phase B, with the instrumentation already in place so the run only needs to
 happen once.
+
+## AMENDED (2026-09-06)
+
+**The Phase B live-mic run described above never happened, and turned out not to be needed to
+close this ADR.** A 2026-09-05/06 lease session reported the live symptom directly ("no voice is
+heard... doesn't detect when I talk in Arabic"), and reading `app/routers/voice.py` end to end
+found two independent, sufficient causes that have nothing to do with the VAD threshold or any
+browser AGC/sample-rate hypothesis this ADR raised:
+
+1. **The session pins every turn's language to turn 1's.** `pinned_language` was fed
+   unconditionally into `stt_engine.transcribe(..., language_hint=pinned_language)`. Whisper's
+   `language=` argument DISABLES auto-detection (not a bias) — so after a French turn 1, any later
+   Darija speech was force-decoded as French. This alone explains "doesn't detect when I talk in
+   Arabic" with zero VAD involvement: the audio was correctly endpointed and handed to STT, and STT
+   mis-transcribed it under a forced-wrong language.
+2. **A TTS (or any post-transcription) failure deadlocked the session in `SPEAKING`.**
+   `run_and_persist` had no `try`/`finally`; an uncaught exception left `state` stuck at `SPEAKING`
+   forever, and the receive loop routes every frame in that state to the barge-in branch, never to
+   transcription — a second, independent, sufficient explanation for the same reported symptom.
+
+Both confirmed by reading the code, not by a live trace — the offline sweep's own conclusion (the
+threshold is not the bottleneck) stands, and the AGC/sample-rate/frame-size hypotheses in this
+ADR's Decision §3 are **downgraded from leading suspects to a residual possibility**: they may
+still matter, but two sufficient causes were found first and fixed, so there is no longer a
+live-mic reproduction that isolates whether AGC contributes anything additional.
+
+**The sample-rate half of that hypothesis was closed this session, and it was a real hole.** The
+proposed frame-size guard was shipped (`voice.py` logs once if an inbound frame is not
+`FRAME_BYTES`) — but writing it exposed that **a byte-length check cannot detect a declined
+sample rate at all**: `frontend/src/audio/pcm-worklet.js` buffers by SAMPLE count (320), not by
+duration, so a browser that hands back 48kHz instead of the requested 16kHz still emits exactly
+640-byte frames. The guard passes, `speech_start`/`hangover_ms` silently mean a third of what they
+should, and STT receives 48kHz audio labelled 16kHz — which reads as a bad model, not a broken
+pipeline. Only the client knows its real rate, so `useVoiceSession.ts` now handles the
+mismatch at session start rather than letting it through.
+
+> **AMENDED same day — the first shipped form of this guard was wrong, and reproduced within the
+> hour.** It was written to *reject* the session (`throw` when `micContext.sampleRate !== 16000`),
+> on the reasoning quoted above that the request had never been observed to be declined here. It
+> was declined on the very next browser run: the user's session went `Connecting…` → gone, with
+> **zero WebSocket connections reaching uvicorn** — the throw fires before the socket is opened.
+> Two corrections follow, both shipped:
+>
+> 1. **Refusing was the wrong response.** A declined rate is not an unserviceable condition, it is
+>    a conversion. `pcm-worklet.js` now resamples to 16kHz (linear interpolation, fractional read
+>    cursor carried across render quanta so it does not click every 128 samples) from whatever rate
+>    the browser hands it, and the constructor is wrapped in try/catch because some
+>    browser/driver pairs reject the `sampleRate` option by throwing outright. The frame-size
+>    contract is unchanged and now actually means 20ms.
+> 2. **The failure was invisible, which is the more general defect.** `stop()` ended with
+>    `setStatus("idle")`, and the catch path called it *after* `setStatus("error")` — so every
+>    startup failure was overwritten into a normal hang-up. Teardown and status are now separate
+>    (`teardown()` vs `stop()`), and an unclean `onclose` reports instead of silently idling.
+>
+> The lesson worth carrying: a guard that converts a silent wrong-answer into a **silent refusal**
+> has not improved anything. This one was verified by construction and not by running the path it
+> guarded.
+>
+> Verified after the fix by running the real `pcm-worklet.js` outside a browser (Node `vm`, fed
+> 48kHz in 128-sample quanta): 6.40s in → 320 × 640-byte frames → 6.40s out, and both the French
+> and Darija turns of the live-server E2E pass on that resampled audio.
+
+What remains genuinely open for a future live session: whether browser AGC/noise suppression
+degrade detection beyond these fixes. `vad_debug_log` plus the two guards will surface it without
+another blind live-mic session.
+
+Fixes shipped 2026-09-06 (see ADR 0004-adjacent voice-pipeline work, `app/routers/voice.py`,
+`app/config.py`'s new `voice_language_pinning`/`voice_echo_mode` settings,
+`scripts/voice_selftest.py`): STT's `language_hint` is now always `None`; language pinning (still
+useful for a single-tutor-VRAM deployment) is opt-in and, when on, applies only to the RESPONSE
+language via `resolve_turn`'s `explicit_language`, never to STT; `run_and_persist` now always resets
+`state` to `LISTENING`. **Verification moved from "needs a lease" to "runs offline"**:
+`scripts/voice_selftest.py` synthesizes real Darija/French sentences, feeds them back through the
+real `EnergyEndpointer`, and confirms STT's auto-detected language matches — settling the
+language-switching half of this ADR's original Phase B agenda with zero GPU lease and zero LLM
+VRAM. What remains genuinely open for a future live session: whether real browser AGC/noise
+suppression or a declined 16kHz `AudioContext` request contribute any further degradation beyond
+these two fixed bugs — worth one confirmatory live check, but no longer a blocking unknown.

@@ -1,0 +1,28 @@
+# XTTS Darija TTS stage -- installed into a DEDICATED .tts_venv, never into
+# .gguf_venv (the app's own venv) or .speech_venv. Same isolation reasoning as
+# config/requirements-speech.txt and requirements-ocr.txt: this stack pins
+# transformers and drags in torchcodec, and must not dictate the app's pins.
+#
+# Only needed when settings.tts_engine="xtts_darija"
+# (app/services/tts.py's XttsDarijaEngine, scripts/tts_worker_resident.py).
+# The default engine is "piper", which is CPU-only and lives in .gguf_venv.
+#
+# LICENSING: the model this venv exists to run (medmac01/darija_xtt_2.0)
+# declares no license and inherits Coqui XTTS-v2's CPML, which forbids
+# commercial use. Installing the runtime is fine; SELECTING the engine in a
+# production deployment is the decision that carries the licence implication.
+# See docs/architecture/rectified/adr/0006-darija-tts-survey.md.
+#
+# torch/torchaudio are intentionally NOT pinned here -- the Dockerfile installs
+# them first from the cu128 index (Blackwell/sm_120); pinning would fight it.
+
+# coqui-tts: the maintained fork of Coqui TTS (the original `TTS` package is
+# unmaintained). Provides TTS.tts.models.xtts.Xtts.
+coqui-tts>=0.27.0
+# coqui-tts declares `transformers>=4.57` with NO upper bound, but breaks on
+# transformers 5.x: `ImportError: cannot import name 'isin_mps_friendly' from
+# transformers.pytorch_utils` (confirmed 2026-09-06). Cap it here.
+transformers>=4.57,<5
+# From PyTorch 2.9 coqui-tts requires torchcodec for audio IO. Needs FFmpeg's
+# SHARED libraries present (the Dockerfile's apt layer installs ffmpeg).
+torchcodec>=0.16.0

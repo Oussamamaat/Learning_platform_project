@@ -38,11 +38,12 @@ import uuid
 from typing import Optional
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
+from starlette.websockets import WebSocketState
 
 from app.config import get_settings, get_tenant_id, get_user_id
 from app.errors import AppError
 from app.services.citations import extract_citations
-from app.services.llm import stream_llm_response
+from app.services.llm import detect_query_language, stream_llm_response
 from app.services.stt import get_stt_engine, SttUnavailableError, TranscriptChunk
 from app.services.tts import get_tts_engine, TtsUnavailableError
 from app.services.turn import resolve_turn, refusal_text, load_prior_turns, persist_turn
@@ -153,6 +154,19 @@ def _answer_worker(
             emit("bytes", audio)
         except TtsUnavailableError as e:
             emit("text", json.dumps({"type": "error", "code": "tts_unavailable", "detail": str(e)}))
+        except Exception:
+            # Anything else (a piper-tts API mismatch, a phonemizer failure,
+            # a bad ONNX load) used to propagate uncaught out of this worker
+            # thread: the client still got audio.end from the `finally`
+            # below and looked "healthy" with no audio ever played, while
+            # run_and_persist's caller silently dropped state back to
+            # LISTENING. Confirmed live 2026-09-05/06 -- caught, logged with
+            # the real traceback, and surfaced to the client instead.
+            logger.exception("voice session: TTS synthesis failed for sentence %r", sentence[:80])
+            emit("text", json.dumps({
+                "type": "error", "code": "tts_failed",
+                "detail": "Speech synthesis failed for part of the answer.",
+            }))
 
     delivered: list[str] = []
     buffer = ""
@@ -208,17 +222,22 @@ async def voice_session(
         min_speech_ms=settings.vad_min_speech_ms,
     )
     state = _State.LISTENING
-    # Set after the first successful (non-refusal) turn, then passed back
-    # in as resolve_turn's explicit_language on every later turn in this
-    # session -- pins the session to one model instead of paying the
-    # ~30s VRAM swap a mid-session French<->Darija flip costs on a card
-    # that cannot hold both tutors resident (docs/architecture/
-    # cloud-scaling-plan.md Part 5 / Part 4 optimization 3). A real
-    # in-message "switch to French" instruction still overrides this --
-    # resolve_language's own precedence (explicit < in-message < sticky
-    # override < script) is unchanged; this only supplies the "sticky"
-    # layer's starting value from THIS session's own history instead of
-    # leaving it unset on every turn.
+    # Set after the first successful (non-refusal) turn. ONLY consulted
+    # when settings.voice_language_pinning is True (default False -- see
+    # that setting's comment in app/config.py): this used to be fed
+    # unconditionally into BOTH the STT call's language_hint AND
+    # resolve_turn's explicit_language, which (a) disabled whisper's
+    # language auto-detection on every turn after the first -- forcing
+    # e.g. Darija speech to be force-decoded as French -- and (b) fed
+    # resolve_language's precedence-0 slot, which returns before an
+    # in-message instruction or the message's own script is ever
+    # consulted, contradicting what this comment used to claim. Both
+    # confirmed live 2026-09-05/06, not a hypothesis -- see ADR 0005's
+    # amendment. explicit_language is precedence 0 specifically because a
+    # hard, VRAM-driven pin genuinely needs to override everything else;
+    # the bug was doing that unconditionally rather than gating it on an
+    # explicit choice to trade language-switch fidelity for a single-tutor
+    # deployment's VRAM budget.
     pinned_language: Optional[str] = None
 
     loop = asyncio.get_running_loop()
@@ -231,10 +250,31 @@ async def voice_session(
             kind, item = await out_queue.get()
             if kind == "close":
                 return
-            if kind == "text":
-                await websocket.send_text(item)
-            else:
-                await websocket.send_bytes(item)
+            if websocket.client_state != WebSocketState.CONNECTED:
+                # A disconnect/reload race: the client went away while a
+                # message was already queued. Sending here used to raise
+                # RuntimeError("Unexpected ASGI message 'websocket.send',
+                # after sending 'websocket.close'...") -- observed live in
+                # a real session log -- which killed this task and silently
+                # dropped everything queued after it, not just this item.
+                continue
+            try:
+                if kind == "text":
+                    await websocket.send_text(item)
+                else:
+                    await websocket.send_bytes(item)
+            except Exception:
+                # Deliberately broad. The failure mode this guards against
+                # is not one exception type, it is "this task dies and
+                # every message queued after it is dropped in silence" --
+                # which is how a whole answer (text AND audio) disappeared
+                # while the session still looked healthy. The concrete type
+                # depends on the ASGI server: RuntimeError from Starlette's
+                # own state check, but a websockets/wsproto ConnectionClosed
+                # can surface here too. Losing one message to a dying
+                # connection is fine; losing the drain loop is not.
+                logger.debug("voice session %s: dropped one outbound message", session_id, exc_info=True)
+                continue
 
     drain_task = asyncio.create_task(drain_outbound())
 
@@ -274,13 +314,26 @@ async def voice_session(
 
         def run_and_persist() -> None:
             nonlocal state, pinned_language
-            spoken = _answer_worker(
-                turn=turn, prior_turns=prior_turns, cancel_flag=cancel_flag,
-                loop=loop, out_queue=out_queue, tts_engine=tts_engine,
-            )
-            persist_turn(turn, assistant_content=spoken or refusal_text(turn))
-            pinned_language = turn.response_lang
-            state = _State.LISTENING
+            # try/finally is load-bearing: _answer_worker already catches
+            # AppError and (as of this session) any TTS exception, but
+            # persist_turn/history writes below it can still raise, and an
+            # uncaught exception here used to leave `state` stuck at
+            # SPEAKING forever -- every later mic frame then routes to the
+            # barge-in branch instead of being transcribed, which is a
+            # second, independent explanation (besides Bug A/pinning) for
+            # "it doesn't detect when I talk." Confirmed live 2026-09-05/06.
+            try:
+                spoken = _answer_worker(
+                    turn=turn, prior_turns=prior_turns, cancel_flag=cancel_flag,
+                    loop=loop, out_queue=out_queue, tts_engine=tts_engine,
+                )
+                persist_turn(turn, assistant_content=spoken or refusal_text(turn))
+                if get_settings().voice_language_pinning:
+                    pinned_language = turn.response_lang
+            except Exception:
+                logger.exception("voice session %s: run_and_persist failed", turn.session_id)
+            finally:
+                state = _State.LISTENING
 
         worker_task = asyncio.create_task(asyncio.to_thread(run_and_persist))
 
@@ -291,7 +344,16 @@ async def voice_session(
         try:
             transcript: TranscriptChunk = await asyncio.to_thread(
                 stt_engine.transcribe, audio_bytes, sample_rate=SAMPLE_RATE,
-                language_hint=pinned_language,
+                # ALWAYS None: STT must auto-detect every utterance's actual
+                # language. Passing pinned_language here used to force
+                # whisper's `language=` argument (disabling its own
+                # auto-detection -- not a bias, a hard override), so once a
+                # session pinned to "fr" it force-decoded any later Arabic
+                # speech as French. Confirmed live 2026-09-05/06. Which
+                # language the ANSWER comes back in is a separate decision,
+                # made below via resolve_turn -- conflating the two was the
+                # bug.
+                language_hint=None,
             )
         except SttUnavailableError as e:
             await _send_json(websocket, {"type": "error", "code": "stt_unavailable", "detail": str(e)})
@@ -299,11 +361,51 @@ async def voice_session(
         if not transcript.text.strip():
             return
         await _send_json(websocket, {"type": "transcript.final", "text": transcript.text})
+
+        if get_settings().voice_echo_mode:
+            await _answer_echo(transcript.text)
+            return
+
         turn = await asyncio.to_thread(
             resolve_turn, transcript.text, tenant_id=tenant_id, user_id=user_id,
-            session_id=session_id, requested_domain=domain, explicit_language=pinned_language,
+            session_id=session_id, requested_domain=domain,
+            explicit_language=pinned_language if get_settings().voice_language_pinning else None,
         )
         await begin_answer(turn)
+
+    _ECHO_HEARD = {
+        "fr": "Je vous ai entendu dire : {text}",
+        "darija": "سمعتك كتقول: {text}",
+    }
+
+    async def _answer_echo(text: str) -> None:
+        """settings.voice_echo_mode: bypasses resolve_turn/RAG/the LLM
+        entirely -- transcript straight to a canned reply in the detected
+        language, then TTS. Exercises the real mic-to-speaker path (VAD,
+        STT, language detection, Piper, client playback) with ZERO Ollama/
+        Postgres/LLM VRAM, so both the silent-TTS and language-switching
+        defects can be verified live without a GPU lease. Never enable in
+        a real tenant deployment -- see the setting's docstring.
+        """
+        nonlocal state
+        detected_lang = detect_query_language(text)
+        reply = _ECHO_HEARD[detected_lang].format(text=text)
+        await _send_json(websocket, {"type": "answer.delta", "text": reply})
+        await _send_json(websocket, {"type": "audio.start", "sample_rate": tts_engine.sample_rate})
+        state = _State.SPEAKING
+        try:
+            audio = await asyncio.to_thread(tts_engine.synthesize, reply, language=detected_lang)
+            await websocket.send_bytes(audio)
+        except TtsUnavailableError as e:
+            await _send_json(websocket, {"type": "error", "code": "tts_unavailable", "detail": str(e)})
+        except Exception:
+            logger.exception("voice session %s: echo-mode TTS synthesis failed", session_id)
+            await _send_json(websocket, {"type": "error", "code": "tts_failed", "detail": "Speech synthesis failed."})
+        finally:
+            await _send_json(websocket, {"type": "audio.end"})
+            state = _State.LISTENING
+
+    _warned_frame_size = [False]
 
     try:
         while True:
@@ -313,6 +415,29 @@ async def voice_session(
 
             if "bytes" in message and message["bytes"] is not None:
                 frame = message["bytes"]
+                if len(frame) != FRAME_BYTES and not _warned_frame_size[0]:
+                    # EnergyEndpointer.push() assumes exactly FRAME_BYTES
+                    # (20ms @ 16kHz mono 16-bit) per call; a non-conforming
+                    # client silently redefines what min_speech_ms and
+                    # hangover_ms mean. Log once per session instead of
+                    # staying silent about it.
+                    #
+                    # NOTE this canNOT catch the other half of the problem:
+                    # a browser that declined the 16kHz AudioContext request
+                    # still sends exactly 640 bytes, because
+                    # frontend/src/audio/pcm-worklet.js buffers by SAMPLE
+                    # count (320), not by duration -- so a 48kHz frame would
+                    # pass this check while holding only ~6.7ms of audio.
+                    # Only the client knows its real rate, so that case is
+                    # handled there: the worklet resamples to 16kHz from
+                    # whatever rate the browser hands it, which keeps this
+                    # check meaningful and needs nothing here.
+                    logger.warning(
+                        "voice session %s: inbound frame is %d bytes, expected %d "
+                        "(FRAME_BYTES) -- VAD timing assumptions may be wrong",
+                        session_id, len(frame), FRAME_BYTES,
+                    )
+                    _warned_frame_size[0] = True
                 if state == _State.SPEAKING:
                     # Barge-in: any speech energy while the assistant is
                     # talking cancels the in-flight answer (see
@@ -360,7 +485,15 @@ async def voice_session(
             except Exception:
                 logger.exception("voice session %s: answer worker raised during teardown", session_id)
         await out_queue.put(("close", None))
-        await drain_task
+        try:
+            await drain_task
+        except Exception:
+            # Teardown must reach websocket.close() no matter what the
+            # drain task did on its way out -- an exception escaping here
+            # used to skip the close below AND propagate out of the
+            # endpoint (observed live as an unhandled RuntimeError in a
+            # real session log).
+            logger.exception("voice session %s: outbound drain failed during teardown", session_id)
         try:
             await websocket.close()
         except Exception:

@@ -15,6 +15,11 @@ log() { echo "[entrypoint] $*"; }
 # to the image's Linux venvs. `:=` means an SDL/akash.env value still wins.
 export OCR_VENV_PYTHON="${OCR_VENV_PYTHON:-/app/.ocr_venv/bin/python}"
 export STT_VENV_PYTHON="${STT_VENV_PYTHON:-/app/.speech_venv/bin/python}"
+export TTS_XTTS_VENV_PYTHON="${TTS_XTTS_VENV_PYTHON:-/app/.tts_venv/bin/python}"
+# XTTS checkpoint lives on the persistent /models volume, not in the image:
+# it is 5.6 GB, and baking it in would bloat every image pull (same reasoning
+# as the GGUFs above). Downloaded once per fresh volume in step 3b.
+export TTS_XTTS_MODEL_DIR="${TTS_XTTS_MODEL_DIR:-/models/darija_xtts}"
 export OLLAMA_BASE_URL="${OLLAMA_BASE_URL:-http://localhost:11434}"
 # Relaxations the 8 GB card could not afford (see app/config.py comments). A
 # 32 GB card holds both tutors + embeddings + OCR/STT resident at once.
@@ -89,6 +94,34 @@ for modelfile in /models/*.Modelfile; do
     ( cd /models && ollama create "$name" -f "$(basename "$modelfile")" )
 done
 log "ollama models: $(ollama list | awk 'NR>1{print $1}' | tr '\n' ' ')"
+
+# ── 3b. Fetch the XTTS Darija checkpoint (only when that engine is selected) ─
+# medmac01/darija_xtt_2.0 -- see app/services/tts.py's XttsDarijaEngine and
+# ADR 0006 (including why it is NOT the commercially-safe default). ~5.6 GB,
+# cached on the /models volume, so this is one download per fresh volume.
+if [ "${TTS_ENGINE:-}" = "xtts_darija" ]; then
+    XTTS_BASE="${TTS_XTTS_BASE_URL:-https://huggingface.co/medmac01/darija_xtt_2.0/resolve/main}"
+    mkdir -p "$TTS_XTTS_MODEL_DIR"
+    # local name -> remote name (the checkpoint is published as model_2.1.pth)
+    for pair in "config.json:config.json" "vocab.json:vocab.json" \
+                "speaker_ref.wav:speaker_ref.wav" "model.pth:model_2.1.pth"; do
+        local_name="${pair%%:*}"; remote_name="${pair##*:}"
+        dest="$TTS_XTTS_MODEL_DIR/$local_name"
+        [ -f "$dest" ] && { log "XTTS asset '$local_name' already present — skipping"; continue; }
+        log "downloading XTTS asset '$remote_name' (one-time; cached on /models) ..."
+        # --speed-limit/--speed-time turn a stalled transfer into an error the
+        # retry can act on, rather than a silent hang: the 5.6 GB file dying
+        # mid-transfer is exactly what happened pulling it on a laptop.
+        if curl -fL -C - --retry 20 --retry-delay 5 --retry-all-errors \
+                --speed-limit 2048 --speed-time 60 \
+                -o "$dest.part" "$XTTS_BASE/$remote_name"; then
+            mv "$dest.part" "$dest"
+        else
+            log "ERROR: XTTS asset '$remote_name' failed to download — voice will fail loudly"
+            rm -f "$dest.part"
+        fi
+    done
+fi
 
 # ── 4. Wait for Postgres, then initialize schema (idempotent) ────────────────
 if [ -n "${DATABASE_URL:-}" ]; then

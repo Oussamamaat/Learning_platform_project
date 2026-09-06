@@ -69,6 +69,29 @@ async def _preload_embedding_model() -> None:
 
 
 @app.on_event("startup")
+async def _warm_tts_engine() -> None:
+    """A GPU-resident TTS engine (settings.tts_engine="xtts_darija") pays a
+    ~51s checkpoint load on its first synthesize(). Preloading here moves
+    that off a live voice turn, where it would look like a hang mid-
+    conversation -- same reasoning as _preload_embedding_model above.
+
+    No-op for the default engines: "none" and "piper" have no warmup (Piper
+    loads a ~60MB ONNX lazily in well under a second).
+    """
+    from app.services.tts import get_tts_engine, TtsUnavailableError
+
+    try:
+        engine = get_tts_engine()
+    except TtsUnavailableError:
+        return  # no TTS configured; voice sessions already fail loudly on their own
+    warmup = getattr(engine, "warmup", None)
+    if warmup is not None:
+        import asyncio
+
+        await asyncio.to_thread(warmup)
+
+
+@app.on_event("startup")
 async def _reap_orphaned_uploads() -> None:
     """The single-worker in-process ingest queue (app.services.ingest_queue)
     keeps no state outside Postgres -- a server restart mid-job would

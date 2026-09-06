@@ -15,6 +15,16 @@
 # (torch/torchaudio are intentionally NOT pinned here -- the Dockerfile passes
 # the cu128 --index-url; pinning a version here would fight that index.)
 
+# CUDA runtime libraries: NOT needed in the Docker GPU image (config/Dockerfile.gpu
+# builds on nvidia/cuda:12.8.0-cudnn-runtime, which already ships cuBLAS), but
+# REQUIRED for a local Windows dev venv with no system CUDA Toolkit installed:
+#     .speech_venv/Scripts/python.exe -m pip install nvidia-cublas-cu12
+# ctranslate2 bundles cudnn64_9.dll but NOT cublas64_12.dll, and loads cuBLAS
+# LAZILY -- WhisperModel(device="cuda") constructs fine and only fails at the
+# first actual transcribe() with "Library cublas64_12.dll is not found or cannot
+# be loaded" (confirmed 2026-09-06 via scripts/voice_selftest.py; a construction-
+# only smoke test passes and hides this). torch's copy inside .gguf_venv does not
+# help: it is in a different venv and is not on PATH.
 # --- Candidate 1: faster-whisper (CTranslate2) ---------------------------------
 # scripts/speech_worker_resident.py:48 loads WhisperModel(device="cuda",
 # compute_type="int8_float16"). Needs a CTranslate2 build with Blackwell (sm_120)

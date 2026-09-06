@@ -1,11 +1,14 @@
 # ADR 0004: `resolve_domain` Implicit-Domain Darija Routing
 
-**Status:** Resolved — root cause found and reproduced: NOT an application or Postgres bug. Literal
-Arabic-script text passed as a shell command-line argument (`curl -d '{"message": "..."}'`) gets
-corrupted into ASCII `?` bytes before curl ever builds the request. Fixed at the reproduction site
-(`docs/deploy/lease-00-seed.sh`); a Phase B lease re-run confirms this is also what happened
-2026-09-04, since it wasn't directly observable after the fact (see Constraints)
-**Date:** 2026-09-04 (root-caused later the same session, after the initial write-up below)
+**Status:** Resolved and confirmed on a live Akash lease (RTX 5090, 2026-09-05). Root cause: NOT an
+application or Postgres bug. Literal Arabic-script text passed as a shell command-line argument
+(`curl -d '{"message": "..."}'`) gets corrupted before curl ever builds the request. Fixed at the
+reproduction site (`docs/deploy/lease-00-seed.sh`), and the fixed script's own verification call —
+run inside the lease's real Linux container shell, against the real seeded Postgres, with no
+`domain` and no `language` specified — returned grounded, correctly routed, and correctly
+language-tagged. See **AMENDED (Phase B)** below for the full result and what remains genuinely
+open.
+**Date:** 2026-09-04 (root-caused later the same session); amended 2026-09-05 (Phase B lease run)
 **Depends on:** `benchmark_results/README.md`, `POST_LEASE_MVP_SPRINT_PLAN.md` item 1
 
 ## Problem
@@ -193,6 +196,55 @@ only one shell (Windows/Git-Bash) was directly proven affected: it removes an en
 argv-marshalling risk rather than patching around one observed symptom, and it costs nothing —
 the file-based invocation produced byte-identical correct behavior to the working `requests`-based
 test.
+
+## AMENDED (Phase B, Akash RTX 5090 lease, 2026-09-05)
+
+**What was run.** `docs/deploy/lease-00-seed.sh` (the fixed, heredoc-to-file version) executed
+inside the lease's own Linux container shell (`root@app-...`, not Windows/Git-Bash), against a
+freshly seeded Postgres (25 files / 37 chunks ingested, matching the local Phase A count exactly).
+The script's built-in verification call — the identical Darija PPE question, no `domain`, no
+`language` field — sent via `curl --data-binary @/tmp/seed_check_req.json` (never as a literal
+shell argument), returned:
+
+```json
+{"domain":"industrial","domain_source":"retrieval","language":"darija",
+ "cross_language":true,"degraded":false,
+ "sources":["1.6_ppe_requirements.md","1.7_machine_guarding_basics.md",
+            "1.11_ar_code_travail_salama.md","1.8_hazardous_materials_handling.md"]}
+```
+
+A grounded, coherent Darija answer about PPE, correctly cited, correctly routed to `industrial`,
+correctly language-tagged, `degraded:false`. This is not a near-miss — it is the exact opposite of
+the originally-reported symptom (`domain_source:"tenant_default"`, `language:"fr"`, empty sources,
+instant refusal) for the byte-identical query, on the actual lease-class environment (Linux
+container, real Postgres, real seeded corpus, real GPU-backed stack) rather than a local Windows
+approximation.
+
+**What this confirms.** The fix — never pass literal multibyte-UTF-8 text as a shell command-line
+argument to a native child process; write it to a file and send with `--data-binary @file` instead
+— is sufficient in practice, on the real target environment, to eliminate the failure this ADR was
+opened to explain. For the seed script's own purpose (verifying the corpus is grounded and usable
+before spending lease time on benchmarks), this item is closed.
+
+**What was not re-tested, and why that's an acceptable gap.** Decision point 2 (original write-up)
+scoped a narrower comparison: deliberately re-running the OLD literal-argument form *inside this
+same lease container* to see whether Linux's argv/locale handling corrupts the text into something
+that makes `search_similar_chunks` itself raise (reproducing `"tenant_default"` exactly, not just
+`"no_match"`) — which would confirm the original swallowed-exception hypothesis as the same
+mechanism under a different byte-level corruption. This comparison was **not** run: it would have
+meant deliberately re-invoking the known-broken pattern on a metered, paid lease purely to satisfy
+academic completeness, with no effect on the shipped decision either way (the fix is the same
+regardless of which exact `resolve_domain` exit the old form hits). Given the sprint's time-box and
+that lease minutes have a real dollar cost, this was judged not worth doing once the practical
+question — does the fix work end-to-end on the real target environment — was already answered
+affirmatively. The distinction between "`no_match`" and "`tenant_default`" as the old form's exact
+failure mode on Linux therefore remains formally unconfirmed; the practical fix does not depend on
+resolving it.
+
+**Net effect on this ADR's open question.** Downgraded from "genuinely open, blocks confidence in
+the fix" to "a satisfied academic curiosity, explicitly not chased, with the reason recorded" — the
+fix's correctness is now demonstrated by a positive real-environment result, not merely inferred
+from the absence of a negative one.
 
 ## Constraints acknowledged
 
