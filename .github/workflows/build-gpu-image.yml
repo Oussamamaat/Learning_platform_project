@@ -15,6 +15,7 @@ on:
       - config/Dockerfile.gpu
       - config/requirements.txt
       - config/requirements-speech.txt
+      - config/requirements-tts.txt
       - config/requirements-ocr-paddle.txt
       - config/models/*.Modelfile
       - app/**
@@ -63,6 +64,16 @@ jobs:
           push: true
           platforms: linux/amd64
           provenance: false
-          tags: ghcr.io/oussamamaat/iblog-tutor:gpu
+          # Both :gpu (mutable) and a sha-derived immutable tag are pushed
+          # every build. Akash renders the SDL as k8s, which defaults
+          # imagePullPolicy to IfNotPresent for any non-":latest" tag -- a
+          # provider node that already pulled :gpu for a prior lease reuses
+          # that cached layer for a new lease under the same tag name, and
+          # "Update Deployment" does not fix it (2026-09-06 incident #1: the
+          # correct image was already published, but the node never re-pulled
+          # it). Point the SDL's image: at the sha tag before every lease.
+          tags: |
+            ghcr.io/oussamamaat/iblog-tutor:gpu
+            ghcr.io/oussamamaat/iblog-tutor:gpu-${{ github.sha }}
           cache-from: type=registry,ref=ghcr.io/oussamamaat/iblog-tutor:buildcache
           cache-to: type=registry,ref=ghcr.io/oussamamaat/iblog-tutor:buildcache,mode=max

@@ -28,12 +28,30 @@ Requires (per POST_LEASE_MVP_SPRINT_PLAN.md's local voice setup):
     + soundfile (no torch needed -- see config/requirements-speech.txt's
     own comment on why SeamlessM4T alone needs torch).
   - .env: STT_ENGINE=whisper, STT_MODEL=large-v3-turbo.
+  - --engine xtts_darija only: .tts_eval_venv (coqui-tts, torch cu128,
+    torchcodec) with settings.tts_xtts_venv_python/tts_xtts_model_dir
+    pointed at it (app/config.py's defaults already do, on this machine).
+    Needs ~5.7GB VRAM -- stop Ollama and don't run this alongside the
+    pytest suite (both want the same 8GB card).
 
 Run (from repo root):
-    .gguf_venv/Scripts/python.exe scripts/voice_selftest.py
+    .gguf_venv/Scripts/python.exe scripts/voice_selftest.py [--engine {piper,xtts_darija,auto}]
 
-Uses ZERO LLM VRAM -- Ollama does not need to be running.
+--engine defaults to "piper" (this script's original, zero-VRAM behavior).
+Added 2026-09-06: before this flag, PiperEngine() was hardcoded here, so
+XttsDarijaEngine -> _ResidentTtsWorker -> tts_worker_resident.py -- the
+exact path that failed on that lease's TTS incident -- had never run
+outside a paid lease. "auto" goes through the real get_tts_engine()
+probe-and-fallback resolution (app/services/tts.py) instead of a fixed
+engine, which is how to verify the fallback-to-Piper path locally: point
+settings.tts_xtts_model_dir at something broken and confirm this script
+still produces audio.
+
+Uses ZERO LLM VRAM -- Ollama does not need to be running. --engine
+xtts_darija/auto DOES use GPU VRAM for TTS (~5.7GB); --engine piper (the
+default) stays CPU-only.
 """
+import argparse
 import sys
 import time
 import traceback
@@ -99,16 +117,42 @@ def _frames(pcm_bytes: bytes) -> list[bytes]:
     return [pcm_bytes[i:i + FRAME_BYTES] for i in range(0, len(pcm_bytes) - FRAME_BYTES + 1, FRAME_BYTES)]
 
 
+def _resolve_tts_engine(engine_arg: str):
+    from app.services.tts import PiperEngine, XttsDarijaEngine, get_tts_engine
+
+    if engine_arg == "piper":
+        return PiperEngine()
+    if engine_arg == "xtts_darija":
+        return XttsDarijaEngine()
+    # "auto": the real production resolution path, including fallback --
+    # driven by settings.tts_engine / settings.tts_fallback_engine, not by
+    # this script's own --engine choice.
+    return get_tts_engine()
+
+
 def main() -> None:
+    parser = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    parser.add_argument(
+        "--engine", choices=["piper", "xtts_darija", "auto"], default="piper",
+        help="TTS engine to exercise (default: piper, zero VRAM). 'xtts_darija' "
+             "instantiates the resident-worker path directly; 'auto' goes through "
+             "get_tts_engine()'s real probe-and-fallback resolution.",
+    )
+    args = parser.parse_args()
+
     from app.config import get_settings
-    from app.services.tts import PiperEngine, TtsUnavailableError
+    from app.services.tts import TtsUnavailableError
     from app.services.stt import get_stt_engine, SttUnavailableError
 
     settings = get_settings()
-    print(f"tts_engine={settings.tts_engine!r} stt_engine={settings.stt_engine!r} "
-          f"stt_model={settings.stt_model!r}\n")
+    print(f"--engine={args.engine!r} tts_engine={settings.tts_engine!r} "
+          f"stt_engine={settings.stt_engine!r} stt_model={settings.stt_model!r}\n")
 
-    tts = PiperEngine()
+    tts = _resolve_tts_engine(args.engine)
+    print(f"resolved TTS engine: {type(tts).__name__} "
+          f"(name={getattr(tts, 'name', '?')}, sample_rate={tts.sample_rate})\n")
     try:
         stt = get_stt_engine()
     except SttUnavailableError as e:

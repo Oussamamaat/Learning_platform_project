@@ -110,12 +110,30 @@ RUN --mount=type=cache,target=/root/.cache/pip,sharing=locked \
 # system-deps layer above already installs.
 # NOTE the checkpoint itself (5.6 GB) is NOT baked in: entrypoint.sh fetches it
 # onto the persistent /models volume, same as the GGUFs.
+#
+# CUDA-13 shim (2026-09-06 incident #3): torchcodec's PyPI linux wheel dlopens
+# libcudart.so.13/libnvrtc.so.13 but declares NO nvidia-* dependency at all --
+# pip has no matching cu128-built torchcodec to resolve to instead (checked:
+# download.pytorch.org's cu128 and cpu indices both cap at 0.9.1 for
+# linux-x86_64/cp312, which targets torch 2.9 and fights the torch 2.11
+# install above), so the plain PyPI wheel silently installs and fails only at
+# import time. The fix proven live in-pod that session was installing the
+# matching CUDA 13 runtime + nvrtc packages and pointing the loader at them;
+# baking it in here (instead of leaving it in a container's writable layer,
+# which a restart wipes -- incident #5) is what makes it survive a restart.
+# The import assertion at the end makes a build that can't speak fail HERE,
+# not at demo time.
 COPY config/requirements-tts.txt config/requirements-tts.txt
 RUN --mount=type=cache,target=/root/.cache/pip,sharing=locked \
     python3.12 -m venv /app/.tts_venv \
     && /app/.tts_venv/bin/pip install --upgrade pip \
     && /app/.tts_venv/bin/pip install torch torchaudio --index-url ${TORCH_CUDA_INDEX} \
-    && /app/.tts_venv/bin/pip install -r config/requirements-tts.txt
+    && /app/.tts_venv/bin/pip install -r config/requirements-tts.txt \
+    && /app/.tts_venv/bin/pip install "nvidia-cuda-runtime==13.3.29" "nvidia-cuda-nvrtc==13.3.33" \
+    && (find /app/.tts_venv -name 'libcudart.so.13*' -o -name 'libnvrtc.so.13*') \
+       | xargs -n1 dirname | sort -u > /etc/ld.so.conf.d/tts-cuda13.conf \
+    && ldconfig \
+    && /app/.tts_venv/bin/python -c "from torchcodec.decoders import AudioDecoder; print('torchcodec OK')"
 
 # ── venv 4/4: .ocr_venv — PaddleOCR-VL (BEST-EFFORT on Blackwell) ─────────────
 # paddlepaddle-gpu may not ship an sm_120 wheel yet; `|| true` keeps a failed

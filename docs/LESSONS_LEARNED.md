@@ -110,3 +110,39 @@ triggered the real attribute-access path; only a live, unmocked failure hit it.
 **Proven fix:** `AppError.__init__` now sets `self.message`; regression-tested in
 `tests/test_errors.py`.
 → `docs/architecture/data-and-retrieval.md` §pgvector backend, `app/errors.py`
+
+### 10. A fix inside a container's writable layer is not a fix
+**Problem:** a live 2026-09-06 lease hand-patched a broken XTTS `torchcodec`/CUDA
+link (`nvidia-cuda-runtime`/`nvidia-cuda-nvrtc` packages + loader symlinks) directly
+inside the running pod. A restart minutes later (a separate, still-unexplained
+incident) wiped it, and every voice session went silently unable to speak again for
+the rest of the lease.
+**Root cause:** the fix lived only in the container's ephemeral writable layer
+(`.tts_venv`'s site-packages, `/usr/lib` symlinks) — Akash storage is ephemeral by
+the SDL's own design, and container restarts are exactly the case that design does
+not survive.
+**Proven fix:** bake the shim into `config/Dockerfile.gpu`'s `.tts_venv` build step,
+with an import assertion (`torchcodec.decoders.AudioDecoder`) right after it, so a
+build that can't produce a working voice engine fails in CI, not at a lease's demo
+time.
+→ `docs/deploy/lease-2026-09-06-incident-log.md` #3
+
+### 11. A self-test that instantiates a different engine than production tests nothing
+**Problem:** `scripts/voice_selftest.py` hardcoded `PiperEngine()`. The engine that
+actually failed on a live lease — `XttsDarijaEngine` → `_ResidentTtsWorker` →
+`scripts/tts_worker_resident.py` — had never once been exercised outside a paid GPU
+lease, despite the checkpoint and a compatible venv (`.tts_eval_venv`) already sitting
+on the laptop that wrote the self-test.
+**Root cause:** the self-test proved the *shape* of the pipeline (VAD, STT
+round-trip) works, and quietly let that stand in for proving the *configured*
+engine works — a difference invisible unless someone reads which class the script
+constructs.
+**Proven fix:** an `--engine {piper,xtts_darija,auto}` flag routes through the real
+engine classes (or the real `get_tts_engine()` resolution for `auto`), so running the
+self-test against the actually-deployed engine choice is one flag away instead of a
+code edit. Also caught, live, on the first run with the new flag: a real (not
+simulated) XTTS failure on this machine (missing `FFMPEG_SHARED_BIN` on Windows),
+which correctly exercised the new fallback-to-Piper path with real synthesized audio
+as output — proof the fallback mechanism (lesson learned alongside this one) actually
+works against a genuine failure, not just a mocked one.
+→ `docs/deploy/local-preflight.md`, `app/services/tts.py`

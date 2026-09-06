@@ -71,6 +71,18 @@ services:
   app:
     # GHCR path is lowercase (registry requirement) even though the GitHub user
     # is "Oussamamaat". Package visibility must be Public — see header note 1.
+    #
+    # Before THIS lease: replace :gpu with the sha-derived tag CI just
+    # pushed (build-gpu-image.yml now pushes both `:gpu` and
+    # `:gpu-<git-sha>` on every build). k8s defaults imagePullPolicy to
+    # IfNotPresent for any non-":latest" tag, so a provider node that
+    # already cached `:gpu` from a prior lease reuses it for a new one --
+    # "Update Deployment" does not fix this (2026-09-06 incident #1: the
+    # correct image was already published, the node just never re-pulled
+    # it). Get the sha via `git rev-parse HEAD` after the build that
+    # includes this session's fixes, e.g.:
+    #   image: ghcr.io/oussamamaat/iblog-tutor:gpu-<sha>
+    # Confirm it exists first: `docker manifest inspect <that tag>`.
     image: ghcr.io/oussamamaat/iblog-tutor:gpu
     env:
       # ── wiring ──────────────────────────────────────────────────────────
@@ -93,7 +105,17 @@ services:
       - STT_VENV_PYTHON=/app/.speech_venv/bin/python
       - TTS_XTTS_VENV_PYTHON=/app/.tts_venv/bin/python
       # ── every engine ON from the start — see header note 3 ──────────────
-      - STT_ENGINE=whisper       # none | whisper | seamless
+      # seamless, not whisper: ADR 0009's own normalized re-scoring (real
+      # GPU lease, 2026-09-04) found whisper's Darija WER is 0.699 vs
+      # seamless's 0.428 -- a real, confirmed gap, not a metric artifact --
+      # and its Decision section names seamless as "the pick for
+      # Darija-heavy traffic." Switched here 2026-09-06 to match that
+      # already-made decision (the SDL had drifted from it, running whisper
+      # anyway). seamless ignores STT_MODEL below (fixed to
+      # facebook/seamless-m4t-v2-large per app/services/stt.py's
+      # SeamlessEngine); whisper remains preferable for French-only traffic
+      # if a future tenant needs that instead.
+      - STT_ENGINE=seamless      # none | whisper | seamless
       # xtts_darija = medmac01/darija_xtt_2.0, the Darija voice chosen on
       # live listening (ADR 0006). NOT commercially licensed — it inherits
       # XTTS-v2's CPML — so this is an EVALUATION deployment setting, not a
@@ -104,13 +126,17 @@ services:
       - TTS_ENGINE=xtts_darija   # none | piper | xtts_darija
       - TTS_XTTS_MODEL_DIR=/models/darija_xtts
       - STT_MODEL=large-v3
-      # web_search_engine stays "none" (the default) for this lease -- no
-      # Tavily key has been exercised against the live API yet (see ADR
-      # 0010's "Open, for later"). To opt in: set WEB_SEARCH_ENGINE=tavily
-      # and TAVILY_API_KEY=<key> here, then update the deployment. Nothing
-      # else in this SDL needs to change -- app/services/web_search.py's
-      # NullWebSearchEngine keeps chat.py's refusal gate byte-identical to
-      # today's behaviour until this is flipped.
+      # web_search_engine stays "none" (the default) here -- verify it live
+      # locally first with scripts/web_search_selftest.py (a real Tavily
+      # query + a real gemma2:9b generation, ADR 0010's own "no live key
+      # exercised yet" item) before flipping it on a lease. To opt in: set
+      # WEB_SEARCH_ENGINE=tavily and TAVILY_API_KEY=<key> here, then update
+      # the deployment. entrypoint.sh pulls gemma2:9b on boot when this is
+      # "tavily" (added 2026-09-06 -- ADR 0010's generation model was never
+      # provisioned before, so enabling this used to call a model that
+      # didn't exist). Nothing else in this SDL needs to change --
+      # app/services/web_search.py's NullWebSearchEngine keeps chat.py's
+      # refusal gate byte-identical to today's behaviour until this is flipped.
       - WEB_SEARCH_ENGINE=none   # none | tavily
       - OCR_ENGINE=paddleocr     # paddleocr | none — lazy-loaded, won't block
                                  # boot if the paddle install failed (verified:
@@ -121,6 +147,12 @@ services:
       - OCR_KEEP_RESIDENT=true
       - OCR_WORKER_IDLE_RELEASE_SECONDS=0
       - SPEECH_WORKER_IDLE_RELEASE_SECONDS=0
+      # Found missing here during the 2026-09-06 incident review: without
+      # it, app/config.py's 300s default silently released the XTTS worker
+      # after 5 idle minutes (easy during a demo), and the next spoken
+      # sentence paid the full ~51s checkpoint reload -- looked exactly
+      # like "it doesn't speak" / "the latency increased".
+      - TTS_WORKER_IDLE_RELEASE_SECONDS=0
       - EMBEDDING_BATCH_SIZE=128
       # ── driver-constraint workaround — needed on every tier, not just ────
       # Blackwell: the base image's NVIDIA_REQUIRE_CUDA stops at driver<566,
@@ -155,7 +187,19 @@ profiles:
           units: 8                    # was 16 — models sit on the GPU, OCR
                                        # doesn't need many cores
         memory:
-          size: 32Gi                  # was 64Gi
+          size: 48Gi                  # was 64Gi, then 32Gi -- raised back up
+                                       # after the 2026-09-06 lease's incident
+                                       # #5 unexplained restart (never
+                                       # confirmed OOMKilled via the Console
+                                       # Events tab, but both 9B tutors
+                                       # pinned at OLLAMA_KEEP_ALIVE=24h +
+                                       # whisper large-v3 + resident
+                                       # PaddleOCR + bge-m3 + a torch.load()
+                                       # of the 5.6GB XTTS checkpoint (which
+                                       # materializes in HOST ram before
+                                       # .to(cuda)) is tight at 32Gi. Cheap
+                                       # insurance; check the Events tab
+                                       # again this lease regardless.
         gpu:
           units: 1
           attributes:

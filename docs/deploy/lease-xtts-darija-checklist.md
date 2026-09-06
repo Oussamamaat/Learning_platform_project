@@ -46,8 +46,9 @@ container.
 ## Phase 1 — before spending anything (local, free)
 
 - [ ] `git status` clean-ish; commit the voice + web-search-fallback work.
-- [ ] `.gguf_venv/Scripts/python.exe -m pytest` → **742 passed** (729 + 13 new for ADR 0010's web
-      search fallback). Run it with the GPU idle:
+- [ ] `.gguf_venv/Scripts/python.exe -m pytest` → **750 passed** (742 + 8 new for the TTS
+      fallback-engine resolution added this session — `tests/test_tts_engine_selection.py`).
+      Run it with the GPU idle:
       the suite loads bge-m3, and on the 8GB laptop it will stall or OOM if a local XTTS server
       is holding 5.7GB at the same time (observed 2026-09-06 — a `torch...to()` timeout, not a
       code failure).
@@ -70,7 +71,21 @@ container.
       - `[tts_worker_resident] loaded darija_xtt_2.0 on cuda`
       - `[tts_worker_resident] speaker latents ready`
       - `starting uvicorn on 0.0.0.0:8000`
-- [ ] `curl -sf http://<ingress>/health` → `{"status":"ok",...}`
+- [ ] `curl -sf http://<ingress>/health` → check `tts.active == "xtts_darija"` and
+      `tts.fallback_used == false`. **This is the assertion the 2026-09-06 lease didn't have** --
+      `/health` used to say only `{"status":"ok"}` regardless of whether the voice engine actually
+      loaded, so a broken XTTS looked identical to a healthy one from this one curl. If
+      `tts.fallback_used == true`, the session is speaking Piper, not the Darija voice this lease
+      exists to evaluate -- check `tts.error` for why before going further, don't assume it's fine
+      because the session isn't silent.
+- [ ] Check the Console **Events** tab (not Logs) once, now, before any load — a baseline read for
+      comparing against later if a restart happens (2026-09-06 incident #5, never root-caused:
+      `OOMKilled` vs `Evicted` vs something else). The memory profile was raised to 48Gi this
+      session for exactly this risk; confirm the Events tab agrees nothing already happened.
+- [ ] **Seed immediately, before anything else** — `bash docs/deploy/lease-00-seed.sh`. Skipping
+      this under time pressure is exactly what produced incident #4 (every chat/voice turn refusing
+      with `domain_source: "no_match"` because the corpus was never ingested) on the last lease.
+      Do this before opening a browser, before the voice-only test below, before anything.
 - [ ] **Repoint the frontend at the new lease.** `frontend/.env` currently points at
       `http://127.0.0.1:8123` (this session's local voice testing) — `frontend/.env.akash-lease.bak`
       holds the *previous* (2026-09-05) lease's ingress URL, which is now dead; a new lease gets a
@@ -80,10 +95,16 @@ container.
 If the checkpoint download stalls (it did on a laptop connection), `aria2c -x16 -s16 -k1M` inside
 the pod is the known-good workaround, writing to `/models/darija_xtts/model.pth`.
 
+**Rollback, no image rebuild needed:** if XTTS misbehaves live (won't load, sounds worse than
+expected, runs out of time to debug), set `TTS_ENGINE=piper` in the Console SDL editor and hit
+Update Deployment. Piper and its voices already ship in the image; nothing else in this change is
+XTTS-specific. As of this session, an XTTS load failure now does this automatically at boot anyway
+(`tts_fallback_engine=piper`) — this manual override is for "XTTS loads fine but you want Piper for
+other reasons," not for a load failure, which no longer needs manual intervention.
+
 ## Phase 3 — verify the pipeline
 
-- [ ] Seed + gates: `bash docs/deploy/lease-00-seed.sh` (unchanged; already fixed for the
-      Arabic-argv bug — ADR 0004).
+- [ ] Corpus + gates already confirmed above (seed ran right after `/health`, per Phase 2).
 - [ ] **Voice-only, no LLM** — the fastest way to prove mic→speaker works before involving the
       tutor. Set `VOICE_ECHO_MODE=true` and open the frontend:
       it transcribes you and speaks back *"سمعتك كتقول: …"* / *"Je vous ai entendu dire : …"*

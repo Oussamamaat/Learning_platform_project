@@ -28,7 +28,6 @@ built.
 """
 import json
 import logging
-from functools import lru_cache
 from pathlib import Path
 from typing import Optional, Protocol
 
@@ -417,17 +416,17 @@ class XttsDarijaEngine:
         Measured 2026-09-06: the first synthesize() costs ~51s (5.6GB
         checkpoint, then conditioning latents), every later one ~2s. Without
         this, that ~50s lands on a user's first spoken sentence, inside a
-        live voice session, looking exactly like a hang. app/main.py calls
-        it at startup for the same reason it preloads bge-m3 there.
+        live voice session, looking exactly like a hang.
 
-        Best-effort: a warmup failure must not stop the server from booting
-        -- the real synthesize() call will surface the error properly to the
-        client (as a tts_failed event) if the engine is genuinely broken.
+        Raises on failure -- deliberately, unlike a typical "best-effort"
+        warmup. get_tts_engine() is the caller (not app/main.py directly
+        any more) and uses a failure here as the signal to fall back to
+        settings.tts_fallback_engine, so a broken XTTS load degrades a
+        voice session to a working engine instead of leaving every session
+        silently unable to speak for the rest of the process's life (the
+        2026-09-06 incident this fallback exists for).
         """
-        try:
-            self.synthesize("مرحبا", language="darija")
-        except Exception:
-            logger.exception("XTTS warmup failed -- first real synthesis will pay the load cost")
+        self.synthesize("مرحبا", language="darija")
 
     def synthesize(self, text: str, *, language: str) -> bytes:
         import os
@@ -470,16 +469,86 @@ _ENGINES = {
     "xtts_darija": XttsDarijaEngine,
 }
 
+# Resolved once per process by get_tts_engine() below -- manual singleton
+# (not functools.lru_cache) because resolution now does real work (probing
+# the primary engine, possibly falling back) whose outcome app/main.py's
+# /health needs to read back via active_tts_engine_status(), which a plain
+# lru_cache has no way to expose.
+_active_engine: Optional["TtsEngine"] = None
+_active_status: dict = {}
 
-@lru_cache(maxsize=1)
-def get_tts_engine() -> TtsEngine:
-    """Cached singleton, keyed off settings.tts_engine at first call --
-    same read-once-per-process contract as app.services.ocr.get_ocr_engine.
-    """
-    engine_name = get_settings().tts_engine
+
+def _instantiate(engine_name: str) -> "TtsEngine":
     engine_cls = _ENGINES.get(engine_name)
     if engine_cls is None:
         raise TtsUnavailableError(
-            f"Unknown settings.tts_engine={engine_name!r}. Valid values: {sorted(_ENGINES)}."
+            f"Unknown TTS engine {engine_name!r}. Valid values: {sorted(_ENGINES)}."
         )
     return engine_cls()
+
+
+def get_tts_engine() -> TtsEngine:
+    """Resolve the TTS engine for this process.
+
+    Read-once-per-process contract, same as app.services.ocr.get_ocr_engine
+    -- but unlike a plain lru_cache, resolution here PROBES the configured
+    engine (calling its warmup() if it defines one -- only XttsDarijaEngine
+    does) and falls back to settings.tts_fallback_engine ("piper" by
+    default) if that probe raises. This is the fix for the 2026-09-06
+    incident where a torchcodec/CUDA mismatch inside the XTTS worker left
+    every voice session on that lease silently unable to speak: the engine
+    choice was made once at import time with no health signal and no
+    fallback, so the failure was invisible until a human opened a browser.
+
+    Idempotent: once resolved (success or fallback), the same instance is
+    returned on every call for the life of the process. Call
+    active_tts_engine_status() for what /health reports.
+    """
+    global _active_engine
+    if _active_engine is not None:
+        return _active_engine
+
+    settings = get_settings()
+    primary_name = settings.tts_engine
+    primary = _instantiate(primary_name)
+    status = {"configured": primary_name, "active": primary_name, "fallback_used": False}
+
+    probe = getattr(primary, "warmup", None)
+    if probe is None:
+        status["ok"] = True
+        _active_engine = primary
+    else:
+        try:
+            probe()
+            status["ok"] = True
+            _active_engine = primary
+        except Exception as e:
+            status["ok"] = False
+            status["error"] = f"{type(e).__name__}: {e}"
+            fallback_name = settings.tts_fallback_engine
+            if fallback_name and fallback_name not in ("none", primary_name):
+                logger.error(
+                    "TTS engine %r failed to load (%s) -- falling back to %r for the "
+                    "rest of this process's life",
+                    primary_name, status["error"], fallback_name,
+                )
+                _active_engine = _instantiate(fallback_name)
+                status["active"] = fallback_name
+                status["fallback_used"] = True
+            else:
+                logger.error(
+                    "TTS engine %r failed to load (%s) and no fallback is configured "
+                    "(settings.tts_fallback_engine=%r) -- voice sessions will fail loudly",
+                    primary_name, status["error"], fallback_name,
+                )
+                _active_engine = primary  # unchanged: fail loudly on synthesize(), as before
+
+    _active_status.clear()
+    _active_status.update(status)
+    return _active_engine
+
+
+def active_tts_engine_status() -> dict:
+    """For app/main.py's /health. Empty until get_tts_engine() has run once
+    (e.g. in a process/test that never touches TTS)."""
+    return dict(_active_status)

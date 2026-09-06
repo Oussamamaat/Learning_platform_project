@@ -23,6 +23,14 @@ coqui-tts>=0.27.0
 # transformers 5.x: `ImportError: cannot import name 'isin_mps_friendly' from
 # transformers.pytorch_utils` (confirmed 2026-09-06). Cap it here.
 transformers>=4.57,<5
-# From PyTorch 2.9 coqui-tts requires torchcodec for audio IO. Needs FFmpeg's
-# SHARED libraries present (the Dockerfile's apt layer installs ffmpeg).
+# From PyTorch 2.9 coqui-tts requires torchcodec for audio IO. NOT an FFmpeg
+# problem despite the package's own docs (confirmed 2026-09-06: ffmpeg 6.1.1
+# was fully present with all libav*/libsw* libs when this broke) -- the
+# actual cause is torchcodec's linux wheel dlopening libcudart.so.13/
+# libnvrtc.so.13 while torch here is a cu128 (CUDA 12.8) build, and no
+# matching cu128 torchcodec wheel exists on PyPI or download.pytorch.org
+# (both cap at 0.9.1 for linux-x86_64/cp312). config/Dockerfile.gpu's
+# .tts_venv step installs the CUDA 13 runtime + nvrtc packages and an import
+# assertion right after this install to catch it at build time instead of at
+# a lease's demo time -- see that file's comment for the full account.
 torchcodec>=0.16.0

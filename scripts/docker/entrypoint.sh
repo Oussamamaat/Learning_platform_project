@@ -27,6 +27,13 @@ export OLLAMA_KEEP_ALIVE="${OLLAMA_KEEP_ALIVE:-24h}"
 export OCR_KEEP_RESIDENT="${OCR_KEEP_RESIDENT:-true}"
 export OCR_WORKER_IDLE_RELEASE_SECONDS="${OCR_WORKER_IDLE_RELEASE_SECONDS:-0}"
 export SPEECH_WORKER_IDLE_RELEASE_SECONDS="${SPEECH_WORKER_IDLE_RELEASE_SECONDS:-0}"
+# Missing here until 2026-09-06's incident review: the app defaults this to
+# 300s (app/config.py), so 5 idle minutes on a lease -- easy during a live
+# demo/meeting -- silently released the XTTS worker and made the NEXT
+# spoken sentence pay the full ~51s checkpoint reload. Looked exactly like
+# "it doesn't speak" / "latency increased". A 32GB+ card has no VRAM
+# pressure reason to ever release it.
+export TTS_WORKER_IDLE_RELEASE_SECONDS="${TTS_WORKER_IDLE_RELEASE_SECONDS:-0}"
 export EMBEDDING_BATCH_SIZE="${EMBEDDING_BATCH_SIZE:-128}"
 export UPLOADS_READ_ONLY="${UPLOADS_READ_ONLY:-true}"
 # Where `ollama serve` binds (in-container only; not exposed by the SDL).
@@ -94,6 +101,24 @@ for modelfile in /models/*.Modelfile; do
     ( cd /models && ollama create "$name" -f "$(basename "$modelfile")" )
 done
 log "ollama models: $(ollama list | awk 'NR>1{print $1}' | tr '\n' ' ')"
+
+# ── 3a. Pull the web-search-fallback generation model (opt-in feature) ──────
+# ADR 0010: app.services.llm.generate_web_fallback_response deliberately
+# uses settings.web_search_fallback_model ("gemma2:9b"), NOT either
+# fine-tuned tutor -- live-tested 2026-09-06, the tutors false-refused 4/5
+# answerable web-snippet questions the base model got right 3/3. That model
+# was never added to entrypoint.sh's own provisioning (ADR 0010's own "Open,
+# for later"): enabling WEB_SEARCH_ENGINE=tavily on a lease without this
+# calls a model that was never pulled. Gated on the same env var so a lease
+# running with the fallback off doesn't pay a ~5.4GB pull for nothing.
+if [ "${WEB_SEARCH_ENGINE:-}" = "tavily" ]; then
+    if ollama list 2>/dev/null | grep -q "^gemma2:9b\b"; then
+        log "web-search-fallback model 'gemma2:9b' already present — skipping"
+    else
+        log "pulling web-search-fallback model 'gemma2:9b' (~5.4GB, one-time) ..."
+        ollama pull gemma2:9b || log "ERROR: 'ollama pull gemma2:9b' failed — web-search fallback will fail loudly"
+    fi
+fi
 
 # ── 3b. Fetch the XTTS Darija checkpoint (only when that engine is selected) ─
 # medmac01/darija_xtt_2.0 -- see app/services/tts.py's XttsDarijaEngine and

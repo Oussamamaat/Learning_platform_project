@@ -327,6 +327,16 @@ class Settings(BaseSettings):
     voice_echo_mode: bool = False
 
     tts_engine: str = "none"  # "none" | "piper" | "xtts_darija"
+    # Engine app.services.tts.get_tts_engine() switches to if tts_engine
+    # fails to load (probed once at process startup via that engine's
+    # warmup(), if it defines one -- only XttsDarijaEngine does today). Set
+    # to "none" to disable the fallback and keep the old fail-loud-only
+    # contract. Added after the 2026-09-06 lease: a torchcodec/CUDA
+    # mismatch left every voice session silently unable to speak for the
+    # whole lease, when falling back to the MIT-licensed, always-available
+    # Piper engine would have kept the session usable. app/main.py's
+    # /health reports whether the fallback is currently in effect.
+    tts_fallback_engine: str = "piper"  # "none" | "piper" | "xtts_darija"
     # Piper voice models (ONNX, downloaded separately -- see
     # app.services.tts.PiperEngine's docstring for why Piper was chosen
     # over XTTS-v2/MMS-TTS: CPU-only, ~zero VRAM contention with the

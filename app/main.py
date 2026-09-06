@@ -71,24 +71,25 @@ async def _preload_embedding_model() -> None:
 @app.on_event("startup")
 async def _warm_tts_engine() -> None:
     """A GPU-resident TTS engine (settings.tts_engine="xtts_darija") pays a
-    ~51s checkpoint load on its first synthesize(). Preloading here moves
-    that off a live voice turn, where it would look like a hang mid-
-    conversation -- same reasoning as _preload_embedding_model above.
+    ~51s checkpoint load on its first synthesize(). Calling get_tts_engine()
+    here (in a thread, off the event loop) moves that load off a live voice
+    turn, where it would look like a hang mid-conversation -- same
+    reasoning as _preload_embedding_model above.
 
-    No-op for the default engines: "none" and "piper" have no warmup (Piper
-    loads a ~60MB ONNX lazily in well under a second).
+    get_tts_engine() itself now does the probing and fallback decision
+    (app.services.tts docstring) -- this hook just needs to make sure that
+    happens at boot, not on the first WS connection, and that a total
+    failure (no engine loadable, no fallback configured) does not crash
+    server startup. /health reports the outcome via active_tts_engine_status().
     """
+    import asyncio
+
     from app.services.tts import get_tts_engine, TtsUnavailableError
 
     try:
-        engine = get_tts_engine()
+        await asyncio.to_thread(get_tts_engine)
     except TtsUnavailableError:
         return  # no TTS configured; voice sessions already fail loudly on their own
-    warmup = getattr(engine, "warmup", None)
-    if warmup is not None:
-        import asyncio
-
-        await asyncio.to_thread(warmup)
 
 
 @app.on_event("startup")
@@ -134,4 +135,21 @@ def _release_resources() -> None:
 
 @app.get("/health", tags=["health"])
 async def health_check():
-    return {"status": "ok", "version": get_settings().app_version}
+    """Includes voice-engine status, not just process liveness -- the
+    2026-09-06 lease's TTS failure would have returned {"status":"ok"} from
+    this endpoint the whole time, since it said nothing about whether audio
+    could actually be produced. `tts` reflects
+    app.services.tts.active_tts_engine_status() (empty until
+    get_tts_engine() has run at least once, e.g. at startup); `stt` reports
+    only the configured engine name since app.services.stt has no
+    equivalent probe/fallback today.
+    """
+    from app.services.tts import active_tts_engine_status
+
+    settings = get_settings()
+    return {
+        "status": "ok",
+        "version": settings.app_version,
+        "tts": active_tts_engine_status(),
+        "stt": {"configured": settings.stt_engine},
+    }
