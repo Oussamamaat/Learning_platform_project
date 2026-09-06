@@ -1,0 +1,50 @@
+# Copies the manifest already published at ghcr.io/oussamamaat/iblog-tutor:gpu
+# to an immutable, never-before-seen tag. No rebuild, no layer transfer -- it is
+# a registry-side manifest copy that finishes in seconds.
+#
+# Why this exists: Akash providers deploy the SDL as a Kubernetes pod, and k8s
+# defaults imagePullPolicy to IfNotPresent for any tag that is not `:latest`.
+# A node that pulled `:gpu` for an earlier lease therefore reuses that cached
+# image for a new lease under the same tag -- so a freshly pushed `:gpu` never
+# reaches the container, and "Update Deployment" does not help either, because
+# the tag name it resolves is unchanged. Pointing the SDL at a tag the node has
+# never seen is what forces a real pull. Observed 2026-09-06.
+#
+# NOTE: this filename is deliberately absent from build-gpu-image.yml's `paths:`
+# filter, so committing it does not trigger a ~22 min GPU image rebuild.
+name: Retag GPU image
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_tag:
+        description: Existing tag to copy from
+        required: true
+        default: gpu
+      target_tag:
+        description: New immutable tag to create (e.g. gpu-9d314ee)
+        required: true
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  retag:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Copy manifest to the new tag
+        run: |
+          set -euo pipefail
+          src="ghcr.io/oussamamaat/iblog-tutor:${{ inputs.source_tag }}"
+          dst="ghcr.io/oussamamaat/iblog-tutor:${{ inputs.target_tag }}"
+          docker buildx imagetools create -t "$dst" "$src"
+          echo "--- $dst now resolves to ---"
+          docker buildx imagetools inspect "$dst" | head -5
