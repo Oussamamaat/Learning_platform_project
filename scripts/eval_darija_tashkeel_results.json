@@ -1,0 +1,68 @@
+[
+  {
+    "index": 0,
+    "bare": "خصك تلبس الكاسك ديال الحماية.",
+    "diacritized": "خَصُّكَ تَلْبٌّسُ الْكَاسِكُ دِيَالَ الْحِمَايَةِ.",
+    "bare_seconds": 11.07,
+    "bare_rtf": 3.459,
+    "bare_wav": "tashkeel_eval_0_bare.wav",
+    "diacritized_seconds": 13.03,
+    "diacritized_rtf": 3.189,
+    "diacritized_wav": "tashkeel_eval_0_diacritized.wav"
+  },
+  {
+    "index": 1,
+    "bare": "على حساب المادة 8، خاصك تتأكد من العزلة قبل ما تبدا.",
+    "diacritized": "عَلَى حِسَابِ الْمَادَّةِ 8، خَاصُّك تَتَأَكَّدُ مِنْ الْعُزْلَةِ قَبْلَ مَا تَبْدَا.",
+    "bare_seconds": 14.44,
+    "bare_rtf": 2.994,
+    "bare_wav": "tashkeel_eval_1_bare.wav",
+    "diacritized_seconds": 12.18,
+    "diacritized_rtf": 2.884,
+    "diacritized_wav": "tashkeel_eval_1_diacritized.wav"
+  },
+  {
+    "index": 2,
+    "bare": "قبل ما تبدا الخدمة، تأكد أن التجهيزات معزولة مزيان وأن الترخيص ديال الخدمة موقع.",
+    "diacritized": "قَبْلَ مَا تُبْدَا الْخِدْمَةُ، تَأَكَّدَ أَنَّ التَّجْهِيزَاتِ مَعْزُولَةٌ مِزْيَانِ وَأَنَّ التَّرْخِيصَ دِيَالُ الْخِدْمَةِ مُوقِعٌ.",
+    "bare_seconds": 14.53,
+    "bare_rtf": 2.899,
+    "bare_wav": "tashkeel_eval_2_bare.wav",
+    "diacritized_seconds": 18.41,
+    "diacritized_rtf": 2.915,
+    "diacritized_wav": "tashkeel_eval_2_diacritized.wav"
+  },
+  {
+    "index": 3,
+    "bare": "هوما مخبيين شي حاجة انا متيقن",
+    "diacritized": "هَوَمًا مُخَبِّيَينَ شَيُّ حَاجَةٍ انَا مُتَيَقِّنٍ",
+    "bare_seconds": 15.02,
+    "bare_rtf": 2.97,
+    "bare_wav": "tashkeel_eval_3_bare.wav",
+    "diacritized_seconds": 11.31,
+    "diacritized_rtf": 2.938,
+    "diacritized_wav": "tashkeel_eval_3_diacritized.wav"
+  },
+  {
+    "index": 4,
+    "bare": "باينة هوما كيحاولو يبقاو مبردين",
+    "diacritized": "بَايِنَةٍ هَوْمَا كَيُحَاوِلُو يَبْقَاوَ مُبَرِدِينَ",
+    "bare_seconds": 7.48,
+    "bare_rtf": 2.985,
+    "bare_wav": "tashkeel_eval_4_bare.wav",
+    "diacritized_seconds": 9.09,
+    "diacritized_rtf": 2.84,
+    "diacritized_wav": "tashkeel_eval_4_diacritized.wav"
+  },
+  {
+    "index": 5,
+    "bare": "لوطيلات مبيناش فيهم مريحين بزاف",
+    "diacritized": "لِوَطِيلَاتِ مُبَينَاشٍ فِيهِمْ مُرِيحِينَ بِزَافِ",
+    "bare_seconds": 7.63,
+    "bare_rtf": 2.992,
+    "bare_wav": "tashkeel_eval_5_bare.wav",
+    "diacritized_seconds": 12.76,
+    "diacritized_rtf": 3.02,
+    "diacritized_wav": "tashkeel_eval_5_diacritized.wav"
+  }
+]

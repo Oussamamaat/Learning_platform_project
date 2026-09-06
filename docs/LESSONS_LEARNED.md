@@ -146,3 +146,26 @@ which correctly exercised the new fallback-to-Piper path with real synthesized a
 as output — proof the fallback mechanism (lesson learned alongside this one) actually
 works against a genuine failure, not just a mocked one.
 → `docs/deploy/local-preflight.md`, `app/services/tts.py`
+
+### 12. Tashkeel made Darija TTS worse, not better — disproven, not shipped
+**Problem:** after a live lease demo, the expectation was that adding tashkeel
+(Arabic diacritics) before XTTS synthesis would sharpen Darija pronunciation, the
+way it does for some Arabic TTS systems. A/B eval built (bare vs. diacritized audio,
+same sentences, same voice), listened to by the user. Verdict: "without tashkeel is
+better, tashkeel is trash."
+**Root cause:** two compounding facts, either alone would have predicted this. (1)
+No Darija-specific diacritizer exists — every available tool targets Modern Standard
+Arabic, and applying MSA vowelization/case-ending rules to genuine Darija vocabulary
+produces grammatically-plausible-*looking* but linguistically wrong forms (confirmed
+by inspection before even listening: Darija "خصك" ("you must", no MSA case system
+applies) came back "خَصُّكَ" with an invented case ending). (2) The fine-tune's own
+training corpus was never diacritized — measured directly against
+`data/v11_merged/train.jsonl`, only ~4.9% of rows contain any diacritic at all, as
+sparse incidental noise, not systematic tashkeel — so the model's learned
+pronunciation has no reliable mapping for heavily-vowelized input it never trained on.
+**Proven fix:** there isn't one — this is a genuine negative result, not a bug.
+Confirmed via ADR 0006's own methodology (build the eval, listen, decide) rather than
+assuming an NLP technique that works for other Arabic TTS systems would transfer to
+this fine-tuned Darija checkpoint. No production code changed as a result; the eval
+script and its finding are kept for reference so the idea isn't re-tried blind.
+→ `scripts/eval_darija_tashkeel.py`
