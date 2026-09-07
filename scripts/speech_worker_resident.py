@@ -125,6 +125,12 @@ _SEAMLESS_LANG_MAP = {
     "en": "eng",
 }
 
+# Used ONLY for the auto-detected path below, where "ar" specifically means
+# Darija for this tenant (there is no MSA speaker to distinguish from) --
+# kept separate from _SEAMLESS_LANG_MAP's "ar"->"arb" so an explicit caller
+# (scripts/eval_stt.py, which passes a real per-file hint) is unaffected.
+_AUTO_DETECTED_SEAMLESS_LANG_MAP = {"fr": "fra", "ar": "ary", "en": "eng"}
+
 
 def _get_seamless_model():
     if "seamless" in _MODELS:
@@ -137,6 +143,38 @@ def _get_seamless_model():
     _MODELS["seamless"] = (processor, model)
     print(f"[speech_worker_resident] loaded SeamlessM4T-v2-large", file=sys.stderr, flush=True)
     return processor, model
+
+
+def _get_langid_model():
+    """A separate, tiny faster-whisper model used ONLY to guess which
+    language was spoken -- never to transcribe. Kept out of _MODELS["whisper"]
+    (the full WhisperModel used by the "whisper" engine, sized by STT_MODEL)
+    so the two don't collide if a deployment ever exercises both engines in
+    the same resident process.
+    """
+    if "langid" in _MODELS:
+        return _MODELS["langid"]
+    from faster_whisper import WhisperModel
+
+    model = WhisperModel("tiny", device="cuda", compute_type="int8_float16")
+    _MODELS["langid"] = model
+    print("[speech_worker_resident] loaded faster-whisper 'tiny' for seamless language ID",
+          file=sys.stderr, flush=True)
+    return model
+
+
+def _detect_spoken_language(audio_path: str) -> str:
+    """ISO 639-1 guess ('fr'/'ar'/...) for _transcribe_seamless's auto path.
+
+    faster-whisper's language ID runs eagerly on the audio's first window
+    before any segment is decoded (it needs to know the language before it
+    can pick a decoding path), so `info.language` is available without
+    iterating the (unconsumed, lazy) segment generator -- this is a fast
+    encoder pass, not a full transcription, and 'tiny' is ~75MB.
+    """
+    model = _get_langid_model()
+    _, info = model.transcribe(audio_path, beam_size=1, without_timestamps=True)
+    return info.language
 
 
 def _transcribe_seamless(audio_path: str, language_hint) -> dict:
@@ -158,7 +196,23 @@ def _transcribe_seamless(audio_path: str, language_hint) -> dict:
     # It takes ISO 639-3 throughout, so "fr" must become "fra" -- passing
     # "fr" raises ValueError listing the supported set (confirmed live on
     # the lease, where it failed all 8 French utterances).
-    src_lang = _SEAMLESS_LANG_MAP.get(language_hint, language_hint) or "ary"
+    #
+    # generate()'s `tgt_lang` is a TRANSLATION target, not an auto-detected
+    # source -- there is no "auto" mode. The live pipeline (app/routers/
+    # voice.py) always calls with language_hint=None (deliberately -- see
+    # its own comment on why it can't pin a language across a session), so
+    # a fixed fallback here previously forced tgt_lang="ary" on every call,
+    # silently TRANSLATING French speech into Darija instead of
+    # transcribing it (confirmed live 2026-09-07). Detect the spoken
+    # language first and ask seamless to translate into itself -- i.e.
+    # produce a transcription. scripts/eval_stt.py's ADR-0009 numbers are
+    # unaffected: it always passes a real per-file language_hint, so it
+    # never takes this auto-detect branch.
+    if language_hint:
+        src_lang = _SEAMLESS_LANG_MAP.get(language_hint, language_hint)
+    else:
+        detected = _detect_spoken_language(audio_path)
+        src_lang = _AUTO_DETECTED_SEAMLESS_LANG_MAP.get(detected, "ary")
     # transformers renamed AutoProcessor's audio kwarg audios -> audio at
     # some point after this file was written (see its own "UNVERIFIED
     # SCAFFOLDING" docstring note -- never run against a loaded model until

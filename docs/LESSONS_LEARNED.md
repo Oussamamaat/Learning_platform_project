@@ -239,3 +239,54 @@ listening, never assumed.
   `_TRANSLITERATE_FR`), `scripts/darija_tts_normalization.py`,
   `tests/test_darija_tts_normalization.py`,
   `tests/test_tts_language_spans.py`
+
+### 14. A translation model used as a transcriber silently mistranslates every utterance
+
+Live symptom (2026-09-07): speaking French to the voice assistant, the transcript,
+the tutor's answer, and the TTS all came back in Darija. Every layer downstream of
+STT was behaving *correctly* on its input — `detect_query_language()` saw an
+Arabic-script transcript and routed to the Darija tutor exactly as designed. The
+corruption was one layer earlier, in `_transcribe_seamless()`
+(`scripts/speech_worker_resident.py`).
+
+SeamlessM4T-v2 is a translation model: `model.generate(tgt_lang=...)`'s `tgt_lang`
+is the **output** language, not an auto-detected source — there is no "auto" mode,
+because translation requires knowing the desired output. `app/routers/voice.py`
+always calls the STT layer with `language_hint=None` (deliberately — pinning a
+language across a session previously broke mid-session language switches, see
+its own comment), so the resident worker's fallback made `tgt_lang` a fixed
+`"ary"` on every call. The result: **every utterance, regardless of what was
+actually spoken, was translated into Darija.** French input didn't fail to
+transcribe — it was faithfully translated, which reads as "the model ignored
+what I said."
+
+This is why ADR 0009's own French numbers (seamless normalized WER 0.098,
+competitive with whisper) never caught it: `scripts/eval_stt.py` passes a real
+per-utterance `language_hint` from a sidecar file, so the offline bake-off never
+exercised the `language_hint=None` path the live pipeline always uses.
+
+The tempting fix — switch `STT_ENGINE` to whisper, which auto-detects and
+transcribes rather than translates — would have silently reintroduced a
+different, already-measured regression: ADR 0009 found whisper's Darija WER
+(0.699 normalized) nearly **double** seamless's (0.428) on this exact tenant's
+audio. Downgrading STT quality lease-wide to fix a French-only bug would have
+traded one reported problem for a worse, unreported one.
+
+**Fix:** keep seamless, but stop asking it to guess by feeding it a fixed
+target. Run a cheap language-ID pass (`faster-whisper`'s `tiny` model — already
+in the same venv as the `whisper` engine, ~75MB, and its language ID runs
+eagerly on the first audio window without a full decode) immediately before the
+seamless call, and set `tgt_lang` from *that* — i.e. ask seamless to translate
+into whatever was actually spoken, which is a transcription. The explicit-hint
+path (`scripts/eval_stt.py`) is untouched, so ADR 0009's numbers still describe
+the code that runs.
+
+**Wider lesson:** a bake-off/eval harness that always supplies a parameter the
+live caller can't reliably supply is measuring a different code path than
+production runs. The gap doesn't show up as a test failure — the eval passes,
+the live pipeline is silently wrong — because nothing forces the two call sites
+to agree on what "no hint given" means.
+→ `scripts/speech_worker_resident.py` (`_transcribe_seamless`,
+  `_detect_spoken_language`, `_get_langid_model`), `app/routers/voice.py`
+  (`language_hint=None` and its comment), `docs/architecture/rectified/adr/
+  0009-stt-eval-rescoring.md`
