@@ -169,3 +169,41 @@ assuming an NLP technique that works for other Arabic TTS systems would transfer
 this fine-tuned Darija checkpoint. No production code changed as a result; the eval
 script and its finding are kept for reference so the idea isn't re-tried blind.
 → `scripts/eval_darija_tashkeel.py`
+
+### 13. Splicing per-language TTS spans loses to mispronouncing them
+**Problem:** XTTS mispronounces the Latin-script French technical terms this
+tenant's fine-tune is deliberately trained to embed inside Arabic-script Darija
+sentences (`build_code_switching_prompt`, enforced by `row_is_code_switched`).
+The structurally obvious fix — split each sentence into same-script spans, call
+`Xtts.inference()` once per span with that span's own language tag, concatenate
+the audio — was built, unit-tested, and listened to. It made the voice worse,
+twice, and was reverted.
+**Root cause:** the premise is correct but incomplete. `inference()` really does
+take exactly one language code and prefix the whole string with a single `[lang]`
+token, so one call genuinely cannot pronounce both scripts — that part of the
+analysis held up. What it missed is that XTTS is autoregressive and conditioned
+on speaker prosody, so each span is generated as its own *complete utterance*,
+with utterance-initial and utterance-final prosody of its own. Butting those
+together never reads as one sentence, and short spans (a lone «ديال», a bare
+«sécurité») have no context to stop cleanly on and trail off into audible
+hallucinated filler — heard by the user as "aaaaaah" at every language switch.
+The follow-up mitigation made it markedly worse: appending terminal punctuation
+to each non-final fragment as an explicit stop cue is precisely what tells the
+model to apply *sentence-final* prosody to what is only a mid-sentence clause,
+so the Darija itself degraded on top of the filler.
+**Proven fix:** none for splitting — it is the wrong shape of fix. Reverted to
+the single-call path (kept behind `TTS_SPAN_SPLIT=1`, off by default, so the A/B
+can be re-run without re-implementing it). The mispronunciation remains a real,
+open limitation. The promising untried direction keeps **one** inference call and
+changes the *text* instead: transliterate embedded French terms into Arabic
+script («sécurité» → «سيكوريتي»), which is both how Moroccan speakers actually
+pronounce these loanwords and how they are commonly written in Arabic script —
+no splice, no fragment, no prosody discontinuity. Judge it the same way, by ear.
+**Wider lesson:** the same one as #12, from the opposite direction — #12 was an
+NLP technique assumed to transfer and disproven by listening; this was a
+correct-on-paper architectural fix defeated by a property of the model class
+(autoregressive utterance-level prosody) that no amount of reading the *API* would
+have surfaced. Both were caught only by ADR 0006's rule: TTS quality is judged by
+listening, never assumed.
+→ `scripts/tts_worker_resident.py` (`_split_language_spans`, `_SPAN_SPLIT_ENABLED`),
+  `tests/test_tts_language_spans.py`

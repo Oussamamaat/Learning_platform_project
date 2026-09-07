@@ -60,6 +60,15 @@ const QUICK_PROMPTS: Record<Domain, Record<Language, string[]>> = {
 
 const UPLOAD_ACCEPT = ".txt,.md,.pdf,.docx,.pptx,.xlsx,.csv,.png,.jpg,.jpeg,.tiff,.tif";
 
+// Voice captions can't reuse activeLanguage (MessageBubble/QuizCard's dir
+// source) -- useVoiceSession never updates it, so during a live language
+// switch it would still show the PREVIOUS text turn's language, not the
+// current spoken one. Detect script directly from the caption text itself
+// instead, same Arabic-Unicode-block convention the backend already uses
+// (e.g. app/services/generate_training_data.py's has_arabic_script).
+const isArabicScript = (text: string) => /[ء-ۿ]/.test(text);
+const captionDir = (text: string) => (isArabicScript(text) ? "rtl" : "ltr");
+
 export default function InputArea() {
   const {
     sendMessage,
@@ -134,8 +143,16 @@ export default function InputArea() {
               {voice.status === "thinking" && "Thinking…"}
               {voice.status === "speaking" && "Speaking…"}
             </div>
-            {voice.transcript && <p className="mt-1 text-ink">“{voice.transcript}”</p>}
-            {voice.answerText && <p className="mt-1 text-ink-dim">{voice.answerText}</p>}
+            {voice.transcript && (
+              <p dir={captionDir(voice.transcript)} className="mt-1 text-ink">
+                “{voice.transcript}”
+              </p>
+            )}
+            {voice.answerText && (
+              <p dir={captionDir(voice.answerText)} className="mt-1 text-ink-dim">
+                {voice.answerText}
+              </p>
+            )}
           </div>
         )}
 
