@@ -290,3 +290,24 @@ to agree on what "no hint given" means.
   `_detect_spoken_language`, `_get_langid_model`), `app/routers/voice.py`
   (`language_hint=None` and its comment), `docs/architecture/rectified/adr/
   0009-stt-eval-rescoring.md`
+
+### 15. A proven fix applied to one download, not its sibling, three lines up
+
+`scripts/docker/entrypoint.sh` downloads three kinds of large file at boot: two
+~5.5 GB tutor GGUFs (step 3) and the 5.6 GB XTTS checkpoint (step 3b). The XTTS
+download was hardened after being observed dying mid-transfer on a flaky
+connection: `-C -` (resume) plus `--speed-limit 2048 --speed-time 60` (fail a
+transfer that's gone quiet instead of hanging on it forever) plus 20 retries.
+The GGUF download sits a few lines above that exact fix, fetches a file of the
+same size from the same kind of host, and was never given it — plain `--retry 3
+--retry-delay 5`, no stall detection, no resume. Every fresh lease re-downloads
+both GGUFs from scratch (ephemeral `/models`), so every lease re-exposed the
+same gap: a stalled transfer just hangs (curl has no way to notice a connection
+that's open but idle), which reads as "this model always stalls" rather than
+"this download has no timeout."
+
+**Wider lesson:** fixing a stall in one of several structurally-identical
+download blocks in the same file doesn't fix the others — check for siblings
+doing the same kind of operation before considering a class of bug closed.
+→ `scripts/docker/entrypoint.sh` (step 3's GGUF `curl` call vs. step 3b's XTTS
+  `curl` call)

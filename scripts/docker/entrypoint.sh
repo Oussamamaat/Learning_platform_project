@@ -91,7 +91,17 @@ for modelfile in /models/*.Modelfile; do
         bearer="${GGUF_AUTH_BEARER:-${HF_TOKEN:-}}"
         [ -n "$bearer" ] && auth=(-H "Authorization: Bearer $bearer")
         log "downloading '$name' GGUF from \$$var (one-time; cached on the /models volume) ..."
-        if curl -fL --retry 3 --retry-delay 5 "${auth[@]}" -o "$gguf.part" "$url"; then
+        # -C -/--speed-limit/--speed-time/--retry-all-errors: same hardening as
+        # step 3b's XTTS download below, added there after the 5.6 GB file was
+        # observed dying mid-transfer on a flaky connection. This ~5.5 GB GGUF
+        # download had the same exposure but was missed at the time (2026-09-07)
+        # -- without --speed-limit/--speed-time curl has no way to notice a
+        # stalled-but-still-open connection, so it hangs indefinitely instead of
+        # erroring out and retrying; without -C - each retry restarted from byte
+        # 0 on a multi-GB file instead of resuming.
+        if curl -fL -C - --retry 20 --retry-delay 5 --retry-all-errors \
+                --speed-limit 2048 --speed-time 60 \
+                "${auth[@]}" -o "$gguf.part" "$url"; then
             mv "$gguf.part" "$gguf"
         else
             log "ERROR: download of '$name' failed from $url"; rm -f "$gguf.part"; continue
