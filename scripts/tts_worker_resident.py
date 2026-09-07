@@ -229,6 +229,14 @@ _SPAN_SPLIT_ENABLED = os.environ.get("TTS_SPAN_SPLIT", "").strip().lower() in ("
 # read as a pause inside what should be one sentence.
 _SPAN_GAP_SECONDS = 0.04
 
+# Rewrite embedded French terms into Arabic-script phonetic spelling before
+# synthesis, keeping ONE inference() call (see darija_tts_normalization's
+# module docstring). This is the alternative to span splicing, which was
+# tried and reverted -- LESSONS_LEARNED #13. Applied only when synthesizing
+# under the Arabic tag: a French-tagged sentence is already pronounced
+# correctly and must be left alone. Off by default pending a listening verdict.
+_TRANSLITERATE_FR = os.environ.get("TTS_TRANSLITERATE_FR", "").strip().lower() in ("1", "true", "yes")
+
 
 def _handle_synthesize(req: dict) -> dict:
     rid = req.get("id")
@@ -243,6 +251,17 @@ def _handle_synthesize(req: dict) -> dict:
     import numpy as np
 
     model, (gpt_cond_latent, speaker_embedding) = _load()
+
+    if _TRANSLITERATE_FR and language == "ar":
+        # Imported here, not at module scope: this is an off-by-default
+        # experiment, and an unconditional import would let a missing or
+        # broken sibling module kill the worker at startup -- i.e. turn a
+        # disabled feature into "the model doesn't speak" (the exact failure
+        # class of the 2026-09-06 lease). Nothing is loaded unless it is on.
+        sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+        from darija_tts_normalization import normalize_for_tts
+
+        text = normalize_for_tts(text)
 
     # Default path: ONE inference() call for the whole sentence -- the
     # behavior that demoed successfully live. Span splitting is opt-in and

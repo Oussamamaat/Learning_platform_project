@@ -89,3 +89,6 @@ out/
 # it isn't baked into the image. Every other *.pdf (tenant uploads etc.) stays
 # ignored.
 !/arabic_test.pdf
+# Scratch A/B audio from TTS listening evaluations (not source)
+codeswitch_listening_test/
+translit_listening_test/

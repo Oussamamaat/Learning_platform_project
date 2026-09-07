@@ -199,11 +199,43 @@ changes the *text* instead: transliterate embedded French terms into Arabic
 script («sécurité» → «سيكوريتي»), which is both how Moroccan speakers actually
 pronounce these loanwords and how they are commonly written in Arabic script —
 no splice, no fragment, no prosody discontinuity. Judge it the same way, by ear.
+**Follow-up (2026-09-07): the transliteration route was built and evaluated
+too, and not adopted.** `scripts/darija_tts_normalization.py` rewrites embedded
+French into Arabic script before a single `inference()` call -- a ~230-entry
+lexicon mined from the actual Latin-token frequency of assistant turns in
+`data/v11_merged` (75.3% of which are mixed-script), plus a rule-based
+French-orthography fallback. 25 A/B pairs were synthesized, 21 of them from real
+corpus sentences stratified across all six domains and every mechanism
+(acronyms, hard /g/, multi-word phrases, rule fallback, digits). Verdict: keep
+the current behavior. Note this is a *product decision, not a disproof* -- the
+audio was never judged broken, it simply was not clearly better than leaving the
+French in Latin script. The module stays in-tree behind `TTS_TRANSLITERATE_FR=1`
+(off, and imported lazily so a disabled experiment can never break worker
+startup) so the A/B can be re-run without rebuilding it.
+
+Three findings from that work are worth keeping regardless of the verdict:
+1. **The checkpoint's tokenizer has only 59 Arabic characters, and lacks گ
+   (U+06AF), پ (U+067E) and ڤ (U+06A4)** -- precisely the Maghrebi letters used
+   to write /g/, /p/ and /v/. Spelling "protection" the standard way
+   ("پروتيكسيون") pushes پ through as an unknown and silently mangles the word.
+   Any future work that puts Arabic text in front of this checkpoint must check
+   its characters against the vocab; `out_of_vocab()` and its tests do this
+   mechanically.
+2. A nasal guard used `break` where it needed `continue`, exiting the rule loop
+   without advancing the cursor *and* skipping the for/else fallback -- an
+   infinite loop on any word with a nasal digraph before a vowel ("animation").
+   In production that hangs the TTS worker on the first such word.
+3. `s` was missing from the character table, so every non-intervocalic `s` was
+   silently deleted ("poste" -> "بو"). A test now asserts every ASCII letter has
+   a mapping.
+
 **Wider lesson:** the same one as #12, from the opposite direction — #12 was an
 NLP technique assumed to transfer and disproven by listening; this was a
 correct-on-paper architectural fix defeated by a property of the model class
 (autoregressive utterance-level prosody) that no amount of reading the *API* would
 have surfaced. Both were caught only by ADR 0006's rule: TTS quality is judged by
 listening, never assumed.
-→ `scripts/tts_worker_resident.py` (`_split_language_spans`, `_SPAN_SPLIT_ENABLED`),
+→ `scripts/tts_worker_resident.py` (`_split_language_spans`, `_SPAN_SPLIT_ENABLED`,
+  `_TRANSLITERATE_FR`), `scripts/darija_tts_normalization.py`,
+  `tests/test_darija_tts_normalization.py`,
   `tests/test_tts_language_spans.py`
