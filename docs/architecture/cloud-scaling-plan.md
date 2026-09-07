@@ -1,9 +1,16 @@
 # Cloud scaling plan — ingestion and serving
 
-**Status: target architecture, not built.** Everything in `docs/architecture/` except this
-file describes what is actually deployed. This file describes what should change when the
-platform leaves the single-laptop deployment, and it is written against **measured** local
-numbers so the projections can be checked rather than believed.
+**Status: partially built — the migration this file proposed has happened.** As of the
+2026-09-03/04 Akash lease (`benchmark_results/README.md`, `docs/deploy/akash-rtx5090-runbook.md`),
+the platform runs on rented cloud GPUs with both 9B tutors resident simultaneously, not on the
+single laptop this file was written against. **§4's serving-latency estimate held up well against
+real measurement**: predicted 2–4s turns / zero switch cost, measured 2.0–3.4s / zero switch cost.
+Ingestion fan-out (§5 items 1–3) has **not** been built — ingestion still runs single-worker; that
+part of this plan remains a target. The serving-side win landed a different way than §5 item 4
+proposed: both tutors are resident via Ollama with sufficient leased VRAM, not via a vLLM/TGI
+migration — that migration is still open and is the current next step (see
+[serving.md](serving.md)). The measured-laptop baseline below is kept as the number this migration
+was checked against, not as current reality.
 
 Every "today" figure below was measured on this laptop (RTX 4060 Laptop, 8 GB VRAM,
 `arabic_test.pdf` 80 pages / `french_test.pdf` 39 pages, tenant `company_efg`). Every
@@ -189,6 +196,12 @@ By document type:
 The French-vs-Darija asymmetry is **entirely** a VRAM artefact and should vanish; it is not
 a property of the models.
 
+**Confirmed, 2026-09-04 lease:** both rows of the "Est. cloud" column above matched real
+measurement almost exactly (2.0–3.4s observed vs. 2–4s estimated; switch cost measured as
+genuinely ~0, not just estimated as such) — via Ollama with both tutors resident on leased VRAM,
+not the vLLM/TGI migration this section names. That migration is still open (see §5 item 4, now
+tracked in [serving.md](serving.md)).
+
 ---
 
 ## 5. Sequencing
@@ -202,7 +215,10 @@ Ordered by value per unit of risk:
 3. **Lease/heartbeat instead of boot-time reaping.** Required before more than one worker
    can safely exist.
 4. **LLM serving on vLLM/TGI with both tutors resident.** Fixes the largest user-visible
-   latency and the language-switch stall.
+   latency and the language-switch stall. **Partially superseded**: both-tutors-resident and
+   the latency/switch-cost win it predicted are already achieved via Ollama on leased VRAM (see
+   confirmation above) — the vLLM/TGI migration itself is still open, now for production
+   concurrent-request serving specifically rather than for this latency win.
 5. **OCR behind an HTTP pool** (`vl_rec_backend="vllm-server"`). Mostly configuration.
 6. **Re-tune the two-tier router.** With cheap parallel heavy OCR, the light tier's value
    drops and the honest move may be to route more pages to the heavy engine for fidelity.

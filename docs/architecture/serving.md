@@ -63,6 +63,16 @@ This is a deliberate MVP-speed trade, not an oversight: ship merged now, treat
 multi-LoRA as a post-MVP migration once more than one capability needs to share a base
 model.
 
+**Status, 2026-09-07: the vLLM migration is the current named next step, for a narrower reason
+than originally scoped.** The 2026-09-04 Akash lease showed Ollama-with-both-tutors-resident
+already delivers the latency and language-switch win multi-LoRA/vLLM was meant to provide (see
+`cloud-scaling-plan.md`'s confirmation note) — so this migration is no longer motivated by
+per-request latency. It's motivated by **concurrent production traffic**: `app/services/llm.py`'s
+Ollama call sites have no request-batching or continuous-batching behavior, so N simultaneous
+users still queue behind each other on the shared GPU (mitigated for now, not solved, by ADR
+0008's concurrency limit). vLLM's continuous batching is built for exactly that case. Not yet
+started; no ADR filed for it yet.
+
 ## Train/serve parity — safety-critical
 
 Gemma-2 has no native system-role chat turn. Training data assumes one exists, so a

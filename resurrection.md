@@ -526,7 +526,15 @@ cite by definition.
 Not questions — commitments already made that nothing has closed. Listed so
 they are not rediscovered later as surprises.
 
-1. **TTS vendor** — MVP-critical, zero evaluation run. (Q0.2)
+1. ~~**TTS vendor** — MVP-critical, zero evaluation run. (Q0.2)~~ **Closed 2026-09-06.**
+   Evaluated Piper, an XTTS-v2 Darija fine-tune, and surveyed OuteTTS-1.0 as the production
+   candidate (`docs/architecture/rectified/adr/0006-darija-tts-survey.md`). Piper's Darija-ish
+   voice rejected on live listening (wrong accent); XTTS-v2 sounds right but is non-commercially
+   licensed, deployed for demo/evaluation only; a clean-licensed production fine-tune is scoped,
+   not yet executed. STT vendor also closed alongside it, not originally its own item: seamless
+   picked for Darija over whisper by a normalized WER/CER re-score
+   (`docs/architecture/rectified/adr/0009-stt-eval-rescoring.md`). See
+   `docs/architecture/voice-assistant.md`'s status amendment for the full live-deployment record.
 2. **Retrieval quality** — measured 2026-08-10/11 (baseline, heading-aware
    chunking, language affinity, pgvector cutover, auto-domain routing); see
    `docs/architecture/data-and-retrieval.md`. Domain-routing tier-2 vote
