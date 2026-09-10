@@ -28,11 +28,37 @@ class AppError(Exception):
         self.status_code = status_code
 
 
-class OllamaConnectionError(AppError):
+class LLMConnectionError(AppError):
+    """Failed to connect to the configured LLM backend (Ollama or vLLM).
+
+    Backend-neutral supertype added for the vLLM migration
+    (app.services.llm's llm_generate/llm_chat/llm_stream_chat dispatchers) so
+    a caller that just wants "the inference server is unreachable" can catch
+    one type regardless of settings.llm_backend. OllamaConnectionError below
+    is kept as a subclass with its original message/code unchanged, since
+    tests/test_errors.py and every existing catch site key off that exact
+    name and wording -- this class is additive, not a replacement.
+    """
+
+    def __init__(self, backend: str, model: str, url: str):
+        super().__init__(
+            message=f"Cannot reach {backend} at {url}. Is it running with model '{model}'?",
+            code="LLM_CONNECTION_ERROR",
+            status_code=503,
+        )
+
+
+class OllamaConnectionError(LLMConnectionError):
     """Failed to connect to Ollama."""
 
     def __init__(self, model: str, url: str):
-        super().__init__(
+        # Bypasses LLMConnectionError.__init__ deliberately: this preserves
+        # the exact message text ("Cannot reach Ollama at...", no backend
+        # name repeated) and code ("OLLAMA_CONNECTION_ERROR") every existing
+        # caller and test already depends on, while still being an
+        # LLMConnectionError for anything that wants the neutral catch.
+        AppError.__init__(
+            self,
             message=f"Cannot reach Ollama at {url}. Is it running with model '{model}'?",
             code="OLLAMA_CONNECTION_ERROR",
             status_code=503,

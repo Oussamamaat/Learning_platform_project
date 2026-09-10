@@ -13,7 +13,7 @@ import urllib.request
 import urllib.error
 from typing import Iterator, Optional
 from app.config import get_settings
-from app.errors import OllamaConnectionError, GenerationError
+from app.errors import OllamaConnectionError, LLMConnectionError, GenerationError
 from app.services.citations import (
     extract_citations,
     inject_citations,
@@ -1030,6 +1030,347 @@ def _stream_ollama_chat(
         _get_ollama_semaphore().release()
 
 
+# -- vLLM transport -------------------------------------------------------
+#
+# /v1/completions with a RAW PROMPT (render_conversation()'s output), not
+# /v1/chat/completions. This is the plan's single most important transport
+# choice: render_conversation() above is already a byte-exact, test-locked
+# (tests/test_prompt_format.py) port of the training notebook's template.
+# The chat_template.jinja recovered alongside the production adapters
+# (docs/architecture/model-artifacts.md) emits a literal {{ bos_token }} --
+# sending that through vLLM's own chat templating would double-BOS exactly
+# the way the training notebook warns against. Rendering here and sending
+# the result as a raw prompt keeps this app owning the one template that
+# must stay correct, instead of trusting a second, divergent one server-side.
+
+# The two stop strings Ollama gets for free from each Modelfile's
+# `PARAMETER stop` -- vLLM never sees the Modelfile, so these must be sent
+# per request. See render_conversation(): every rendered turn is wrapped in
+# exactly these two markers.
+_VLLM_STOP = ["<end_of_turn>", "<start_of_turn>"]
+
+# Mirrors _ollama_semaphore's module-level comment almost exactly, with one
+# difference: settings.llm_max_concurrent is NOT a parallelism ceiling the
+# way ollama_max_concurrent is. vLLM does its own continuous-batching
+# admission control; this only bounds how many sockets this process opens
+# to it at once (backpressure), so it can safely default far higher than
+# the Ollama semaphore. A separate primitive from _ollama_semaphore so the
+# two backends never contend for the same permits, including in a
+# both-backends-configured test or a Step 6 side-by-side benchmark run.
+_vllm_semaphore: Optional[threading.Semaphore] = None
+_vllm_semaphore_lock = threading.Lock()
+
+
+def _get_vllm_semaphore() -> threading.Semaphore:
+    global _vllm_semaphore
+    if _vllm_semaphore is None:
+        with _vllm_semaphore_lock:
+            if _vllm_semaphore is None:
+                _vllm_semaphore = threading.Semaphore(get_settings().llm_max_concurrent)
+    return _vllm_semaphore
+
+
+def _post_vllm(payload: dict, *, timeout: Optional[int] = None) -> dict:
+    """POST a JSON body to vLLM's /v1/completions and return the decoded
+    response.
+
+    Sibling to _post_ollama, same retry/error-mapping shape (transient
+    502/503/504 retried with the same backoff, HTTPError mapped to
+    GenerationError, a connection failure mapped to LLMConnectionError) so
+    both backends fail the same way from a caller's point of view. Not
+    built on _post_ollama itself: that function unconditionally injects
+    Ollama's `keep_alive` field (vLLM has no analogue -- a served model is
+    always resident) and acquires the Ollama semaphore, neither of which
+    applies here.
+    """
+    _get_vllm_semaphore().acquire()
+    try:
+        settings = get_settings()
+        url = f"{settings.llm_base_url.rstrip('/')}/v1/completions"
+        data = json.dumps(payload).encode("utf-8")
+        effective_timeout = timeout if timeout is not None else settings.ollama_timeout_seconds
+
+        last_error: Optional[Exception] = None
+        for attempt in range(len(_RETRY_DELAYS_SECONDS) + 1):
+            req = urllib.request.Request(
+                url, data=data, headers={"Content-Type": "application/json"}, method="POST",
+            )
+            try:
+                with urllib.request.urlopen(req, timeout=effective_timeout) as response:
+                    return json.loads(response.read().decode("utf-8"))
+            except urllib.error.HTTPError as e:
+                body = ""
+                try:
+                    body = e.read().decode("utf-8", errors="replace")[:500]
+                except Exception:
+                    pass
+                if e.code in _RETRYABLE_STATUS and attempt < len(_RETRY_DELAYS_SECONDS):
+                    logger.warning(
+                        "vLLM returned HTTP %s (retryable); retrying in %.1fs",
+                        e.code, _RETRY_DELAYS_SECONDS[attempt],
+                    )
+                    last_error = e
+                    time.sleep(_RETRY_DELAYS_SECONDS[attempt])
+                    continue
+                logger.error("vLLM returned HTTP %s for /v1/completions: %s", e.code, body)
+                if e.code == 404:
+                    raise GenerationError(
+                        f"vLLM has no served model named {payload.get('model')!r} (HTTP 404). "
+                        f"Check settings.llm_model_darija / llm_model_fr against "
+                        f"--served-model-name at {settings.llm_base_url}."
+                    ) from e
+                raise GenerationError(f"vLLM HTTP {e.code}: {body}") from e
+            except urllib.error.URLError as e:
+                if attempt < len(_RETRY_DELAYS_SECONDS):
+                    logger.warning(
+                        "vLLM connection failed (%s); retrying in %.1fs",
+                        e, _RETRY_DELAYS_SECONDS[attempt],
+                    )
+                    last_error = e
+                    time.sleep(_RETRY_DELAYS_SECONDS[attempt])
+                    continue
+                logger.error("vLLM connection failed: %s", e)
+                raise LLMConnectionError("vLLM", payload.get("model"), settings.llm_base_url) from e
+            except json.JSONDecodeError as e:
+                logger.error("Invalid JSON from vLLM: %s", e)
+                raise GenerationError(f"Invalid JSON response: {e}") from e
+            except (LLMConnectionError, GenerationError):
+                raise
+            except Exception as e:
+                logger.error("Unexpected vLLM error: %s", e)
+                raise GenerationError(str(e)) from e
+
+        raise LLMConnectionError("vLLM", payload.get("model"), settings.llm_base_url) from last_error
+    finally:
+        _get_vllm_semaphore().release()
+
+
+def _call_vllm_generate(
+    model: str,
+    prompt: str,
+    system: str,
+    *,
+    timeout: Optional[int] = None,
+    guided_json: Optional[dict] = None,
+) -> str:
+    """vLLM sibling of _call_ollama_generate -- same (model, prompt, system)
+    signature so quiz.py/diagrams.py's call sites are a one-line swap.
+    `prompt`/`system` are folded into a [system, user] messages list and
+    rendered through render_conversation() into the raw prompt vLLM
+    receives; `guided_json` is vLLM's substitution for Ollama's `format`
+    (ADR 0003 already anticipated this)."""
+    text = render_conversation(
+        [{"role": "system", "content": system}, {"role": "user", "content": prompt}]
+    )
+    payload = {
+        "model": model,
+        "prompt": text,
+        "temperature": 0.2,
+        "max_tokens": get_settings().llm_max_tokens,
+        "stop": _VLLM_STOP,
+        "stream": False,
+    }
+    if guided_json is not None:
+        payload["guided_json"] = guided_json
+
+    res_json = _post_vllm(payload, timeout=timeout)
+    choices = res_json.get("choices") or []
+    result = (choices[0].get("text", "") if choices else "").strip()
+    if not result:
+        raise GenerationError("vLLM returned empty response")
+    return result
+
+
+def _call_vllm_chat(
+    model: str,
+    messages: list[dict],
+    *,
+    timeout: Optional[int] = None,
+    guided_json: Optional[dict] = None,
+) -> str:
+    """vLLM sibling of _call_ollama_chat -- same (model, messages) signature.
+    `messages` is rendered through render_conversation() into the raw
+    prompt vLLM's /v1/completions receives, rather than sent to a vLLM
+    /v1/chat/completions endpoint -- see the module header comment above."""
+    text = render_conversation(messages)
+    payload = {
+        "model": model,
+        "prompt": text,
+        "temperature": 0.2,
+        "max_tokens": get_settings().llm_max_tokens,
+        "stop": _VLLM_STOP,
+        "stream": False,
+    }
+    if guided_json is not None:
+        payload["guided_json"] = guided_json
+
+    res_json = _post_vllm(payload, timeout=timeout)
+    choices = res_json.get("choices") or []
+    result = (choices[0].get("text", "") if choices else "").strip()
+    if not result:
+        raise GenerationError("vLLM returned empty response")
+    return result
+
+
+def _stream_vllm_chat(
+    model: str,
+    messages: list[dict],
+    *,
+    timeout: Optional[int] = None,
+) -> Iterator[str]:
+    """Streaming vLLM sibling of _stream_ollama_chat. vLLM's /v1/completions
+    with stream=true emits OpenAI-compatible SSE (`data: {...}\\n\\n`,
+    terminated by `data: [DONE]`) -- NOT Ollama's NDJSON -- and the delta
+    lives at choices[0].text, not message.content.
+
+    Mirrors _stream_ollama_chat's semantics verbatim on purpose: no retry
+    once bytes have reached the caller (replaying would duplicate content
+    already spoken/displayed), a distinct GenerationError for a mid-stream
+    drop after real content, and the semaphore permit released in `finally`
+    so early abandonment (voice.py's cancel_flag) still frees the slot via
+    GeneratorExit.
+    """
+    _get_vllm_semaphore().acquire()
+    try:
+        settings = get_settings()
+        url = f"{settings.llm_base_url.rstrip('/')}/v1/completions"
+        text = render_conversation(messages)
+        payload = {
+            "model": model,
+            "prompt": text,
+            "temperature": 0.2,
+            "max_tokens": settings.llm_max_tokens,
+            "stop": _VLLM_STOP,
+            "stream": True,
+        }
+        data = json.dumps(payload).encode("utf-8")
+        effective_timeout = timeout if timeout is not None else settings.ollama_timeout_seconds
+
+        req = urllib.request.Request(
+            url, data=data, headers={"Content-Type": "application/json"}, method="POST",
+        )
+        try:
+            response = urllib.request.urlopen(req, timeout=effective_timeout)
+        except urllib.error.HTTPError as e:
+            body = ""
+            try:
+                body = e.read().decode("utf-8", errors="replace")[:500]
+            except Exception:
+                pass
+            logger.error("vLLM returned HTTP %s for /v1/completions (stream): %s", e.code, body)
+            if e.code == 404:
+                raise GenerationError(
+                    f"vLLM has no served model named {model!r} (HTTP 404). Check "
+                    f"settings.llm_model_darija / llm_model_fr."
+                ) from e
+            raise GenerationError(f"vLLM HTTP {e.code}: {body}") from e
+        except urllib.error.URLError as e:
+            logger.error("vLLM connection failed (stream): %s", e)
+            raise LLMConnectionError("vLLM", model, settings.llm_base_url) from e
+
+        got_any = False
+        try:
+            with response:
+                for raw_line in response:
+                    line = raw_line.decode("utf-8", errors="replace").strip()
+                    if not line or not line.startswith("data:"):
+                        continue
+                    data_str = line[len("data:"):].strip()
+                    if data_str == "[DONE]":
+                        break
+                    try:
+                        chunk = json.loads(data_str)
+                    except json.JSONDecodeError:
+                        logger.warning(
+                            "Skipping malformed SSE line from vLLM stream: %r", line[:200]
+                        )
+                        continue
+                    choices = chunk.get("choices") or []
+                    delta = choices[0].get("text", "") if choices else ""
+                    if delta:
+                        got_any = True
+                        yield delta
+        except (urllib.error.URLError, ConnectionError, TimeoutError) as e:
+            if got_any:
+                raise GenerationError(f"vLLM stream dropped mid-response: {e}") from e
+            raise LLMConnectionError("vLLM", model, settings.llm_base_url) from e
+
+        if not got_any:
+            raise GenerationError("vLLM returned an empty stream")
+    finally:
+        _get_vllm_semaphore().release()
+
+
+# -- Backend-neutral dispatchers -------------------------------------------
+#
+# Everything above this point (Ollama transport + vLLM transport) is
+# backend-specific. These three functions are the seam the rest of the app
+# calls through: they read settings.llm_backend once and dispatch to the
+# matching pair. Kept in this module rather than a new one, deliberately --
+# the whole test suite patches app.services.llm.urllib.request.urlopen as
+# its seam (14 files), and putting both transports here preserves that for
+# free instead of requiring a second patch target.
+
+def resolve_model_name(language: str) -> str:
+    """Which served model name to request for `language` ('fr', or anything
+    else treated as Darija) under the currently configured backend.
+
+    Single source of truth for a ternary that was previously duplicated,
+    identically, at four call sites (quiz.py, diagrams.py, and both of this
+    module's own generate_llm_response/stream_llm_response) -- exactly the
+    kind of duplication that silently drifts, the way the French quiz path
+    once drifted and served every French quiz from the Darija model (see
+    quiz.py's own comment on that incident) before it was fixed there.
+    """
+    settings = get_settings()
+    if settings.llm_backend == "vllm":
+        return settings.llm_model_fr if language == "fr" else settings.llm_model_darija
+    return settings.ollama_model_fr if language == "fr" else settings.ollama_model
+
+
+def llm_generate(
+    model: str,
+    prompt: str,
+    system: str,
+    *,
+    timeout: Optional[int] = None,
+    format_schema: Optional[dict] = None,
+) -> str:
+    """Backend-neutral sibling of _call_ollama_generate / _call_vllm_generate.
+    quiz.py and diagrams.py call this instead of reaching for either
+    backend's function directly."""
+    if get_settings().llm_backend == "vllm":
+        return _call_vllm_generate(model, prompt, system, timeout=timeout, guided_json=format_schema)
+    return _call_ollama_generate(model, prompt, system, timeout=timeout, format_schema=format_schema)
+
+
+def llm_chat(
+    model: str,
+    messages: list[dict],
+    *,
+    timeout: Optional[int] = None,
+    format_schema: Optional[dict] = None,
+) -> str:
+    """Backend-neutral sibling of _call_ollama_chat / _call_vllm_chat."""
+    if get_settings().llm_backend == "vllm":
+        return _call_vllm_chat(model, messages, timeout=timeout, guided_json=format_schema)
+    return _call_ollama_chat(model, messages, timeout=timeout, format_schema=format_schema)
+
+
+def llm_stream_chat(
+    model: str,
+    messages: list[dict],
+    *,
+    timeout: Optional[int] = None,
+) -> Iterator[str]:
+    """Backend-neutral sibling of _stream_ollama_chat / _stream_vllm_chat."""
+    settings = get_settings()
+    if settings.llm_backend == "vllm":
+        yield from _stream_vllm_chat(model, messages, timeout=timeout)
+    else:
+        yield from _stream_ollama_chat(model, messages, timeout=timeout)
+
+
 def generate_llm_response(
     query: str,
     context: str,
@@ -1066,17 +1407,17 @@ def generate_llm_response(
     system_prompt = system_prompt_override or _build_system_prompt(
         domain, context, language
     )
-    model = settings.ollama_model_fr if language == "fr" else settings.ollama_model
+    model = resolve_model_name(language)
 
     messages = [{"role": "system", "content": system_prompt}]
     messages.extend(history or [])
     messages.append({"role": "user", "content": query})
 
     logger.info(
-        "Calling Ollama model=%s domain=%s language=%s history_turns=%d",
-        model, domain, language, len(history or []),
+        "Calling LLM (%s) model=%s domain=%s language=%s history_turns=%d",
+        settings.llm_backend, model, domain, language, len(history or []),
     )
-    result = _call_ollama_chat(model, messages)
+    result = llm_chat(model, messages)
 
     # Citations are derived from the retrieved context, not trusted from the
     # model — see app/services/citations.py for why. Only references that
@@ -1126,14 +1467,14 @@ def stream_llm_response(
     system_prompt = system_prompt_override or _build_system_prompt(
         domain, context, language
     )
-    model = settings.ollama_model_fr if language == "fr" else settings.ollama_model
+    model = resolve_model_name(language)
 
     messages = [{"role": "system", "content": system_prompt}]
     messages.extend(history or [])
     messages.append({"role": "user", "content": query})
 
     logger.info(
-        "Streaming Ollama model=%s domain=%s language=%s history_turns=%d",
-        model, domain, language, len(history or []),
+        "Streaming LLM (%s) model=%s domain=%s language=%s history_turns=%d",
+        settings.llm_backend, model, domain, language, len(history or []),
     )
-    yield from _stream_ollama_chat(model, messages)
+    yield from llm_stream_chat(model, messages)

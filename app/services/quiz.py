@@ -20,7 +20,7 @@ import random
 
 from app.config import get_settings
 from app.errors import OllamaConnectionError, GenerationError
-from app.services.llm import _build_system_prompt, _call_ollama_generate
+from app.services.llm import _build_system_prompt, llm_generate, resolve_model_name
 from app.services.generate_training_data import (
     QUIZ_USER_FALLBACKS,
     QUIZ_USER_FALLBACKS_FR,
@@ -115,25 +115,30 @@ def generate_quiz_questions(
     # Same French/Darija model split llm.py:534 and demo.py:70 use -- this
     # branch was previously missing here, so every French-language quiz was
     # silently served by the Darija-tuned model instead of iblog-tutor-fr.
-    model = settings.ollama_model_fr if language == "fr" else settings.ollama_model
+    # resolve_model_name also picks the right backend's model name
+    # (ollama_model_fr/ollama_model vs llm_model_fr/llm_model_darija) --
+    # see its docstring for why this one-line ternary moved out of here.
+    model = resolve_model_name(language)
 
     logger.info(
-        "Calling Ollama for quiz model=%s domain=%s topic=%s",
-        model, domain, topic,
+        "Calling LLM (%s) for quiz model=%s domain=%s topic=%s",
+        settings.llm_backend, model, domain, topic,
     )
-    # Through app.services.llm._call_ollama_generate rather than this
-    # module's own urllib block, which was a near-copy of it. The copy had
-    # drifted in a way that mattered: it sent `options={"temperature": 0.2}`
-    # with NO num_ctx, so every quiz ran at each Modelfile's 4096 default
-    # while chat ran at 8192. Ollama truncates from the FRONT when the
-    # window is exceeded -- so a quiz built on a full 6000-character
+    # Through app.services.llm.llm_generate (backend-neutral: Ollama or
+    # vLLM per settings.llm_backend) rather than this module's own urllib
+    # block, which was a near-copy of the Ollama transport alone. The copy
+    # had drifted in a way that mattered: it sent `options={"temperature":
+    # 0.2}` with NO num_ctx, so every quiz ran at each Modelfile's 4096
+    # default while chat ran at 8192. Ollama truncates from the FRONT when
+    # the window is exceeded -- so a quiz built on a full 6000-character
     # retrieved context (app/services/retrieval.py's max_context_length)
     # was having that context silently eaten before generation, which is
     # precisely the failure llm.py's num_ctx comment exists to prevent.
-    # Sharing the transport also gives quiz the keep_alive, the bounded
-    # retry on transient failures, and the HTTPError-vs-URLError split
-    # (a 404 "no such model" no longer reports as a connection failure).
-    raw = _call_ollama_generate(
+    # Sharing the transport also gives quiz the keep_alive (Ollama)/guided
+    # JSON (vLLM), the bounded retry on transient failures, and the
+    # HTTPError-vs-URLError split (a 404 "no such model" no longer reports
+    # as a connection failure).
+    raw = llm_generate(
         model, user_turn, system_prompt, format_schema=_quiz_format_schema(n)
     )
 

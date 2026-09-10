@@ -93,6 +93,41 @@ async def _warm_tts_engine() -> None:
 
 
 @app.on_event("startup")
+async def _raise_threadpool_for_vllm() -> None:
+    """Second concurrency ceiling, easy to miss (plan Step 4): chat() and
+    generate_quiz() (app/routers/chat.py, app/services/quiz.py) are plain
+    `def`, so FastAPI/Starlette dispatches them to anyio's worker
+    threadpool -- default 40 tokens, shared with every other sync endpoint
+    including ingestion. Raising app.services.llm's vLLM semaphore
+    (settings.llm_max_concurrent) past 40 buys nothing if requests are
+    already queueing here first.
+
+    Only touches the limiter when llm_backend="vllm" -- Ollama's own
+    threading.Semaphore(ollama_max_concurrent) is well under 40 already, so
+    this is a no-op change for the default (Ollama) deployment. anyio's
+    limiter is per-running-event-loop, so this must run from inside a
+    startup hook, not at import time.
+
+    This is the MINIMUM fix (raise the ceiling), not the full one --
+    switching chat()/generate_quiz() to `async def` with an async HTTP
+    client is larger scope and belongs in its own change (see the plan's
+    Step 4).
+    """
+    settings = get_settings()
+    if settings.llm_backend != "vllm":
+        return
+    from anyio import to_thread
+
+    limiter = to_thread.current_default_thread_limiter()
+    if limiter.total_tokens < settings.llm_max_concurrent:
+        limiter.total_tokens = settings.llm_max_concurrent
+        logging.info(
+            "Raised anyio threadpool tokens to %d for llm_backend=vllm",
+            settings.llm_max_concurrent,
+        )
+
+
+@app.on_event("startup")
 async def _reap_orphaned_uploads() -> None:
     """The single-worker in-process ingest queue (app.services.ingest_queue)
     keeps no state outside Postgres -- a server restart mid-job would

@@ -7,11 +7,20 @@
 #         see docs/deploy/akash-rtx5090-runbook.md Part 2 of the test plan)
 #   app — the GPU image (FastAPI + Ollama + STT/TTS/OCR workers all on ONE card)
 #
-# GPU tier is chosen by real Akash bid price against the workload's actual VRAM
-# need (~23-29 GB: both 9B tutors + bge-m3 + whisper, +OCR), not by matching a
-# future production card — production is heading to AWS, not Akash:
-#   1 (primary)  rtx8000    48 GB  $0.21/hr starting — cheapest, ample margin
-#   2 (fallback) rtx5090    32 GB  $0.67/hr starting — tighter margin with OCR on
+# GPU tier, reordered 2026-09-10 for the vLLM migration (docs: the migration
+# plan's "GPU tier: prefer rtx5090" decision) — this lease also runs Step 0's
+# merge/AWQ build and Step 1/6's benchmark sweeps, which is the first work on
+# this SDL that actually cares which tier it lands on. rtx8000 is Turing
+# (sm_75): vLLM runs there, but on fallback kernels only (no native FP8, no
+# FlashAttention-3, AWQ degrades to weight-only W8A16 via Marlin) — an honest
+# vLLM number needs Blackwell, which is what config/Dockerfile.gpu's cu128
+# build already targets. Costs more per hour ($0.67 vs $0.21 starting) but
+# tier order now matches what the rest of this migration assumes:
+#   1 (primary)  rtx5090    32 GB  $0.67/hr starting — native FP8/FA3, the
+#                                  honest vLLM target
+#   2 (fallback) rtx8000    48 GB  $0.21/hr starting — cheaper, fallback
+#                                  kernels only; fine for the Ollama-side
+#                                  benchmarks, not for a representative vLLM one
 #   3 (fallback) pro6000se  96 GB  $2.04/hr starting — priciest, most headroom
 # All three run the full stack; every GPU-touching component in the image
 # (torch cu128, Ollama, CTranslate2) has a sourced reason to work on Turing
@@ -144,6 +153,16 @@ services:
                                  # bge-m3, no eager OCR/STT init)
       # ── relaxations for a card with VRAM to spare ────────────────────────
       - OLLAMA_KEEP_ALIVE=24h
+      # Step 1's tuned concurrency sweep (plan doc). Set here, not via a shell
+      # `export` + manual `ollama serve` restart -- a pod restart (confirmed
+      # 2026-09-10: ephemeral storage got wiped and entrypoint.sh re-pulled
+      # both GGUFs from scratch, contradicting this file's own storage-note
+      # assumption above that a restart-within-a-lease is safe) loses any
+      # shell-set env immediately. Baked in here, it survives every restart
+      # automatically since entrypoint.sh execs `ollama serve` as this
+      # container's own child process and inherits it. Comment out (or set to
+      # 1) to reproduce the "unset" baseline instead.
+      - OLLAMA_NUM_PARALLEL=4
       - OCR_KEEP_RESIDENT=true
       - OCR_WORKER_IDLE_RELEASE_SECONDS=0
       - SPEECH_WORKER_IDLE_RELEASE_SECONDS=0
@@ -205,8 +224,8 @@ profiles:
           attributes:
             vendor:
               nvidia:
-                - model: rtx8000      # tier 1 (primary) — see header table
-                - model: rtx5090      # tier 2 (fallback)
+                - model: rtx5090      # tier 1 (primary) — see header table
+                - model: rtx8000      # tier 2 (fallback)
                 - model: pro6000se    # tier 3 (fallback)
         storage:
           - size: 140Gi                # ephemeral only: unpacked image

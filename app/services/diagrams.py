@@ -53,7 +53,7 @@ from app.services.generate_training_data import (
     has_arabic_script,
     row_has_ungrounded_reference,
 )
-from app.services.llm import _call_ollama_generate, build_diagram_prompt, diagram_kind_hint
+from app.services.llm import llm_generate, resolve_model_name, build_diagram_prompt, diagram_kind_hint
 
 logger = logging.getLogger(__name__)
 
@@ -739,13 +739,13 @@ def generate_diagram(
     schema = _SCHEMAS[kind]
     spec_model = _SPEC_MODELS[kind]
     heal = _HEAL[kind]
-    model = settings.ollama_model_fr if language == "fr" else settings.ollama_model
+    model = resolve_model_name(language)
 
     rejection_reason: Optional[str] = None
     for attempt in range(2):
         system = build_diagram_prompt(kind, domain, context, language)
         user_prompt = _build_user_turn(kind, message, language, rejection_reason)
-        raw = _call_ollama_generate(model, user_prompt, system, format_schema=schema)
+        raw = llm_generate(model, user_prompt, system, format_schema=schema)
 
         try:
             payload_obj = json.loads(raw)

@@ -45,6 +45,49 @@ services:
     volumes:
       - ./app:/app/app
 
+  # Local vLLM smoke test (plan Step 5) -- NOT part of the default `db` +
+  # `ollama` + `api` stack and deliberately has no `depends_on` on either.
+  # This is here for local wiring checks only (prompt parity, guided_json,
+  # streaming, stop handling) against a small stand-in model; the
+  # laptop's 8GB VRAM cannot hold a real 9B alongside anything else, and
+  # the production AWQ merges are built and served on the Akash lease
+  # (Step 0), not here.
+  #
+  # Start ALONE, never with `up` (which would also start db/ollama and
+  # collide with the native-Windows dev stack's ports/container names --
+  # see the plan's W3 "shared resources" table):
+  #     docker compose -f config/docker-compose.yml -p iblog_vllm up vllm
+  # LLM_MODEL defaults to a small CPU/tiny-GPU-friendly stand-in; override
+  # with a real --served-model-name once testing against production AWQ
+  # weights on the lease.
+  vllm:
+    image: vllm/vllm-openai:latest
+    container_name: iblog-vllm
+    ports:
+      - "8001:8000"
+    environment:
+      - HUGGING_FACE_HUB_TOKEN=${HUGGING_FACE_HUB_TOKEN:-}
+    command:
+      - --model
+      - ${LLM_MODEL:-TinyLlama/TinyLlama-1.1B-Chat-v1.0}
+      - --served-model-name
+      - ${LLM_SERVED_NAME:-iblog-tutor-stub}
+      - --max-model-len
+      - "8192"
+      - --gpu-memory-utilization
+      - ${LLM_GPU_MEM_UTIL:-0.85}
+      - --enable-prefix-caching
+    volumes:
+      - vllm_cache:/root/.cache/huggingface
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+
 volumes:
   pgdata:
   ollama_data:
+  vllm_cache:

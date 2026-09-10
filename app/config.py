@@ -1,4 +1,4 @@
-from typing import Optional
+from typing import Literal, Optional
 from pydantic_settings import BaseSettings
 from functools import lru_cache
 
@@ -47,6 +47,49 @@ class Settings(BaseSettings):
     # Embeddings never touch Ollama (app.services.ingestion/search use an
     # in-process SentenceTransformer), so this can never starve retrieval.
     ollama_max_concurrent: int = 4
+
+    # -- vLLM migration (plan: docs/architecture/serving.md, ADR 0011) -----
+    # Additive to every ollama_* setting above, not a replacement -- this
+    # switch is how the two coexist. "ollama" (default) is byte-identical to
+    # pre-migration behavior: app.services.llm's llm_generate/llm_chat/
+    # llm_stream_chat dispatchers read this and call the existing
+    # _call_ollama_* functions unchanged. Flip to "vllm" only once a real
+    # vLLM instance is reachable at llm_base_url with llm_model_darija/
+    # llm_model_fr actually served -- there is no autodetection.
+    llm_backend: Literal["ollama", "vllm"] = "ollama"
+    # vLLM's OpenAI-compatible server. Two vLLM instances are expected (one
+    # per tutor -- see the plan's "one vLLM instance per language" decision,
+    # driven by Darija/French having different base models), so this points
+    # at whichever one a given deployment fronts; if both instances end up
+    # needing different hosts, this becomes two settings the same way
+    # ollama_model/ollama_model_fr are already two settings for one shared
+    # ollama_base_url. Not used while llm_backend="ollama".
+    llm_base_url: str = "http://localhost:8001"
+    # --served-model-name values at `vllm serve` launch time, the vLLM
+    # analogue of ollama_model/ollama_model_fr. Deliberately separate
+    # settings, not a reuse of the ollama_model* names, so a deployment can
+    # run both backends side by side (e.g. during Step 6's before/after
+    # measurement) without one flag's value silently doubling as the other
+    # backend's model name.
+    llm_model_darija: str = "iblog-tutor-darija-awq"
+    llm_model_fr: str = "iblog-tutor-fr-awq"
+    # vLLM's /v1/completions defaults max_tokens to 16 (Ollama's num_predict
+    # has no such default -- see _ollama_options' absence of one). Missing
+    # this setting is the single most likely way this migration silently
+    # ships truncated answers with no error; see the plan's Step 3.
+    llm_max_tokens: int = 1024
+    # Bounds concurrent in-flight vLLM requests -- the vLLM analogue of
+    # ollama_max_concurrent, but NOT the same kind of number. Ollama's 4 is a
+    # real parallelism ceiling (today's server processes one request at a
+    # time regardless). vLLM does its own continuous-batching admission
+    # control, so this is pure backpressure -- keeping this process from
+    # opening unbounded sockets under a traffic spike -- not a parallelism
+    # limit. 64 is a starting placeholder, not a measured value, same
+    # "placeholder until a real sweep runs" status ollama_max_concurrent had
+    # before ADR 0008 -- Step 6's bench_concurrency.py run against vLLM is
+    # what should set this for real.
+    llm_max_concurrent: int = 64
+
     default_tenant_id: str = "company_abc"
     default_user_id: str = "default_user"
     # Tier-3 fallback for app.services.routing's domain router when tier 1
