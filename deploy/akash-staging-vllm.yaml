@@ -1,0 +1,147 @@
+---
+# ═════════════════════════════════════════════════════════════════════════════
+# Akash SDL — IBLOG Tutor vLLM staging (plan Phase D5, ADR 0011)
+# ═════════════════════════════════════════════════════════════════════════════
+# The production layout (deploy/akash-deploy.yaml) with one change: `app` runs
+# on CPU with voice and OCR switched off, so the lease rents a single GPU.
+#   db  — Postgres/pgvector, CPU only
+#   llm — vLLM serving both tutors on one RTX 5090 (identical to production)
+#   app — FastAPI on CPU, LLM_BACKEND=vllm
+#
+# What this lease verifies: chat in both languages with citations, quiz
+# structured output, diagrams, streaming with cancellation, the llm restart
+# drill, and bench_concurrency.py --backend app. Voice and OCR code did not
+# change in the migration and are not re-tested here.
+#
+# The CPU-only app was checked locally on 2026-09-11: with the GPU hidden
+# (CUDA_VISIBLE_DEVICES=-1), it booted in 17 s, loaded bge-m3 on CPU, and a chat
+# request reached the vLLM client. An empty CUDA_VISIBLE_DEVICES does NOT work:
+# torch then reports CUDA available with zero devices and crashes at import.
+#
+# THIS FILE IS THE COMMITTED TEMPLATE — it must stay free of real secrets.
+# Render with:
+#     HF_READ_TOKEN=hf_xxx bash deploy/make-local-sdl.sh deploy/akash-staging-vllm.yaml
+# and deploy deploy/akash-staging-vllm.local.yaml (gitignored).
+#
+# BEFORE DEPLOYING: same four notes as deploy/akash-deploy.yaml (public GHCR
+# packages, sha-pinned images, READ token for Oussamamaat/iblog-tutor-awq,
+# ceilings in uakt per block). Close the lease as soon as the checks finish.
+# ═════════════════════════════════════════════════════════════════════════════
+
+version: "2.0"
+
+services:
+  db:
+    image: pgvector/pgvector:pg16
+    env:
+      - POSTGRES_USER=assistant
+      - POSTGRES_PASSWORD=CHANGE_ME_strong_password
+      - POSTGRES_DB=iblog_assistant
+      - PGDATA=/var/lib/postgresql/data/pgdata
+    expose:
+      - port: 5432
+        # `as` must be explicit: Akash defaults it to 80.
+        as: 5432
+        to:
+          - service: app
+
+  llm:
+    # Pin before deploying, e.g. ghcr.io/oussamamaat/iblog-vllm:vllm-migration-<sha>
+    image: ghcr.io/oussamamaat/iblog-vllm:vllm-migration
+    env:
+      - HF_TOKEN=PASTE_A_READ_ONLY_HF_TOKEN
+      - AWQ_REPO=Oussamamaat/iblog-tutor-awq
+      # Uppercase G means GiB: vLLM reads "6g" as 10^9 bytes.
+      - DARIJA_KV_BYTES=6G
+      - FRENCH_KV_BYTES=6G
+      - VLLM_EXTRA_ARGS=--max-num-seqs 16
+      - NVIDIA_DISABLE_REQUIRE=true
+    expose:
+      - port: 8101
+        as: 8101
+        to:
+          - service: app
+      - port: 8102
+        as: 8102
+        to:
+          - service: app
+
+  app:
+    # Pin before deploying, e.g. ghcr.io/oussamamaat/iblog-tutor:vllm-migration-<sha>
+    image: ghcr.io/oussamamaat/iblog-tutor:vllm-migration
+    env:
+      - DATABASE_URL=postgresql://assistant:CHANGE_ME_strong_password@db:5432/iblog_assistant
+      - LLM_BACKEND=vllm
+      - LLM_BASE_URL=http://llm:8101
+      - LLM_BASE_URL_FR=http://llm:8102
+      # CPU only: -1, not an empty value (see header).
+      - CUDA_VISIBLE_DEVICES=-1
+      - STT_ENGINE=none
+      - TTS_ENGINE=none
+      - OCR_ENGINE=none
+      - WEB_SEARCH_ENGINE=none
+      - UPLOADS_READ_ONLY=true
+    expose:
+      - port: 8000
+        as: 80
+        to:
+          - global: true
+
+profiles:
+  compute:
+    db:
+      resources:
+        cpu:
+          units: 2
+        memory:
+          size: 4Gi
+        storage:
+          - size: 30Gi
+    llm:
+      resources:
+        cpu:
+          units: 8
+        memory:
+          size: 32Gi
+        gpu:
+          units: 1
+          attributes:
+            vendor:
+              nvidia:
+                - model: rtx5090
+        storage:
+          - size: 60Gi   # vLLM image (~20 GB unpacked) + AWQ weights (12.3 GB) + logs
+    app:
+      resources:
+        cpu:
+          units: 8
+        memory:
+          size: 24Gi     # bge-m3 on CPU plus the app; no voice or OCR models
+        storage:
+          - size: 100Gi  # app image (~55 GB unpacked)
+  placement:
+    dcloud:
+      pricing:
+        db:
+          denom: uakt
+          amount: 1000
+        llm:
+          denom: uakt
+          amount: 20000
+        app:
+          denom: uakt
+          amount: 2000
+
+deployment:
+  db:
+    dcloud:
+      profile: db
+      count: 1
+  llm:
+    dcloud:
+      profile: llm
+      count: 1
+  app:
+    dcloud:
+      profile: app
+      count: 1
