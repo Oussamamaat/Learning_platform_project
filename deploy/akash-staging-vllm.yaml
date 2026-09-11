@@ -46,8 +46,8 @@ services:
           - service: app
 
   llm:
-    # Pin before deploying, e.g. ghcr.io/oussamamaat/iblog-vllm:vllm-migration-<sha>
-    image: ghcr.io/oussamamaat/iblog-vllm:vllm-migration
+    # Pinned to the CI build of commit 880dfc3 (provider nodes cache mutable tags).
+    image: ghcr.io/oussamamaat/iblog-vllm:vllm-migration-880dfc35ac44a7b7c7d557708de21d4b2754c33a
     env:
       - HF_TOKEN=PASTE_A_READ_ONLY_HF_TOKEN
       - AWQ_REPO=Oussamamaat/iblog-tutor-awq
@@ -67,8 +67,8 @@ services:
           - service: app
 
   app:
-    # Pin before deploying, e.g. ghcr.io/oussamamaat/iblog-tutor:vllm-migration-<sha>
-    image: ghcr.io/oussamamaat/iblog-tutor:vllm-migration
+    # Pinned to the CI build of commit 880dfc3 (provider nodes cache mutable tags).
+    image: ghcr.io/oussamamaat/iblog-tutor:vllm-migration-880dfc35ac44a7b7c7d557708de21d4b2754c33a
     env:
       - DATABASE_URL=postgresql://assistant:CHANGE_ME_strong_password@db:5432/iblog_assistant
       - LLM_BACKEND=vllm
