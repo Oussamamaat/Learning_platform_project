@@ -39,11 +39,9 @@ class Settings(BaseSettings):
     # that module for why threading.Semaphore rather than asyncio.Semaphore
     # is correct here). Previously there was NO limit at all: N concurrent
     # users meant N concurrent Ollama requests, unmodelled
-    # (docs/architecture/cloud-scaling-plan.md #3). 4 is a conservative
-    # placeholder, not a measured value -- POST_LEASE_MVP_SPRINT_PLAN.md
-    # item 5 / ADR 0008 runs a real concurrency sweep (N=1/2/4/8 against
-    # the 32GB deployment) once the lease is back up and records the
-    # chosen limit against that curve; this default holds until then.
+    # (docs/architecture/cloud-scaling-plan.md #3). 4 matches the
+    # OLLAMA_NUM_PARALLEL=4 rollback SDL; measured on an RTX 5090 in ADR
+    # 0008's 2026-09-11 amendment.
     # Embeddings never touch Ollama (app.services.ingestion/search use an
     # in-process SentenceTransformer), so this can never starve retrieval.
     ollama_max_concurrent: int = 4
@@ -88,10 +86,8 @@ class Settings(BaseSettings):
     # time regardless). vLLM does its own continuous-batching admission
     # control, so this is pure backpressure -- keeping this process from
     # opening unbounded sockets under a traffic spike -- not a parallelism
-    # limit. 64 is a starting placeholder, not a measured value, same
-    # "placeholder until a real sweep runs" status ollama_max_concurrent had
-    # before ADR 0008 -- Step 6's bench_concurrency.py run against vLLM is
-    # what should set this for real.
+    # limit. 64 = 32 per language, the highest load measured with zero
+    # errors (ADR 0011).
     llm_max_concurrent: int = 64
 
     default_tenant_id: str = "company_abc"

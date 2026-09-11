@@ -1,8 +1,9 @@
 # ADR 0008: Ollama Concurrency Limit
 
-**Status:** Mechanism implemented and tested with a conservative placeholder default; the actual
-limit is deferred to a Phase B measured concurrency sweep
-**Date:** 2026-09-04
+**Status:** Mechanism implemented and tested; the default was measured on an RTX 5090 on
+2026-09-11 (see *Amendment*). Production serving moves to vLLM (ADR 0011), so this limit now
+governs the Ollama rollback path only.
+**Date:** 2026-09-04 (amended 2026-09-11)
 **Depends on:** `docs/architecture/cloud-scaling-plan.md` #3, `POST_LEASE_MVP_SPRINT_PLAN.md` item 5
 
 ## Problem
@@ -88,3 +89,35 @@ The mechanism, its config surface, and its test coverage are all local/free work
 without GPU or lease access. The one thing genuinely gated on Phase B is the number itself — no
 concurrent-load data exists yet on this deployment's actual hardware, and inventing one would not
 meet the sprint's own bar for what counts as a measured decision.
+
+## Amendment (2026-09-11): measured on an RTX 5090
+
+**Method.** Same card and same rendered prompts as ADR 0011: 20 real RAG prompts per language,
+`max_tokens` 300, temperature 0, N = 1, 2, 4, 8, 16, 32 concurrent workers, 2 requests per worker.
+Two Ollama v0.33.2 servers: port 11434 with `NUM_PARALLEL` unset, port 11435 with
+`NUM_PARALLEL=4`. Results: `results/public/bench_ollama_{unset,4}_{darija,fr}.json` in the private
+dataset `Oussamamaat/iblog-vllm-lease`.
+
+| Config | Language | p95 N=4 | p95 N=16 | p95 N=32 | Throughput N=16 | Errors N=32 | Peak VRAM |
+|---|---|---|---|---|---|---|---|
+| `NUM_PARALLEL` unset | Darija | 32.9 s | 113.2 s | 231.4 s | 0.15 req/s | 0/64 | 8,510 MiB |
+| `NUM_PARALLEL` unset | French | 31.0 s | 125.8 s | 251.7 s | 0.13 req/s | 0/64 | 17,019 MiB |
+| `NUM_PARALLEL=4` | Darija | 173.1 s | 419.9 s | 400.9 s | 0.03 req/s | 44/64 | 31,160 MiB |
+| `NUM_PARALLEL=4` | French | 24.2 s | 82.7 s | 170.7 s | 0.23 req/s | 0/64 | 15,064 MiB |
+
+**Findings.**
+
+- With `NUM_PARALLEL` unset, throughput is flat from N=2 to N=32 for both tutors: Ollama is
+  strictly serial, and p95 grows with the queue.
+- `NUM_PARALLEL=4` raised French throughput about 1.7x and cut its p95 at N=16 from 125.8 s to
+  82.7 s.
+- The Darija `NUM_PARALLEL=4` row is not a valid measurement. That run started with the other
+  server's model still loaded, so the card peaked at 31,160 of 32,607 MiB; its slowdown and its
+  timeouts (9/32 at N=16, 44/64 at N=32) come from memory starvation, not from the setting.
+- Neither configuration meets the p95 < 10 s target at N=16. That is why production moves to vLLM
+  (ADR 0011).
+
+**Decision.** Keep `ollama_max_concurrent = 4`, paired with `OLLAMA_NUM_PARALLEL=4` in the Ollama
+rollback SDL. The clean French run shows 4 parallel slots improving throughput without errors, and a
+semaphore of 4 matches the server's slot count, so requests wait in the app rather than inside
+Ollama.
