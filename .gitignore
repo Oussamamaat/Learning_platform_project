@@ -54,6 +54,10 @@ frontend/dist/
 atlas_gguf_export*/
 unsloth_compiled_cache/
 
+# Recovered production LoRA adapters (models/adapters/, ~490 MB). Not reproducible
+# from this repo; they live on Hugging Face (Oussamamaat/iblog-tutor-adapters), not in git.
+models/
+
 # Tenant-uploaded documents (settings.upload_dir). Runtime data, not source:
 # each file is reachable only via its source_files row, and the rows live in
 # Postgres -- committing the blobs would leak one tenant's corpus into the repo.

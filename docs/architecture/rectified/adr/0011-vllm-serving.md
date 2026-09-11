@@ -123,13 +123,13 @@ Measurement conditions that make these vLLM numbers conservative or partial:
    because Atlas-Chat-9B's config lists token 107 as EOS; the French build from
    `unsloth/gemma-2-9b` lists only `<eos>`. Run 1's French answers had a median of 287 tokens and
    invented `user`/`model` turns. Every vLLM request now also sends `stop_token_ids: [106, 107]`
-   (commit `2ff045d`); the rerun's French median is 73 tokens.
+   (commit `3d99a51`, lease kit `2ff045d`); the rerun's French median is 73 tokens.
 3. **Ollama and vLLM shared the GPU.** In run 1, B4 queried Ollama while vLLM held 90% of the card:
    Ollama got 1.5 GiB, ran mostly on CPU, and all 7 quality requests timed out at 3 minutes. Ollama's
    runner then stayed loaded long enough to leave B6's French fp8 instance 0.68 GiB short at
    startup. `job.sh` now collects Ollama's quality answers before vLLM starts, unloads Ollama and
    waits for an idle GPU before every vLLM start, and skips benchmarks and AWQ builds already
-   published (commit `2ff045d`).
+   published (commit `3d99a51`, lease kit `2ff045d`).
 
 ## Decision
 
