@@ -1048,6 +1048,8 @@ def _stream_ollama_chat(
 # per request. See render_conversation(): every rendered turn is wrapped in
 # exactly these two markers.
 _VLLM_STOP = ["<end_of_turn>", "<start_of_turn>"]
+# vLLM matches stop strings after stripping special tokens, so they never fire; stop on the ids.
+_VLLM_STOP_TOKEN_IDS = [106, 107]  # Gemma-2 <start_of_turn>, <end_of_turn>
 
 # Mirrors _ollama_semaphore's module-level comment almost exactly, with one
 # difference: settings.llm_max_concurrent is NOT a parallelism ceiling the
@@ -1191,6 +1193,7 @@ def _call_vllm_generate(
         "temperature": 0.2,
         "max_tokens": get_settings().llm_max_tokens,
         "stop": _VLLM_STOP,
+        "stop_token_ids": _VLLM_STOP_TOKEN_IDS,
         "stream": False,
     }
     if json_schema is not None:
@@ -1222,6 +1225,7 @@ def _call_vllm_chat(
         "temperature": 0.2,
         "max_tokens": get_settings().llm_max_tokens,
         "stop": _VLLM_STOP,
+        "stop_token_ids": _VLLM_STOP_TOKEN_IDS,
         "stream": False,
     }
     if json_schema is not None:
@@ -1265,6 +1269,7 @@ def _stream_vllm_chat(
             "temperature": 0.2,
             "max_tokens": settings.llm_max_tokens,
             "stop": _VLLM_STOP,
+            "stop_token_ids": _VLLM_STOP_TOKEN_IDS,
             "stream": True,
         }
         data = json.dumps(payload).encode("utf-8")

@@ -64,6 +64,8 @@ SMOKE_MODEL_HF="${SMOKE_MODEL_HF:-Qwen/Qwen2.5-0.5B-Instruct}"  # HF repo id, vL
 # both can share one RESULTS_REPO without a smoke run's tiny-model numbers
 # colliding with (or being mistaken for) a real lease's results.
 RESULTS_PREFIX="results"; [ "$JOB_PROFILE" = "smoke" ] && RESULTS_PREFIX="results-smoke"
+# Max GPU memory (MiB) still in use before a vLLM start; a laptop smoke run shares the card with the desktop.
+GPU_IDLE_MIB="${GPU_IDLE_MIB:-1024}"; [ "$JOB_PROFILE" = "smoke" ] && GPU_IDLE_MIB="${GPU_IDLE_MIB_SMOKE:-3072}"
 
 : "${KIT_REPO:?set KIT_REPO to the HF dataset repo from publish_kit.py}"
 : "${HF_TOKEN:?set HF_TOKEN (read on GGUF/adapters/kit repos, write on the AWQ+results repos)}"
@@ -160,6 +162,35 @@ repo, token, local_path, repo_path = sys.argv[1], sys.argv[2], sys.argv[3], sys.
 HfApi(token=token).upload_file(path_or_fileobj=local_path, path_in_repo=repo_path,
                                 repo_id=repo, repo_type="dataset")
 PYEOF
+}
+
+hf_has() {  # hf_has <repo> <repo_type> <path> -- lets a rerun skip work whose output is already on HF
+    python3 - "$1" "$2" "$3" "$HF_TOKEN" <<'PYEOF'
+import sys
+from huggingface_hub import HfApi
+repo, repo_type, path, token = sys.argv[1:5]
+sys.exit(0 if HfApi(token=token).file_exists(repo, path, repo_type=repo_type) else 1)
+PYEOF
+}
+
+# Ollama and vLLM must never share the card: vLLM's startup memory check fails, and Ollama falls back to CPU.
+ollama_unload() {
+    for port in 11434 11435; do
+        for model in IBLOG_TUTOR:latest iblog-tutor-fr:latest; do
+            curl -sf "http://127.0.0.1:$port/api/generate" \
+                 -d "{\"model\":\"$model\",\"keep_alive\":0}" >/dev/null 2>&1 || true
+        done
+    done
+}
+
+wait_gpu_idle() {
+    local used=""
+    for i in $(seq 1 90); do
+        used=$(nvidia-smi --query-gpu=memory.used --format=csv,noheader,nounits | head -1 | tr -d ' ')
+        if [ -n "$used" ] && [ "$used" -le "$GPU_IDLE_MIB" ]; then echo "GPU idle: ${used} MiB used"; return 0; fi
+        sleep 2
+    done
+    echo "ERROR: GPU still has ${used} MiB in use (limit $GPU_IDLE_MIB)"; return 1
 }
 
 # ── Tiny status file server on :8000 (SDL maps this to global port 80) ──────
@@ -306,6 +337,9 @@ else
             port="${cfg%%:*}"; note="${cfg#*:}"
             for lang in darija fr; do
                 model="IBLOG_TUTOR:latest"; [ "$lang" = "fr" ] && model="iblog-tutor-fr:latest"
+                if hf_has "$RESULTS_REPO" dataset "$RESULTS_PREFIX/public/bench_ollama_${note}_${lang}.json"; then
+                    echo "bench_ollama_${note}_${lang}.json already on HF -- skipping"; continue
+                fi
                 "$APP_PY" "$KIT_ROOT/scripts/benchmark/bench_concurrency.py" \
                     --backend ollama --base-url "http://127.0.0.1:$port" --model "$model" \
                     --prompts "$FIXTURES_DIR/bench_prompts.json" --language "$lang" \
@@ -313,6 +347,13 @@ else
                     --out "$PUBLIC_DIR/bench_ollama_${note}_${lang}.json"
             done
         done
+        # Ollama's side of the quality comparison, collected while it has the card to itself.
+        "$APP_PY" "$KIT_ROOT/scripts/vllm/quality_sample.py" \
+            --prompts "$FIXTURES_DIR/quality_prompts.json" --backends ollama \
+            --ollama-url http://127.0.0.1:11434 \
+            --ollama-model-darija IBLOG_TUTOR:latest --ollama-model-fr iblog-tutor-fr:latest \
+            --out "$PUBLIC_DIR/quality_ollama.md" --out-json "$PUBLIC_DIR/quality_ollama.json"
+
         # Explicitly release Ollama's GPU memory now, rather than waiting
         # on its default 5-minute idle timeout -- found for real running
         # this exact script (plan Phase A11): with that natural timeout,
@@ -326,12 +367,7 @@ else
         # instead of failing outright. Rule R2's own principle (unload via
         # API, never kill the process) applied to a resource problem, not
         # just the process-liveness problem it was written for.
-        for port in 11434 11435; do
-            for model in IBLOG_TUTOR:latest iblog-tutor-fr:latest; do
-                curl -sf "http://127.0.0.1:$port/api/generate" \
-                     -d "{\"model\":\"$model\",\"keep_alive\":0}" >/dev/null 2>&1 || true
-            done
-        done
+        ollama_unload
     ) > "$LOG_DIR/B2_ollama_bench.log" 2>&1
     if [ $? -ne 0 ]; then fail_and_sleep "B2_ollama_bench" "$LOG_DIR/B2_ollama_bench.log"; fi
     mark_done "B2"
@@ -348,6 +384,9 @@ elif [ "$JOB_PROFILE" = "smoke" ]; then
     log "scripts/vllm/dry_run_awq.py, not by this orchestration smoke test."
     mark_done "B3"
     write_status "running" "{\"note\": \"B3 skipped in smoke profile\"}"
+elif hf_has "$AWQ_REPO" model darija/model.safetensors && hf_has "$AWQ_REPO" model french/model.safetensors; then
+    log "B3: both AWQ models already on $AWQ_REPO -- skipping the build"
+    mark_done "B3"
 else
     write_status "running"
     (
@@ -409,6 +448,8 @@ snapshot_download(repo_id='$AWQ_REPO', repo_type='model', allow_patterns='french
         # auto-inferred once to observe it, real Phase B5 numbers get
         # whatever serve_pair.sh's log shows worked.
         export VLLM_AUTO_KV=1
+        ollama_unload
+        wait_gpu_idle
         bash "$KIT_ROOT/scripts/vllm/serve_pair.sh" > "$LOG_DIR/serve_pair_startup.log" 2>&1 &
         SERVE_PAIR_PID=$!
         echo "$SERVE_PAIR_PID" > "$WORK_DIR/serve_pair.pid"
@@ -428,10 +469,10 @@ snapshot_download(repo_id='$AWQ_REPO', repo_type='model', allow_patterns='french
         PARITY_RC=$?
         set -e
 
+        ollama_unload
         python3 "$KIT_ROOT/scripts/vllm/quality_sample.py" \
             --prompts "$FIXTURES_DIR/quality_prompts.json" \
-            --ollama-url http://127.0.0.1:11434 \
-            --ollama-model-darija IBLOG_TUTOR:latest --ollama-model-fr iblog-tutor-fr:latest \
+            --backends vllm --ollama-answers "$PUBLIC_DIR/quality_ollama.json" \
             --vllm-url-darija http://127.0.0.1:8101 --vllm-url-fr http://127.0.0.1:8102 \
             --vllm-model-darija iblog-tutor-darija-awq --vllm-model-fr iblog-tutor-fr-awq \
             --out "$PUBLIC_DIR/quality_transcripts.md" --out-json "$PUBLIC_DIR/quality_transcripts.json"
@@ -494,8 +535,9 @@ else
         if [ -f "$WORK_DIR/serve_pair.pid" ]; then
             kill "$(cat "$WORK_DIR/serve_pair.pid")" 2>/dev/null || true
             pkill -f "vllm serve" 2>/dev/null || true
-            sleep 5
         fi
+        ollama_unload
+        wait_gpu_idle
         export DARIJA_MODEL_DIR="$WORK_DIR/awq/darija/darija"
         export FRENCH_MODEL_DIR="$WORK_DIR/awq/french/french"
         export VLLM_AUTO_KV=1
@@ -515,8 +557,7 @@ else
 
         python3 "$KIT_ROOT/scripts/vllm/quality_sample.py" \
             --prompts "$FIXTURES_DIR/quality_prompts.json" \
-            --ollama-url http://127.0.0.1:11434 \
-            --ollama-model-darija IBLOG_TUTOR:latest --ollama-model-fr iblog-tutor-fr:latest \
+            --backends vllm --ollama-answers "$PUBLIC_DIR/quality_ollama.json" \
             --vllm-url-darija http://127.0.0.1:8101 --vllm-url-fr http://127.0.0.1:8102 \
             --vllm-model-darija iblog-tutor-darija-awq --vllm-model-fr iblog-tutor-fr-awq \
             --out "$PUBLIC_DIR/quality_transcripts_fp8.md" --out-json "$PUBLIC_DIR/quality_transcripts_fp8.json"

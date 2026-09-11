@@ -176,6 +176,16 @@ def test_call_vllm_generate_sends_stop_sequences():
         _call_vllm_generate("iblog-tutor-darija-awq", "p", "s")
     payload = json.loads(mock_urlopen.call_args[0][0].data.decode("utf-8"))
     assert payload["stop"] == ["<end_of_turn>", "<start_of_turn>"]
+    assert payload["stop_token_ids"] == [106, 107]
+
+
+def test_call_vllm_chat_sends_stop_token_ids():
+    """vLLM strips special tokens before matching stop strings, so only the ids stop generation."""
+    with patch("app.services.llm.urllib.request.urlopen",
+               return_value=_fake_completion_response("ok")) as mock_urlopen:
+        _call_vllm_chat("iblog-tutor-fr-awq", [{"role": "user", "content": "salut"}])
+    payload = json.loads(mock_urlopen.call_args[0][0].data.decode("utf-8"))
+    assert payload["stop_token_ids"] == [106, 107]
 
 
 def test_call_vllm_generate_never_sends_keep_alive():
@@ -286,6 +296,14 @@ def test_stream_vllm_chat_yields_deltas_in_order_and_stops_at_done():
     with patch("app.services.llm.urllib.request.urlopen", return_value=_FakeStream(lines)):
         deltas = list(_stream_vllm_chat("iblog-tutor-fr-awq", [{"role": "user", "content": "hi"}]))
     assert "".join(deltas) == "Bonjour, le casque."
+
+
+def test_stream_vllm_chat_sends_stop_token_ids():
+    with patch("app.services.llm.urllib.request.urlopen",
+               return_value=_FakeStream(_sse("ok"))) as mock_urlopen:
+        list(_stream_vllm_chat("iblog-tutor-fr-awq", [{"role": "user", "content": "salut"}]))
+    payload = json.loads(mock_urlopen.call_args[0][0].data.decode("utf-8"))
+    assert payload["stop_token_ids"] == [106, 107]
 
 
 def test_stream_vllm_chat_skips_malformed_sse_line():

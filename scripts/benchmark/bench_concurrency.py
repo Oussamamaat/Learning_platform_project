@@ -62,6 +62,8 @@ _FALLBACK_PROMPTS = [
 ]
 
 _VLLM_STOP = ["<end_of_turn>", "<start_of_turn>"]
+# vLLM matches stop strings after stripping special tokens, so they never fire; stop on the ids.
+_VLLM_STOP_TOKEN_IDS = [106, 107]  # Gemma-2 <start_of_turn>, <end_of_turn>
 
 
 def _load_prompts(path: str, language: str) -> list[dict]:
@@ -137,6 +139,7 @@ def _one_request_vllm(base_url: str, model: str, prompt: str, max_tokens: int,
         "temperature": temperature,
         "max_tokens": max_tokens,
         "stop": _VLLM_STOP,
+        "stop_token_ids": _VLLM_STOP_TOKEN_IDS,
         "stream": True,
         "stream_options": {"include_usage": True},
     }
