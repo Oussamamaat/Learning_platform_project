@@ -1070,6 +1070,18 @@ def _get_vllm_semaphore() -> threading.Semaphore:
     return _vllm_semaphore
 
 
+def _vllm_base_url(model: str) -> str:
+    """Which of the two vLLM instances serves `model`. Darija and French are
+    different base models (Atlas-Chat-9B vs unsloth/gemma-2-9b), so they are
+    two separate `vllm serve` processes on two ports -- never one shared
+    llm_base_url (rev 1's bug; see the plan doc's "What rev 1 got wrong").
+    """
+    settings = get_settings()
+    if model == settings.llm_model_fr:
+        return settings.llm_base_url_fr
+    return settings.llm_base_url
+
+
 def _post_vllm(payload: dict, *, timeout: Optional[int] = None) -> dict:
     """POST a JSON body to vLLM's /v1/completions and return the decoded
     response.
@@ -1086,7 +1098,8 @@ def _post_vllm(payload: dict, *, timeout: Optional[int] = None) -> dict:
     _get_vllm_semaphore().acquire()
     try:
         settings = get_settings()
-        url = f"{settings.llm_base_url.rstrip('/')}/v1/completions"
+        base_url = _vllm_base_url(payload.get("model"))
+        url = f"{base_url.rstrip('/')}/v1/completions"
         data = json.dumps(payload).encode("utf-8")
         effective_timeout = timeout if timeout is not None else settings.ollama_timeout_seconds
 
@@ -1117,7 +1130,16 @@ def _post_vllm(payload: dict, *, timeout: Optional[int] = None) -> dict:
                     raise GenerationError(
                         f"vLLM has no served model named {payload.get('model')!r} (HTTP 404). "
                         f"Check settings.llm_model_darija / llm_model_fr against "
-                        f"--served-model-name at {settings.llm_base_url}."
+                        f"--served-model-name at {base_url}."
+                    ) from e
+                # vLLM's context-length error is a 400, not a truncation --
+                # left unmapped this would surface as a generic GenerationError
+                # with an opaque body; naming it explicitly matches assumption
+                # 5 (never silently truncate) and Ollama's own equivalent
+                # behavior (front-truncation, at least visible in the logs).
+                if e.code == 400 and ("max_model_len" in body or "maximum context length" in body):
+                    raise GenerationError(
+                        f"Prompt exceeds vLLM max_model_len (HTTP 400): {body}"
                     ) from e
                 raise GenerationError(f"vLLM HTTP {e.code}: {body}") from e
             except urllib.error.URLError as e:
@@ -1130,7 +1152,7 @@ def _post_vllm(payload: dict, *, timeout: Optional[int] = None) -> dict:
                     time.sleep(_RETRY_DELAYS_SECONDS[attempt])
                     continue
                 logger.error("vLLM connection failed: %s", e)
-                raise LLMConnectionError("vLLM", payload.get("model"), settings.llm_base_url) from e
+                raise LLMConnectionError("vLLM", payload.get("model"), base_url) from e
             except json.JSONDecodeError as e:
                 logger.error("Invalid JSON from vLLM: %s", e)
                 raise GenerationError(f"Invalid JSON response: {e}") from e
@@ -1140,7 +1162,7 @@ def _post_vllm(payload: dict, *, timeout: Optional[int] = None) -> dict:
                 logger.error("Unexpected vLLM error: %s", e)
                 raise GenerationError(str(e)) from e
 
-        raise LLMConnectionError("vLLM", payload.get("model"), settings.llm_base_url) from last_error
+        raise LLMConnectionError("vLLM", payload.get("model"), base_url) from last_error
     finally:
         _get_vllm_semaphore().release()
 
@@ -1151,14 +1173,15 @@ def _call_vllm_generate(
     system: str,
     *,
     timeout: Optional[int] = None,
-    guided_json: Optional[dict] = None,
+    json_schema: Optional[dict] = None,
 ) -> str:
     """vLLM sibling of _call_ollama_generate -- same (model, prompt, system)
     signature so quiz.py/diagrams.py's call sites are a one-line swap.
     `prompt`/`system` are folded into a [system, user] messages list and
     rendered through render_conversation() into the raw prompt vLLM
-    receives; `guided_json` is vLLM's substitution for Ollama's `format`
-    (ADR 0003 already anticipated this)."""
+    receives; `json_schema` is vLLM's substitution for Ollama's `format`
+    (ADR 0003 already anticipated this), sent as `structured_outputs`
+    (`guided_json` was removed in vLLM v0.12.0)."""
     text = render_conversation(
         [{"role": "system", "content": system}, {"role": "user", "content": prompt}]
     )
@@ -1170,8 +1193,8 @@ def _call_vllm_generate(
         "stop": _VLLM_STOP,
         "stream": False,
     }
-    if guided_json is not None:
-        payload["guided_json"] = guided_json
+    if json_schema is not None:
+        payload["structured_outputs"] = {"json": json_schema}
 
     res_json = _post_vllm(payload, timeout=timeout)
     choices = res_json.get("choices") or []
@@ -1186,7 +1209,7 @@ def _call_vllm_chat(
     messages: list[dict],
     *,
     timeout: Optional[int] = None,
-    guided_json: Optional[dict] = None,
+    json_schema: Optional[dict] = None,
 ) -> str:
     """vLLM sibling of _call_ollama_chat -- same (model, messages) signature.
     `messages` is rendered through render_conversation() into the raw
@@ -1201,8 +1224,8 @@ def _call_vllm_chat(
         "stop": _VLLM_STOP,
         "stream": False,
     }
-    if guided_json is not None:
-        payload["guided_json"] = guided_json
+    if json_schema is not None:
+        payload["structured_outputs"] = {"json": json_schema}
 
     res_json = _post_vllm(payload, timeout=timeout)
     choices = res_json.get("choices") or []
@@ -1233,7 +1256,8 @@ def _stream_vllm_chat(
     _get_vllm_semaphore().acquire()
     try:
         settings = get_settings()
-        url = f"{settings.llm_base_url.rstrip('/')}/v1/completions"
+        base_url = _vllm_base_url(model)
+        url = f"{base_url.rstrip('/')}/v1/completions"
         text = render_conversation(messages)
         payload = {
             "model": model,
@@ -1263,10 +1287,14 @@ def _stream_vllm_chat(
                     f"vLLM has no served model named {model!r} (HTTP 404). Check "
                     f"settings.llm_model_darija / llm_model_fr."
                 ) from e
+            if e.code == 400 and ("max_model_len" in body or "maximum context length" in body):
+                raise GenerationError(
+                    f"Prompt exceeds vLLM max_model_len (HTTP 400): {body}"
+                ) from e
             raise GenerationError(f"vLLM HTTP {e.code}: {body}") from e
         except urllib.error.URLError as e:
             logger.error("vLLM connection failed (stream): %s", e)
-            raise LLMConnectionError("vLLM", model, settings.llm_base_url) from e
+            raise LLMConnectionError("vLLM", model, base_url) from e
 
         got_any = False
         try:
@@ -1293,7 +1321,7 @@ def _stream_vllm_chat(
         except (urllib.error.URLError, ConnectionError, TimeoutError) as e:
             if got_any:
                 raise GenerationError(f"vLLM stream dropped mid-response: {e}") from e
-            raise LLMConnectionError("vLLM", model, settings.llm_base_url) from e
+            raise LLMConnectionError("vLLM", model, base_url) from e
 
         if not got_any:
             raise GenerationError("vLLM returned an empty stream")
@@ -1340,7 +1368,7 @@ def llm_generate(
     quiz.py and diagrams.py call this instead of reaching for either
     backend's function directly."""
     if get_settings().llm_backend == "vllm":
-        return _call_vllm_generate(model, prompt, system, timeout=timeout, guided_json=format_schema)
+        return _call_vllm_generate(model, prompt, system, timeout=timeout, json_schema=format_schema)
     return _call_ollama_generate(model, prompt, system, timeout=timeout, format_schema=format_schema)
 
 
@@ -1353,7 +1381,7 @@ def llm_chat(
 ) -> str:
     """Backend-neutral sibling of _call_ollama_chat / _call_vllm_chat."""
     if get_settings().llm_backend == "vllm":
-        return _call_vllm_chat(model, messages, timeout=timeout, guided_json=format_schema)
+        return _call_vllm_chat(model, messages, timeout=timeout, json_schema=format_schema)
     return _call_ollama_chat(model, messages, timeout=timeout, format_schema=format_schema)
 
 

@@ -2436,7 +2436,7 @@ ROW_LIST_SCHEMA = {
 # first attempt returned prose with a/b/c/d options instead of an object.
 # Constraining the quiz itself and doing the wrapping deterministically means
 # the training rows carry exactly the structure production will request under
-# `guided_json`, rather than a prose approximation of it.
+# `structured_outputs`, rather than a prose approximation of it.
 QUIZ_CONTENT_SCHEMA = {
     "type": "object",
     "properties": {

@@ -45,37 +45,126 @@ services:
     volumes:
       - ./app:/app/app
 
-  # Local vLLM smoke test (plan Step 5) -- NOT part of the default `db` +
-  # `ollama` + `api` stack and deliberately has no `depends_on` on either.
-  # This is here for local wiring checks only (prompt parity, guided_json,
-  # streaming, stop handling) against a small stand-in model; the
-  # laptop's 8GB VRAM cannot hold a real 9B alongside anything else, and
-  # the production AWQ merges are built and served on the Akash lease
-  # (Step 0), not here.
+  # Local vLLM smoke test (plan rev 2, Phase A11) -- NOT part of the default
+  # `db` + `ollama` + `api` stack and deliberately has no `depends_on` on
+  # either. This is here for local wiring checks only (prompt parity,
+  # structured_outputs, streaming, stop handling) against a small stand-in
+  # model, served under BOTH tutor names, one per port -- the app always
+  # talks to two vLLM instances (llm_base_url / llm_base_url_fr,
+  # app/config.py), never one shared URL, because Darija and French are
+  # different base models in production. The laptop's 8GB VRAM cannot hold
+  # a real 9B alongside anything else, and the production AWQ merges are
+  # built and served on the Akash lease (plan Phase B), not here.
+  #
+  # LLM_MODEL default: Qwen/Qwen2.5-0.5B-Instruct. Two prior stand-ins were
+  # tried and rejected for real, specific reasons, not guessed around:
+  #   1. unsloth/gemma-2-2b-it -- both instances crashed with `ValueError:
+  #      No available memory for the cache blocks`. gemma-2-2b-it is
+  #      ~5.2 GB in bf16, but each instance was only budgeted
+  #      gpu_memory_utilization=0.40 x 8GB = 3.2 GB -- less than the
+  #      model's OWN weights, before any KV cache at all.
+  #   2. TinyLlama/TinyLlama-1.1B-Chat-v1.0 -- fit the VRAM budget fine
+  #      (~2.2 GB in bf16), but its native max_position_embeddings is only
+  #      2048, and this app's real system prompts (app/services/llm.py's
+  #      SYSTEM_PROMPT_TEMPLATE/_FR) plus retrieved RAG context already run
+  #      ~1900-2000 tokens on their own (measured directly, plan Phase A5's
+  #      make_fixtures.py gate) -- there was no room left for ANY output
+  #      tokens, let alone a real answer. Forcing past 2048 via
+  #      VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 was rejected too: TinyLlama uses
+  #      RoPE, and vLLM's own docs warn that positions beyond a RoPE
+  #      model's derived max_model_len produce NaN, not just a truncated
+  #      answer -- exactly the kind of silent, misleading failure this
+  #      migration's own error-mapping work (app/services/llm.py's 400
+  #      context-length -> GenerationError) exists to avoid, not reproduce.
+  # Qwen2.5-0.5B-Instruct's native max_position_embeddings is 32768 and its
+  # bf16 weights are ~1 GB -- two copies (~2 GB) leave ample headroom for
+  # KV cache AND this app's real ~2000-token prompts within the 0.45 x 8GB
+  # = 3.6 GB budgeted per instance below.
   #
   # Start ALONE, never with `up` (which would also start db/ollama and
   # collide with the native-Windows dev stack's ports/container names --
-  # see the plan's W3 "shared resources" table):
-  #     docker compose -f config/docker-compose.yml -p iblog_vllm up vllm
-  # LLM_MODEL defaults to a small CPU/tiny-GPU-friendly stand-in; override
-  # with a real --served-model-name once testing against production AWQ
-  # weights on the lease.
+  # see the plan's W3 "shared resources" table), and `ollama stop` both
+  # tutors first (one 4060 8GB card cannot hold both at once):
+  #     docker compose -f config/docker-compose.yml -p iblog_vllm up vllm vllm-fr
+  # Override LLM_MODEL with the real --served-model-name once testing
+  # against production AWQ weights on the lease. Version pinned (not
+  # :latest) so a smoke-test pass means something concrete: rev 1 assumed
+  # guided_json, removed in v0.12.0 -- floating on :latest would have
+  # silently re-broken this the next time the tag moved.
+  #
+  # --max-num-seqs 8, NOT vLLM's own default: even after the model-size
+  # fix above, both instances still crashed with `ValueError: No available
+  # memory for the cache blocks` -- vLLM pre-allocates KV cache sized for
+  # its scheduler's max concurrent sequences (which defaults much higher
+  # than 8) x max_model_len (8192), regardless of how small the MODEL
+  # itself is. A local wiring smoke test never needs more than a handful
+  # of concurrent requests, so bounding this directly is the right fix,
+  # not shrinking the model further or the context window (which is
+  # exactly what broke the two previous stand-ins).
   vllm:
-    image: vllm/vllm-openai:latest
+    image: vllm/vllm-openai:v0.29.0
     container_name: iblog-vllm
     ports:
-      - "8001:8000"
+      - "8101:8000"
     environment:
       - HUGGING_FACE_HUB_TOKEN=${HUGGING_FACE_HUB_TOKEN:-}
+      # Docker Desktop's WSL2 GPU passthrough: vLLM v0.29.0's new
+      # GPUModelRunnerV2 needs pinned memory (UVA) to allocate its
+      # UvaBuffer, and vLLM disables pinned memory under WSL2 by default
+      # (vllm/platforms/cuda.py) unless this is set -- without it, the
+      # container crashes on startup with `RuntimeError: UVA is not
+      # available`, even with 0 MiB of VRAM ever touched (this is a
+      # startup-time platform check, not an OOM). Confirmed against this
+      # image's own source and this machine's WSL2 kernel (6.6.87.2,
+      # comfortably above the 4.19.121 gate vLLM checks first).
+      - VLLM_WSL2_ENABLE_PIN_MEMORY=1
     command:
       - --model
-      - ${LLM_MODEL:-TinyLlama/TinyLlama-1.1B-Chat-v1.0}
+      - ${LLM_MODEL:-Qwen/Qwen2.5-0.5B-Instruct}
       - --served-model-name
-      - ${LLM_SERVED_NAME:-iblog-tutor-stub}
+      - ${LLM_SERVED_NAME:-iblog-tutor-darija-awq}
+      - --max-num-seqs
+      - "${LLM_MAX_NUM_SEQS:-8}"
       - --max-model-len
-      - "8192"
+      - ${LLM_MAX_MODEL_LEN:-8192}
       - --gpu-memory-utilization
-      - ${LLM_GPU_MEM_UTIL:-0.85}
+      - ${LLM_GPU_MEM_UTIL:-0.45}
+      - --enable-prefix-caching
+    volumes:
+      - vllm_cache:/root/.cache/huggingface
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+
+  # French sibling of `vllm` above -- same stand-in model under the French
+  # served name, on port 8102 (app/config.py's llm_base_url_fr). A real
+  # production lease serves two DIFFERENT base models here (Atlas-Chat-9B
+  # vs unsloth/gemma-2-9b); the local smoke test uses one small model
+  # twice since wiring, not model quality, is what this checks (Verification
+  # criterion 2 / V2 in the plan).
+  vllm-fr:
+    image: vllm/vllm-openai:v0.29.0
+    container_name: iblog-vllm-fr
+    ports:
+      - "8102:8000"
+    environment:
+      - HUGGING_FACE_HUB_TOKEN=${HUGGING_FACE_HUB_TOKEN:-}
+      - VLLM_WSL2_ENABLE_PIN_MEMORY=1  # see the `vllm` service's comment above
+    command:
+      - --model
+      - ${LLM_MODEL:-Qwen/Qwen2.5-0.5B-Instruct}
+      - --served-model-name
+      - ${LLM_SERVED_NAME_FR:-iblog-tutor-fr-awq}
+      - --max-num-seqs
+      - "${LLM_MAX_NUM_SEQS:-8}"
+      - --max-model-len
+      - ${LLM_MAX_MODEL_LEN:-8192}
+      - --gpu-memory-utilization
+      - ${LLM_GPU_MEM_UTIL:-0.45}
       - --enable-prefix-caching
     volumes:
       - vllm_cache:/root/.cache/huggingface

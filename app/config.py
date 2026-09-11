@@ -57,14 +57,18 @@ class Settings(BaseSettings):
     # vLLM instance is reachable at llm_base_url with llm_model_darija/
     # llm_model_fr actually served -- there is no autodetection.
     llm_backend: Literal["ollama", "vllm"] = "ollama"
-    # vLLM's OpenAI-compatible server. Two vLLM instances are expected (one
-    # per tutor -- see the plan's "one vLLM instance per language" decision,
-    # driven by Darija/French having different base models), so this points
-    # at whichever one a given deployment fronts; if both instances end up
-    # needing different hosts, this becomes two settings the same way
-    # ollama_model/ollama_model_fr are already two settings for one shared
-    # ollama_base_url. Not used while llm_backend="ollama".
-    llm_base_url: str = "http://localhost:8001"
+    # vLLM's OpenAI-compatible server. TWO instances are required, not one --
+    # Darija (Atlas-Chat-9B) and French (unsloth/gemma-2-9b) are different
+    # base models, so they can never be one served process the way
+    # ollama_model/ollama_model_fr are two model names behind one shared
+    # ollama_base_url. rev 1 of this migration used a single llm_base_url
+    # for both languages, which would have silently sent French requests to
+    # the Darija server; fixed in rev 2 (plan doc, "What rev 1 got wrong").
+    # Ports 8101/8102, not 8001 -- 8001 is the worktree's own dev-backend
+    # port (start_backend.ps1 -Port 8001), and rev 1 collided the two.
+    # Not used while llm_backend="ollama".
+    llm_base_url: str = "http://localhost:8101"       # Darija
+    llm_base_url_fr: str = "http://localhost:8102"     # French
     # --served-model-name values at `vllm serve` launch time, the vLLM
     # analogue of ollama_model/ollama_model_fr. Deliberately separate
     # settings, not a reuse of the ollama_model* names, so a deployment can

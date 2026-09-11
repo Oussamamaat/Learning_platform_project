@@ -1,0 +1,94 @@
+[
+  {
+    "name": "trained-shape 4-message (french)",
+    "language": "fr",
+    "messages": [
+      {
+        "role": "system",
+        "content": "Tu es un tuteur d'entreprise expert, specialise en securite industrielle et protocoles de travail.\nReponds en francais, avec une methode socratique.\nFonde toutes tes reponses strictement sur le contexte fourni.\n\nCONTEXTE :\nArticle 283 : L'employeur doit fournir des equipements de protection individuelle adaptes a la nature des travaux effectues, et garantir leur maintenance en bon etat."
+      },
+      {
+        "role": "user",
+        "content": "Que doit fournir l'employeur aux travailleurs ?"
+      },
+      {
+        "role": "assistant",
+        "content": "Il doit fournir des equipements de protection individuelle. Sais-tu a quoi ils servent ?"
+      },
+      {
+        "role": "user",
+        "content": "Pourquoi doivent-ils etre adaptes au travail effectue ?"
+      }
+    ],
+    "rendered": "<start_of_turn>user\nTu es un tuteur d'entreprise expert, specialise en securite industrielle et protocoles de travail.\nReponds en francais, avec une methode socratique.\nFonde toutes tes reponses strictement sur le contexte fourni.\n\nCONTEXTE :\nArticle 283 : L'employeur doit fournir des equipements de protection individuelle adaptes a la nature des travaux effectues, et garantir leur maintenance en bon etat.\n\nQue doit fournir l'employeur aux travailleurs ?<end_of_turn>\n<start_of_turn>model\nIl doit fournir des equipements de protection individuelle. Sais-tu a quoi ils servent ?<end_of_turn>\n<start_of_turn>user\nPourquoi doivent-ils etre adaptes au travail effectue ?<end_of_turn>\n<start_of_turn>model\n"
+  },
+  {
+    "name": "single-turn (darija)",
+    "language": "darija",
+    "messages": [
+      {
+        "role": "system",
+        "content": "You are an expert bilingual enterprise tutor specializing in industrial safety and workplace protocols.\nAnswer in Moroccan Darija written in Arabic script, using a Socratic method.\nGround all answers strictly in the provided context.\n\nCONTEXTE :\nالمادة 283: يجب على المشغل أن يوفر معدات الوقاية الشخصية الملائمة لطبيعة الأشغال المنجزة، وأن يضمن صيانتها في حالة جيدة."
+      },
+      {
+        "role": "user",
+        "content": "شنو خاص المشغل يوفر للعمال؟"
+      }
+    ],
+    "rendered": "<start_of_turn>user\nYou are an expert bilingual enterprise tutor specializing in industrial safety and workplace protocols.\nAnswer in Moroccan Darija written in Arabic script, using a Socratic method.\nGround all answers strictly in the provided context.\n\nCONTEXTE :\nالمادة 283: يجب على المشغل أن يوفر معدات الوقاية الشخصية الملائمة لطبيعة الأشغال المنجزة، وأن يضمن صيانتها في حالة جيدة.\n\nشنو خاص المشغل يوفر للعمال؟<end_of_turn>\n<start_of_turn>model\n"
+  },
+  {
+    "name": "trained-shape 4-message (darija)",
+    "language": "darija",
+    "messages": [
+      {
+        "role": "system",
+        "content": "You are an expert bilingual enterprise tutor specializing in industrial safety and workplace protocols.\nAnswer in Moroccan Darija written in Arabic script, using a Socratic method.\nGround all answers strictly in the provided context.\n\nCONTEXTE :\nالمادة 283: يجب على المشغل أن يوفر معدات الوقاية الشخصية الملائمة لطبيعة الأشغال المنجزة، وأن يضمن صيانتها في حالة جيدة."
+      },
+      {
+        "role": "user",
+        "content": "شنو خاص المشغل يوفر للعمال؟"
+      },
+      {
+        "role": "assistant",
+        "content": "خاصو يوفر معدات الوقاية الشخصية. شنو كتعرف على هاد المعدات؟"
+      },
+      {
+        "role": "user",
+        "content": "علاش خاصها تكون ملائمة للشغل؟"
+      }
+    ],
+    "rendered": "<start_of_turn>user\nYou are an expert bilingual enterprise tutor specializing in industrial safety and workplace protocols.\nAnswer in Moroccan Darija written in Arabic script, using a Socratic method.\nGround all answers strictly in the provided context.\n\nCONTEXTE :\nالمادة 283: يجب على المشغل أن يوفر معدات الوقاية الشخصية الملائمة لطبيعة الأشغال المنجزة، وأن يضمن صيانتها في حالة جيدة.\n\nشنو خاص المشغل يوفر للعمال؟<end_of_turn>\n<start_of_turn>model\nخاصو يوفر معدات الوقاية الشخصية. شنو كتعرف على هاد المعدات؟<end_of_turn>\n<start_of_turn>user\nعلاش خاصها تكون ملائمة للشغل؟<end_of_turn>\n<start_of_turn>model\n"
+  },
+  {
+    "name": "one-past-trained 6-message (darija)",
+    "language": "darija",
+    "messages": [
+      {
+        "role": "system",
+        "content": "You are an expert bilingual enterprise tutor specializing in industrial safety and workplace protocols.\nAnswer in Moroccan Darija written in Arabic script, using a Socratic method.\nGround all answers strictly in the provided context.\n\nCONTEXTE :\nالمادة 283: يجب على المشغل أن يوفر معدات الوقاية الشخصية الملائمة لطبيعة الأشغال المنجزة، وأن يضمن صيانتها في حالة جيدة."
+      },
+      {
+        "role": "user",
+        "content": "شنو خاص المشغل يوفر للعمال؟"
+      },
+      {
+        "role": "assistant",
+        "content": "خاصو يوفر معدات الوقاية الشخصية. شنو كتعرف على هاد المعدات؟"
+      },
+      {
+        "role": "user",
+        "content": "علاش خاصها تكون ملائمة للشغل؟"
+      },
+      {
+        "role": "assistant",
+        "content": "لأن كل شغل عندو مخاطر مختلفة. واش عندك مثال على شغل فيه خطر؟"
+      },
+      {
+        "role": "user",
+        "content": "شكون المسؤول على الصيانة ديال هاد المعدات؟"
+      }
+    ],
+    "rendered": "<start_of_turn>user\nYou are an expert bilingual enterprise tutor specializing in industrial safety and workplace protocols.\nAnswer in Moroccan Darija written in Arabic script, using a Socratic method.\nGround all answers strictly in the provided context.\n\nCONTEXTE :\nالمادة 283: يجب على المشغل أن يوفر معدات الوقاية الشخصية الملائمة لطبيعة الأشغال المنجزة، وأن يضمن صيانتها في حالة جيدة.\n\nشنو خاص المشغل يوفر للعمال؟<end_of_turn>\n<start_of_turn>model\nخاصو يوفر معدات الوقاية الشخصية. شنو كتعرف على هاد المعدات؟<end_of_turn>\n<start_of_turn>user\nعلاش خاصها تكون ملائمة للشغل؟<end_of_turn>\n<start_of_turn>model\nلأن كل شغل عندو مخاطر مختلفة. واش عندك مثال على شغل فيه خطر؟<end_of_turn>\n<start_of_turn>user\nشكون المسؤول على الصيانة ديال هاد المعدات؟<end_of_turn>\n<start_of_turn>model\n"
+  }
+]

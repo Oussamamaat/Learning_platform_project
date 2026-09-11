@@ -1,0 +1,143 @@
+---
+# ═════════════════════════════════════════════════════════════════════════════
+# Akash SDL — vLLM migration Phase B: the benchmark/build lease.
+# Plan rev 2, Phase A10. One service, one job: scripts/lease/job.sh, which
+# runs unattended (plan rule R1 -- no interactive shell steps) and publishes
+# every result to HF as each phase finishes (rule R4), so nothing depends on
+# this Console session, or any shell session, staying connected. The
+# 2026-09-10 lease for rev 1 lost real work twice to exactly that assumption
+# ("the shell dying means the container died" turned out to be false, and
+# "I can always reconnect and pick up where I left off by hand" turned out
+# to be exactly the operation -- pkill + manual restart -- that correlated
+# with the container dying for real).
+#
+# GPU tier: rtx5090 ONLY, no fallback tiers. This is deliberate, not an
+# oversight -- job.sh's own B0 preflight step hard-fails if the GPU name
+# doesn't contain "5090", so a bid on the wrong tier would just fail loudly
+# a few seconds into the job rather than silently producing an
+# unrepresentative vLLM number (see the plan's "GPU tier: prefer rtx5090"
+# decision -- Turing/rtx8000 runs vLLM on fallback kernels only).
+#
+# Storage: ONE persistent volume at /work (class beta3 -- confirmed
+# supported by checking this repo's own pre-a46d741 SDL history, which used
+# exactly this syntax before persistent storage was removed for the
+# always-open, always-warm production lease). Rule R3: anything that must
+# survive a restart -- the AWQ build's intermediate state, GGUF/AWQ weights,
+# Ollama's registered models, job.sh's phase markers -- lives here, not on
+# the ephemeral root. This is the fix for the actual failure mode the last
+# lease hit: an SDL that claimed persistent storage in its comments but
+# didn't declare any, so a restart wiped everything and re-downloaded from
+# scratch every time.
+#
+# THIS FILE IS THE COMMITTED TEMPLATE -- it must stay free of real secrets.
+# Render with:
+#     HF_READ_TOKEN=hf_xxx bash deploy/make-local-sdl.sh deploy/akash-vllm-bench.yaml
+# (make-local-sdl.sh now takes the template path as its first argument --
+# plan Phase A10 -- so it can render either this file or the production
+# deploy/akash-deploy.yaml without duplicating the script.)
+#
+# BEFORE DEPLOYING:
+#   1. Run scripts/lease/publish_kit.py first (from the laptop) so KIT_REPO
+#      actually has something at kit/latest.txt for job.sh to fetch.
+#   2. HF_TOKEN below needs READ on GGUF_REPO/ADAPTER_REPO/KIT_REPO and
+#      WRITE on AWQ_REPO/RESULTS_REPO. A single fine-grained token scoped to
+#      exactly those repos is simpler to plumb through than splitting reads
+#      and writes across two env vars, and is still a fresh, narrowly-scoped
+#      token -- never the original broad write token. Per the plan's Q2:
+#      also rotate `akash-tutor-read` (the read-only token that was
+#      accidentally exposed in a tool-output pane during the 2026-09-10
+#      lease) before this token is created, so it isn't reused by accident.
+# ═════════════════════════════════════════════════════════════════════════════
+
+version: "2.0"
+
+services:
+  bench:
+    image: vllm/vllm-openai:v0.29.0
+    # Override the image's own ENTRYPOINT/CMD (which would otherwise try to
+    # `vllm serve` directly): fetch job.sh from the kit, then exec it. job.sh
+    # itself fetches the rest of the kit (scripts + fixtures) on its own --
+    # this bootstrap only needs to get job.sh onto disk before it can run.
+    command: ["bash", "-c"]
+    args:
+      - |
+        set -e
+        pip install -q --no-cache-dir "huggingface_hub>=1.0,<2.0"
+        SHA=$(python3 -c "
+        from huggingface_hub import hf_hub_download
+        p = hf_hub_download(repo_id='$KIT_REPO', repo_type='dataset', filename='kit/latest.txt', token='$HF_TOKEN')
+        print(open(p).read().strip())
+        ")
+        echo "Bootstrap: kit sha = $SHA"
+        python3 -c "
+        from huggingface_hub import hf_hub_download
+        hf_hub_download(repo_id='$KIT_REPO', repo_type='dataset',
+                         filename='kit/$SHA/scripts/lease/job.sh',
+                         local_dir='/work/bootstrap', token='$HF_TOKEN')
+        "
+        exec bash "/work/bootstrap/kit/$SHA/scripts/lease/job.sh"
+    env:
+      - WORK_DIR=/work
+      # Fill these in before deploying -- see BEFORE DEPLOYING note 2.
+      - HF_TOKEN=PASTE_A_SCOPED_HF_TOKEN
+      - KIT_REPO=Oussamamaat/iblog-vllm-lease
+      - RESULTS_REPO=Oussamamaat/iblog-vllm-lease
+      - GGUF_REPO=Oussamamaat/iblog-tutor-gguf
+      - ADAPTER_REPO=Oussamamaat/iblog-tutor-adapters
+      - AWQ_REPO=Oussamamaat/iblog-tutor-awq
+      # Bypass a too-new host driver refusing to start the container --
+      # same reasoning as the production SDL, confirmed necessary across
+      # every GPU tier this repo has leased so far.
+      - NVIDIA_DISABLE_REQUIRE=true
+    params:
+      storage:
+        work:
+          mount: /work
+    expose:
+      # job.sh's own file server (python3 -m http.server 8000, serving
+      # /work/public -- status.json + every bench/parity/quality JSON as
+      # each phase finishes). Global so you can watch it from a browser
+      # without opening a Console shell at all -- rule R1.
+      - port: 8000
+        as: 80
+        to:
+          - global: true
+
+profiles:
+  compute:
+    bench:
+      resources:
+        cpu:
+          units: 8
+        memory:
+          size: 48Gi
+        gpu:
+          units: 1
+          attributes:
+            vendor:
+              nvidia:
+                - model: rtx5090   # ONLY tier -- see header note. No fallback.
+        storage:
+          - size: 40Gi                # ephemeral root: the vllm-openai image
+                                       # itself + pip installs + logs
+          - name: work                 # persistent: GGUF/AWQ weights, Ollama
+            size: 120Gi                 # models, AWQ build intermediates
+                                         # (~43GB peak per language), job.sh's
+                                         # own phase markers/results cache
+            attributes:
+              persistent: true
+              class: beta3
+  placement:
+    dcloud:
+      pricing:
+        bench:
+          # Ceiling bid (uakt/block) -- rtx5090 starts around $0.67/hr per
+          # the production SDL's own header table; raise if no provider bids.
+          denom: uakt
+          amount: 12000
+
+deployment:
+  bench:
+    dcloud:
+      profile: bench
+      count: 1
