@@ -1,0 +1,11 @@
+# syntax=docker/dockerfile:1
+# Production `llm` service (ADR 0011): vLLM plus the two-instance launcher.
+# The AWQ weights are downloaded at boot by llm_entrypoint.sh, not baked in.
+# Build context = repo root:
+#     docker build -f config/Dockerfile.vllm -t ghcr.io/oussamamaat/iblog-vllm:<tag> .
+FROM vllm/vllm-openai:v0.29.0
+
+COPY scripts/vllm/serve_pair.sh scripts/vllm/llm_entrypoint.sh /opt/iblog/
+
+EXPOSE 8101 8102
+ENTRYPOINT ["bash", "/opt/iblog/llm_entrypoint.sh"]

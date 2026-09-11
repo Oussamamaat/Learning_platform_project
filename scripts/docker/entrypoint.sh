@@ -42,6 +42,29 @@ export OLLAMA_HOST="${OLLAMA_HOST:-127.0.0.1:11434}"
 APP_PY=/app/.gguf_venv/bin/python
 cd /app
 
+if [ "${LLM_BACKEND:-ollama}" = "vllm" ]; then
+# ── 2v. vLLM backend: the tutors run in the separate `llm` service (ADR 0011) ─
+# Ollama is not started. The wait below is bounded and non-fatal: until vLLM
+# answers, LLM requests fail with 503 rather than blocking boot forever.
+mkdir -p /models/logs
+echo "boot $(date -u +%Y-%m-%dT%H:%M:%SZ)" >> /models/logs/app-boots.log
+( while true; do date -u +%Y-%m-%dT%H:%M:%SZ > /models/logs/app-heartbeat; sleep 30; done ) &
+if [ "${WEB_SEARCH_ENGINE:-}" = "tavily" ]; then
+    log "WARNING: WEB_SEARCH_ENGINE=tavily needs gemma2:9b on Ollama, which LLM_BACKEND=vllm does not start"
+fi
+for url in "${LLM_BASE_URL:-http://localhost:8101}" "${LLM_BASE_URL_FR:-http://localhost:8102}"; do
+    waited=0
+    until curl -sf "${url%/}/health" >/dev/null 2>&1; do
+        sleep 5; waited=$((waited + 5))
+        if [ "$waited" -ge 300 ]; then break; fi
+    done
+    if [ "$waited" -ge 300 ]; then
+        log "WARNING: vLLM at $url not healthy after 300s -- LLM requests return 503 until it is"
+    else
+        log "vLLM at $url is up (${waited}s)"
+    fi
+done
+else
 # ── 2. Start Ollama in the background ────────────────────────────────────────
 log "starting ollama serve ..."
 ollama serve > /tmp/ollama.log 2>&1 &
@@ -130,6 +153,8 @@ if [ "${WEB_SEARCH_ENGINE:-}" = "tavily" ]; then
     fi
 fi
 
+fi
+
 # ── 3b. Fetch the XTTS Darija checkpoint (only when that engine is selected) ─
 # medmac01/darija_xtt_2.0 -- see app/services/tts.py's XttsDarijaEngine and
 # ADR 0006 (including why it is NOT the commercially-safe default). ~5.6 GB,
@@ -173,7 +198,7 @@ else
 fi
 
 # ── 5. Optionally warm both tutor models so keep_alive=-1 pins them ───────────
-if [ "${WARM_MODELS:-1}" = "1" ]; then
+if [ "${LLM_BACKEND:-ollama}" != "vllm" ] && [ "${WARM_MODELS:-1}" = "1" ]; then
     for name in $(ollama list | awk 'NR>1{print $1}'); do
         case "$name" in
             IBLOG_TUTOR*|iblog-tutor*)
