@@ -111,6 +111,10 @@ profiles:
             vendor:
               nvidia:
                 - model: rtx5090
+                # Same Blackwell architecture. On 2026-09-11 the 5090 providers stopped
+                # bidding while 24 of these sat idle. Staging checks behaviour, not the
+                # 5090 latency numbers, which stay the Phase B ones.
+                - model: pro6000se
         storage:
           - size: 60Gi   # vLLM image (~20 GB unpacked) + AWQ weights (12.3 GB) + logs
     app:
