@@ -54,7 +54,9 @@ services:
       # Uppercase G means GiB: vLLM reads "6g" as 10^9 bytes.
       - DARIJA_KV_BYTES=6G
       - FRENCH_KV_BYTES=6G
-      - VLLM_EXTRA_ARGS=--max-num-seqs 16
+      # vLLM's startup check still requires gpu-memory-utilization x card to be free with
+      # explicit KV bytes; the 0.9 default stops the second instance from starting.
+      - VLLM_EXTRA_ARGS=--max-num-seqs 16 --gpu-memory-utilization 0.4
       - NVIDIA_DISABLE_REQUIRE=true
     expose:
       - port: 8101
