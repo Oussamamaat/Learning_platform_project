@@ -196,7 +196,8 @@ def _one_request_app(base_url: str, prompt_row: dict, timeout: int) -> dict:
     since /api/v1/chat/ takes a message, not a raw prompt.
     """
     url = base_url.rstrip("/") + "/api/v1/chat/"
-    lang = "fr" if prompt_row["language"] == "fr" else "darija"
+    # ChatRequest.language accepts fr | en | ar-MA; "darija" is rejected with a 422.
+    lang = "fr" if prompt_row["language"] == "fr" else "ar-MA"
     payload = {
         "message": prompt_row.get("question") or prompt_row.get("prompt", "")[:500],
         "domain": prompt_row.get("domain"),
@@ -210,7 +211,7 @@ def _one_request_app(base_url: str, prompt_row: dict, timeout: int) -> dict:
         with urllib.request.urlopen(req, timeout=timeout) as r:
             body = json.loads(r.read().decode("utf-8"))
         return {"ok": True, "total_s": time.perf_counter() - t0,
-                "ttft_s": None, "tokens": len(body.get("answer", "").split())}
+                "ttft_s": None, "tokens": len(body.get("response", "").split())}
     except urllib.error.HTTPError as e:
         return {"ok": False, "error": f"HTTP {e.code}: {e.read()[:200]!r}",
                 "total_s": time.perf_counter() - t0}
