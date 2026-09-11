@@ -1,0 +1,253 @@
+---
+# ═════════════════════════════════════════════════════════════════════════════
+# Akash SDL — IBLOG Tutor, Ollama rollback (ADR 0011)
+# ═════════════════════════════════════════════════════════════════════════════
+# The pre-vLLM deployment, kept so production can return to Ollama with one
+# redeploy. deploy/akash-deploy.yaml is the vLLM deployment.
+#
+# One deployment (lease), two services:
+#   db  — Postgres/pgvector, CPU only, ephemeral (corpus re-seeded each lease —
+#         see docs/deploy/akash-rtx5090-runbook.md Part 2 of the test plan)
+#   app — the GPU image (FastAPI + Ollama + STT/TTS/OCR workers all on ONE card)
+#
+# OLLAMA_NUM_PARALLEL=4 with the app's ollama_max_concurrent=4 is the measured
+# setting (ADR 0008, amended 2026-09-11). No Ollama configuration meets the
+# p95 < 10 s target at 16 concurrent requests, which is why production moved
+# to vLLM.
+#
+# GPU tiers, in bid preference order: rtx5090 (32 GB), rtx8000 (48 GB),
+# pro6000se (96 GB). All three run the full Ollama stack.
+#
+# Why everything GPU is in ONE service: Akash allocates GPUs per-service, and
+# this is a single physical card. Co-locating Ollama + embeddings + the STT/OCR
+# workers in the `app` container is what "all models loaded, emulating
+# production" means on one card.
+#
+# Ephemeral-only storage (both services) is deliberate, not a placeholder: Akash
+# persistent storage does not survive closing a lease, only container restarts
+# and env-var updates within one still-open lease. This plan seeds the corpus
+# and downloads model weights once per lease and keeps the lease open across all
+# test phases, which makes a persistent volume's one job (survive a close) moot.
+#
+# THIS FILE IS THE COMMITTED TEMPLATE — it must stay free of real secrets.
+# Deploy from deploy/akash-deploy.ollama.local.yaml (gitignored), which carries
+# the real Postgres password and the HF READ token. Generate/refresh it with:
+#     HF_READ_TOKEN=hf_xxx bash deploy/make-local-sdl.sh deploy/akash-deploy.ollama.yaml
+#
+# BEFORE DEPLOYING:
+#   1. The image must be PUBLIC on GHCR — Akash SDL has no imagePullSecrets, so
+#      providers pull anonymously; a private package fails to deploy.
+#   2. Put a HuggingFace READ token in HF_TOKEN (the GGUF repo is private).
+#      Akash providers can read SDL env, so scope it read-only to that one repo
+#      and NEVER paste the write token used for the upload.
+#   3. All engines (STT/TTS/OCR) are ON from the start — see the plan doc for
+#      why staging them buys nothing (config is @lru_cache'd per-process, and
+#      48 GB fits everything at once). Flip to "none" only if you deliberately
+#      want to isolate a phase's VRAM footprint.
+# See docs/deploy/akash-rtx5090-runbook.md for the full workflow.
+# ═════════════════════════════════════════════════════════════════════════════
+
+version: "2.0"
+
+services:
+  db:
+    image: pgvector/pgvector:pg16
+    env:
+      - POSTGRES_USER=assistant
+      - POSTGRES_PASSWORD=CHANGE_ME_strong_password
+      - POSTGRES_DB=iblog_assistant
+      - PGDATA=/var/lib/postgresql/data/pgdata
+    expose:
+      - port: 5432
+        # `as` MUST be set explicitly: Akash defaults it to 80 when omitted,
+        # which publishes Postgres to the app as db:80 while DATABASE_URL
+        # below says db:5432 -- DNS resolves, the connection is refused, and
+        # every fail-open path quietly returns its "DB unreachable" sentinel
+        # instead of erroring. Cost a full deploy cycle to find; the db was
+        # healthy the whole time (pg_isready -h db -p 80 answered fine).
+        as: 5432
+        to:
+          - service: app   # internal only — never global
+
+  app:
+    # GHCR path is lowercase (registry requirement) even though the GitHub user
+    # is "Oussamamaat". Package visibility must be Public — see header note 1.
+    #
+    # Before THIS lease: replace :gpu with the sha-derived tag CI just
+    # pushed (build-gpu-image.yml now pushes both `:gpu` and
+    # `:gpu-<git-sha>` on every build). k8s defaults imagePullPolicy to
+    # IfNotPresent for any non-":latest" tag, so a provider node that
+    # already cached `:gpu` from a prior lease reuses it for a new one --
+    # "Update Deployment" does not fix this (2026-09-06 incident #1: the
+    # correct image was already published, the node just never re-pulled
+    # it). Get the sha via `git rev-parse HEAD` after the build that
+    # includes this session's fixes, e.g.:
+    #   image: ghcr.io/oussamamaat/iblog-tutor:gpu-<sha>
+    # Confirm it exists first: `docker manifest inspect <that tag>`.
+    image: ghcr.io/oussamamaat/iblog-tutor:gpu
+    env:
+      # ── wiring ──────────────────────────────────────────────────────────
+      - DATABASE_URL=postgresql://assistant:CHANGE_ME_strong_password@db:5432/iblog_assistant
+      - OLLAMA_BASE_URL=http://localhost:11434
+      - OLLAMA_MODEL=IBLOG_TUTOR:latest
+      - OLLAMA_MODEL_FR=iblog-tutor-fr:latest
+      # ── model weights: fetched at boot into the container's own filesystem ─
+      # Hosted on the private repo Oussamamaat/iblog-tutor-gguf. The filenames
+      # must match the .Modelfile stems that ship in the image, so these URLs
+      # are fixed; entrypoint.sh derives the var name from the stem.
+      - IBLOG_TUTOR_GGUF_URL=https://huggingface.co/Oussamamaat/iblog-tutor-gguf/resolve/main/IBLOG_TUTOR.gguf
+      - IBLOG_TUTOR_FR_GGUF_URL=https://huggingface.co/Oussamamaat/iblog-tutor-gguf/resolve/main/iblog-tutor-fr.gguf
+      # REQUIRED because the repo above is private: entrypoint.sh sends this as
+      # `Authorization: Bearer`. Without it both downloads 401 and neither tutor
+      # model registers. Use a fine-grained READ token, not the write token.
+      - HF_TOKEN=PASTE_A_READ_ONLY_HF_TOKEN
+      # ── Linux venv interpreters (override the Windows defaults) ──────────
+      - OCR_VENV_PYTHON=/app/.ocr_venv/bin/python
+      - STT_VENV_PYTHON=/app/.speech_venv/bin/python
+      - TTS_XTTS_VENV_PYTHON=/app/.tts_venv/bin/python
+      # ── every engine ON from the start — see header note 3 ──────────────
+      # seamless, not whisper: ADR 0009's own normalized re-scoring (real
+      # GPU lease, 2026-09-04) found whisper's Darija WER is 0.699 vs
+      # seamless's 0.428 -- a real, confirmed gap, not a metric artifact --
+      # and its Decision section names seamless as "the pick for
+      # Darija-heavy traffic." Switched here 2026-09-06 to match that
+      # already-made decision (the SDL had drifted from it, running whisper
+      # anyway). seamless ignores STT_MODEL below (fixed to
+      # facebook/seamless-m4t-v2-large per app/services/stt.py's
+      # SeamlessEngine); whisper remains preferable for French-only traffic
+      # if a future tenant needs that instead.
+      - STT_ENGINE=seamless      # none | whisper | seamless
+      # xtts_darija = medmac01/darija_xtt_2.0, the Darija voice chosen on
+      # live listening (ADR 0006). NOT commercially licensed — it inherits
+      # XTTS-v2's CPML — so this is an EVALUATION deployment setting, not a
+      # shipping default. Switch back to `piper` for anything customer-facing.
+      # entrypoint.sh downloads its 5.6 GB checkpoint onto /models on first
+      # boot, and app/main.py warms it at startup (~51s) so the first spoken
+      # turn does not pay the load.
+      - TTS_ENGINE=xtts_darija   # none | piper | xtts_darija
+      - TTS_XTTS_MODEL_DIR=/models/darija_xtts
+      - STT_MODEL=large-v3
+      # web_search_engine stays "none" (the default) here -- verify it live
+      # locally first with scripts/web_search_selftest.py (a real Tavily
+      # query + a real gemma2:9b generation, ADR 0010's own "no live key
+      # exercised yet" item) before flipping it on a lease. To opt in: set
+      # WEB_SEARCH_ENGINE=tavily and TAVILY_API_KEY=<key> here, then update
+      # the deployment. entrypoint.sh pulls gemma2:9b on boot when this is
+      # "tavily" (added 2026-09-06 -- ADR 0010's generation model was never
+      # provisioned before, so enabling this used to call a model that
+      # didn't exist). Nothing else in this SDL needs to change --
+      # app/services/web_search.py's NullWebSearchEngine keeps chat.py's
+      # refusal gate byte-identical to today's behaviour until this is flipped.
+      - WEB_SEARCH_ENGINE=none   # none | tavily
+      - OCR_ENGINE=paddleocr     # paddleocr | none — lazy-loaded, won't block
+                                 # boot if the paddle install failed (verified:
+                                 # app/main.py's startup hooks only preload
+                                 # bge-m3, no eager OCR/STT init)
+      # ── relaxations for a card with VRAM to spare ────────────────────────
+      - OLLAMA_KEEP_ALIVE=24h
+      # Step 1's tuned concurrency sweep (plan doc). Set here, not via a shell
+      # `export` + manual `ollama serve` restart -- a pod restart (confirmed
+      # 2026-09-10: ephemeral storage got wiped and entrypoint.sh re-pulled
+      # both GGUFs from scratch, contradicting this file's own storage-note
+      # assumption above that a restart-within-a-lease is safe) loses any
+      # shell-set env immediately. Baked in here, it survives every restart
+      # automatically since entrypoint.sh execs `ollama serve` as this
+      # container's own child process and inherits it. Comment out (or set to
+      # 1) to reproduce the "unset" baseline instead.
+      - OLLAMA_NUM_PARALLEL=4
+      - OCR_KEEP_RESIDENT=true
+      - OCR_WORKER_IDLE_RELEASE_SECONDS=0
+      - SPEECH_WORKER_IDLE_RELEASE_SECONDS=0
+      # Found missing here during the 2026-09-06 incident review: without
+      # it, app/config.py's 300s default silently released the XTTS worker
+      # after 5 idle minutes (easy during a demo), and the next spoken
+      # sentence paid the full ~51s checkpoint reload -- looked exactly
+      # like "it doesn't speak" / "the latency increased".
+      - TTS_WORKER_IDLE_RELEASE_SECONDS=0
+      - EMBEDDING_BATCH_SIZE=128
+      # ── driver-constraint workaround — needed on every tier, not just ────
+      # Blackwell: the base image's NVIDIA_REQUIRE_CUDA stops at driver<566,
+      # but provider host drivers run newer regardless of GPU generation
+      # (confirmed via a provider's own advertised cuda-version:13 attribute
+      # on an rtx8000 host). Without this, a too-new host driver can refuse to
+      # start the container at all.
+      - NVIDIA_DISABLE_REQUIRE=true
+      # ── safety on a publicly-reachable, auth-less app ───────────────────
+      - UPLOADS_READ_ONLY=true
+      - WARM_MODELS=1
+    expose:
+      - port: 8000
+        as: 80
+        to:
+          - global: true   # needed so the benchmark harness (and the demo
+                            # frontend's VITE_API_BASE) can reach it
+
+profiles:
+  compute:
+    db:
+      resources:
+        cpu:
+          units: 2
+        memory:
+          size: 4Gi
+        storage:
+          - size: 30Gi                # ephemeral only — see header note
+    app:
+      resources:
+        cpu:
+          units: 8                    # was 16 — models sit on the GPU, OCR
+                                       # doesn't need many cores
+        memory:
+          size: 48Gi                  # was 64Gi, then 32Gi -- raised back up
+                                       # after the 2026-09-06 lease's incident
+                                       # #5 unexplained restart (never
+                                       # confirmed OOMKilled via the Console
+                                       # Events tab, but both 9B tutors
+                                       # pinned at OLLAMA_KEEP_ALIVE=24h +
+                                       # whisper large-v3 + resident
+                                       # PaddleOCR + bge-m3 + a torch.load()
+                                       # of the 5.6GB XTTS checkpoint (which
+                                       # materializes in HOST ram before
+                                       # .to(cuda)) is tight at 32Gi. Cheap
+                                       # insurance; check the Events tab
+                                       # again this lease regardless.
+        gpu:
+          units: 1
+          attributes:
+            vendor:
+              nvidia:
+                - model: rtx5090      # tier 1 (primary) — see header table
+                - model: rtx8000      # tier 2 (fallback)
+                - model: pro6000se    # tier 3 (fallback)
+        storage:
+          - size: 140Gi                # ephemeral only: unpacked image
+                                        # (~50-55 GB, incl. .tts_venv's own
+                                        # torch) + GGUFs (11.5 GB) +
+                                        # Ollama's own blob copies (11.5 GB)
+                                        # + STT weights on first use (3-9 GB)
+                                        # + XTTS checkpoint (5.6 GB, only
+                                        # when TTS_ENGINE=xtts_darija)
+                                        # + headroom
+  placement:
+    dcloud:
+      pricing:
+        db:
+          denom: uakt
+          amount: 1000
+        app:
+          # Ceiling bid (uakt/block), set from real bid floors — clears even
+          # the pro6000se tier ($2.04/hr starting) with margin. You still pick
+          # the cheapest bid manually in Console; this only caps what can
+          # appear in the list. Raise if no provider bids; lower to save.
+          denom: uakt
+          amount: 12000
+
+deployment:
+  db:
+    dcloud:
+      profile: db
+      count: 1
+  app:
+    dcloud:
+      profile: app
+      count: 1

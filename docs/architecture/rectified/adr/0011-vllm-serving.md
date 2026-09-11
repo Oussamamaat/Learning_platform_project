@@ -146,7 +146,7 @@ Measurement conditions that make these vLLM numbers conservative or partial:
    | Flag | Starting value | Basis |
    |---|---|---|
    | KV cache dtype | `auto` (bf16) | fp8 answers matched, but fp8 was only measured under an 8-request cap, which hides the extra capacity it exists to provide; revisit in D5 |
-   | `--kv-cache-memory-bytes` | `6g` per instance | Computed, not measured (see below); leaves about 8 GiB of the card for weights overhead and CUDA graphs |
+   | `--kv-cache-memory-bytes` | `6G` (6 GiB) per instance | Computed, not measured (see below). After both models' weights (5.7 GiB each) this leaves about 8 GiB of the card for CUDA contexts, graphs and activations. The uppercase `G` matters: vLLM reads `6g` as 10^9 bytes |
    | `--max-num-seqs` | `16` | Phase B's cap of 8 was already saturated at N=16 |
    | `--max-model-len` | `8192` | Prompt budget in `app/config.py` |
    | `--enable-prefix-caching` | on | Shared system prompt across requests |

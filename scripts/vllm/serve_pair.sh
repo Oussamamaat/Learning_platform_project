@@ -27,7 +27,7 @@
 #   FRENCH_SERVED_NAME  (default: iblog-tutor-fr-awq, matches llm_model_fr)
 #   DARIJA_PORT (default: 8101, matches llm_base_url)
 #   FRENCH_PORT (default: 8102, matches llm_base_url_fr)
-#   DARIJA_KV_BYTES, FRENCH_KV_BYTES     e.g. "6g" -- REQUIRED unless
+#   DARIJA_KV_BYTES, FRENCH_KV_BYTES     e.g. "6G" (GiB; vLLM reads "6g" as 10^9 bytes) -- REQUIRED unless
 #                                         VLLM_AUTO_KV=1. Plan rev 2
 #                                         deliberately rejected
 #                                         --gpu-memory-utilization

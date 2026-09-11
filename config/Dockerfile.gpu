@@ -109,7 +109,7 @@ RUN --mount=type=cache,target=/root/.cache/pip,sharing=locked \
 # the app venv should be forced to match. torchcodec needs FFmpeg, which the
 # system-deps layer above already installs.
 # NOTE the checkpoint itself (5.6 GB) is NOT baked in: entrypoint.sh fetches it
-# onto the persistent /models volume, same as the GGUFs.
+# into /models at boot, same as the GGUFs.
 #
 # CUDA-13 shim (2026-09-06 incident #3): torchcodec's PyPI linux wheel dlopens
 # libcudart.so.13/libnvrtc.so.13 but declares NO nvidia-* dependency at all --
@@ -173,8 +173,8 @@ RUN mkdir -p /app/data/tts_voices /app/data/uploads \
 
 # ── Model Modelfiles only (the GGUFs are fetched at startup) ─────────────────
 # The multi-GB .gguf blobs are NOT baked in (too large for the build host's
-# disk); entrypoint.sh downloads them onto a persistent /models volume on first
-# boot and runs `ollama create`. Only the tiny .Modelfile files ship in the
+# disk); entrypoint.sh downloads them into /models at boot and runs
+# `ollama create`. Only the tiny .Modelfile files ship in the
 # image so the create has its template/params. mkdir keeps /models present even
 # before the volume mounts.
 RUN mkdir -p /models
