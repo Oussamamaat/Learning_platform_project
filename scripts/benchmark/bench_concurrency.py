@@ -65,6 +65,14 @@ _VLLM_STOP = ["<end_of_turn>", "<start_of_turn>"]
 # vLLM matches stop strings after stripping special tokens, so they never fire; stop on the ids.
 _VLLM_STOP_TOKEN_IDS = [106, 107]  # Gemma-2 <start_of_turn>, <end_of_turn>
 
+# --backend app talks to the deployed app through Akash's ingress, which sits
+# behind Cloudflare: the default "Python-urllib/3.x" agent gets 403 (error
+# 1010). The ollama/vllm backends hit servers directly and don't need this.
+_APP_HEADERS = {
+    "Content-Type": "application/json",
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) iblog-bench/1.0",
+}
+
 
 def _load_prompts(path: str, language: str) -> list[dict]:
     if path is None:
@@ -204,8 +212,7 @@ def _one_request_app(base_url: str, prompt_row: dict, timeout: int) -> dict:
         "language": lang,
     }
     data = json.dumps(payload).encode("utf-8")
-    req = urllib.request.Request(url, data=data,
-                                  headers={"Content-Type": "application/json"}, method="POST")
+    req = urllib.request.Request(url, data=data, headers=_APP_HEADERS, method="POST")
     t0 = time.perf_counter()
     try:
         with urllib.request.urlopen(req, timeout=timeout) as r:

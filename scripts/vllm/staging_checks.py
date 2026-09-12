@@ -32,12 +32,18 @@ except Exception:
 
 TENANT = "company_abc"
 _RUNAWAY_TURN = re.compile(r"^\s*(user|model)\s*$", re.MULTILINE)
+# Akash ingress sits behind Cloudflare, which answers the default
+# "Python-urllib/3.x" agent with 403 (error 1010) while letting curl through.
+_HEADERS = {
+    "Content-Type": "application/json",
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) iblog-staging-checks/1.0",
+}
 
 
 def call(base_url: str, method: str, path: str, body: dict | None, timeout: int) -> tuple[int, dict | str, float]:
     data = json.dumps(body, ensure_ascii=False).encode("utf-8") if body is not None else None
     req = urllib.request.Request(base_url.rstrip("/") + path, data=data, method=method,
-                                 headers={"Content-Type": "application/json"})
+                                 headers=_HEADERS)
     t0 = time.perf_counter()
     try:
         with urllib.request.urlopen(req, timeout=timeout) as resp:
