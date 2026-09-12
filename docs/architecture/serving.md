@@ -63,15 +63,24 @@ This is a deliberate MVP-speed trade, not an oversight: ship merged now, treat
 multi-LoRA as a post-MVP migration once more than one capability needs to share a base
 model.
 
-**Status, 2026-09-07: the vLLM migration is the current named next step, for a narrower reason
-than originally scoped.** The 2026-09-04 Akash lease showed Ollama-with-both-tutors-resident
-already delivers the latency and language-switch win multi-LoRA/vLLM was meant to provide (see
-`cloud-scaling-plan.md`'s confirmation note) — so this migration is no longer motivated by
-per-request latency. It's motivated by **concurrent production traffic**: `app/services/llm.py`'s
-Ollama call sites have no request-batching or continuous-batching behavior, so N simultaneous
-users still queue behind each other on the shared GPU (mitigated for now, not solved, by ADR
-0008's concurrency limit). vLLM's continuous batching is built for exactly that case. Not yet
-started; no ADR filed for it yet.
+**Status, 2026-09-12: the vLLM migration is built, measured and staged; Ollama is still the
+default.** The migration was never about per-request latency — the 2026-09-04 Akash lease showed
+Ollama-with-both-tutors-resident already delivers the latency and language-switch win (see
+`cloud-scaling-plan.md`'s confirmation note). It is about **concurrent production traffic**:
+the Ollama call sites in `app/services/llm.py` have no request batching, so N simultaneous users
+queue behind each other on the shared GPU (mitigated, not solved, by ADR 0008's concurrency limit).
+
+What now exists, per [ADR 0011](rectified/adr/0011-vllm-serving.md): AWQ W4A16 builds of both
+tutors, two vLLM `v0.29.0` processes on one card (Darija :8101, French :8102) started by
+`scripts/vllm/serve_pair.sh`, and an `llm_backend` setting that selects the transport. On the same
+RTX 5090 with 16 simultaneous requests, vLLM's p95 was about 65 times lower than Ollama's
+(1.7 s vs 113.2 s). A staging lease then ran the whole app on it: both languages answered with
+citations, quizzes and diagrams were well-formed, and 32 simultaneous users held a 2.95 s p95 with
+no errors.
+
+**Switching production is one setting, not a code change**: `LLM_BACKEND=vllm` plus the `llm`
+service in `deploy/akash-deploy.yaml`. Rolling back is `deploy/akash-deploy.ollama.yaml`.
+`llm_backend` defaults to `ollama`, so nothing changes until an SDL says otherwise.
 
 ## Train/serve parity — safety-critical
 

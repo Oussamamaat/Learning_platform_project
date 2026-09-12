@@ -7,10 +7,11 @@ single laptop this file was written against. **§4's serving-latency estimate he
 real measurement**: predicted 2–4s turns / zero switch cost, measured 2.0–3.4s / zero switch cost.
 Ingestion fan-out (§5 items 1–3) has **not** been built — ingestion still runs single-worker; that
 part of this plan remains a target. The serving-side win landed a different way than §5 item 4
-proposed: both tutors are resident via Ollama with sufficient leased VRAM, not via a vLLM/TGI
-migration — that migration is still open and is the current next step (see
-[serving.md](serving.md)). The measured-laptop baseline below is kept as the number this migration
-was checked against, not as current reality.
+proposed: both tutors became resident via Ollama on leased VRAM, not via a vLLM/TGI migration.
+**That migration has since been built** for the problem Ollama did not solve — concurrent requests
+— and is documented in [ADR 0011](rectified/adr/0011-vllm-serving.md); production switches to it
+when `deploy/akash-deploy.yaml` is deployed. The measured-laptop baseline below is kept as the
+number this migration was checked against, not as current reality.
 
 Every "today" figure below was measured on this laptop (RTX 4060 Laptop, 8 GB VRAM,
 `arabic_test.pdf` 80 pages / `french_test.pdf` 39 pages, tenant `company_efg`). Every
@@ -199,8 +200,9 @@ a property of the models.
 **Confirmed, 2026-09-04 lease:** both rows of the "Est. cloud" column above matched real
 measurement almost exactly (2.0–3.4s observed vs. 2–4s estimated; switch cost measured as
 genuinely ~0, not just estimated as such) — via Ollama with both tutors resident on leased VRAM,
-not the vLLM/TGI migration this section names. That migration is still open (see §5 item 4, now
-tracked in [serving.md](serving.md)).
+not the vLLM/TGI migration this section names. **That migration has since been built and measured**
+(2026-09-12, [ADR 0011](rectified/adr/0011-vllm-serving.md)); it is production serving's concurrency
+answer, not its latency answer, which Ollama had already delivered.
 
 ---
 
@@ -214,11 +216,13 @@ Ordered by value per unit of risk:
    own a tenant by process identity.
 3. **Lease/heartbeat instead of boot-time reaping.** Required before more than one worker
    can safely exist.
-4. **LLM serving on vLLM/TGI with both tutors resident.** Fixes the largest user-visible
-   latency and the language-switch stall. **Partially superseded**: both-tutors-resident and
-   the latency/switch-cost win it predicted are already achieved via Ollama on leased VRAM (see
-   confirmation above) — the vLLM/TGI migration itself is still open, now for production
-   concurrent-request serving specifically rather than for this latency win.
+4. **LLM serving on vLLM with both tutors resident.** ~~Fixes the largest user-visible latency
+   and the language-switch stall.~~ **Done, 2026-09-12** ([ADR 0011](rectified/adr/0011-vllm-serving.md)),
+   and for a different reason than this item predicted: Ollama on leased VRAM had already taken the
+   latency and language-switch win, so vLLM was built for **concurrent** serving. Measured on one
+   RTX 5090 at 16 simultaneous requests: p95 1.7 s versus Ollama's 113.2 s. Deployment is
+   `deploy/akash-deploy.yaml` (`llm` service); `llm_backend` still defaults to `ollama`, so
+   production switches when that SDL is deployed.
 5. **OCR behind an HTTP pool** (`vl_rec_backend="vllm-server"`). Mostly configuration.
 6. **Re-tune the two-tier router.** With cheap parallel heavy OCR, the light tier's value
    drops and the honest move may be to route more pages to the heavy engine for fidelity.

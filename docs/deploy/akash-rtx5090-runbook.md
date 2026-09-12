@@ -71,8 +71,11 @@ python scripts/docker/prepare_models.py
 Expect `config/models/IBLOG_TUTOR.gguf`, `iblog-tutor-fr.gguf`, their `.Modelfile`s,
 and `manifest.json` (~11.6 GB total).
 
-> These `.gguf` files are the **only copies** of the fine-tunes outside Ollama's
-> blob store. Don't delete them until step 1b has finished uploading.
+> Don't delete these `.gguf` files until step 1b has finished uploading. They were
+> once the only copies outside Ollama's blob store; since then the GGUFs are mirrored
+> on `Oussamamaat/iblog-tutor-gguf` (with the Modelfiles), the LoRA adapters on
+> `Oussamamaat/iblog-tutor-adapters`, and the AWQ builds vLLM serves on
+> `Oussamamaat/iblog-tutor-awq`.
 
 ---
 
@@ -171,6 +174,75 @@ actually runs on Blackwell — a successful install doesn't prove that).
 
 ---
 
+## 4b. vLLM instead of Ollama (ADR 0011)
+
+Everything above deploys the Ollama layout. To serve both tutors on vLLM — the
+concurrency win, ~65× lower p95 at 16 simultaneous users — deploy the same way but
+from different files:
+
+| | Ollama (default) | vLLM |
+|---|---|---|
+| Template | `deploy/akash-deploy.ollama.yaml` | `deploy/akash-deploy.yaml` |
+| Services | `db` + `app` | `db` + `llm` + `app` |
+| GPUs | 1 | 2 (`llm` on rtx5090/pro6000se, `app` for voice/OCR) |
+| Weights | GGUFs from `iblog-tutor-gguf` | AWQ from `iblog-tutor-awq` |
+| Token to render | READ token for the GGUF repo | READ token for the AWQ repo |
+
+```
+HF_READ_TOKEN=hf_xxx bash deploy/make-local-sdl.sh deploy/akash-deploy.yaml
+```
+
+**Pin both images to the `<ref>-<sha>` tags CI pushed** before deploying: provider
+nodes cache any non-`:latest` tag, so a mutable tag can silently run an old build.
+Both GHCR packages (`iblog-tutor`, `iblog-vllm`) must be public — Akash pulls
+anonymously.
+
+**What a healthy boot looks like** (from the 2026-09-12 staging lease; watch the
+`llm` service logs):
+
+```
+[llm-entrypoint] downloading darija weights ...      # ~1 min per language
+[serve_pair] darija is up (156s)
+[serve_pair] french is up (62s)
+[serve_pair] GPU KV cache size: 18,701 tokens ...    # per instance
+```
+
+Storage is ephemeral, so every container start re-downloads ~12 GB, about two
+minutes. The `app` service waits up to 300 s for both vLLM `/health` endpoints and
+warns rather than dying if they are late.
+
+**Verify** (from your laptop, against the public app URL):
+
+```
+python scripts/vllm/staging_checks.py --base-url http://<ingress>
+python scripts/benchmark/bench_concurrency.py --backend app --base-url http://<ingress> \
+    --prompts scripts/vllm/fixtures/bench_prompts.json --n-values 1,2,4,8,16,32
+```
+
+Both send a browser `User-Agent`: Akash's ingress sits behind Cloudflare, which
+answers the default `Python-urllib` agent with **403 error 1010** while letting curl
+through.
+
+**Rollback** is a redeploy of `deploy/akash-deploy.ollama.yaml`. The app image is the
+same either way; only `LLM_BACKEND` and the service list differ.
+
+**Lease operating rules**, learned from the leases behind ADR 0011:
+
+1. No interactive long-running work — jobs start themselves, report their own status,
+   and persist their own results.
+2. Never kill a serving process from a shell. Unload Ollama models via the API
+   (`keep_alive: 0`); run alternative configurations as separate servers on separate
+   ports.
+3. Anything over 1 GB that must survive a restart needs a persistent volume. As of
+   2026-09-11 no rtx5090 provider bid on one, hence the re-download above.
+4. A phase's artifacts leave the box when that phase finishes; status is served over
+   HTTP, not read through a shell that can drop.
+5. Log a boot line, a 30 s heartbeat, and child exit codes, or a restart cannot be
+   explained afterwards.
+6. Pin exact versions, and have the job verify the GPU model before spending time.
+
+---
+
 ## 5. Deploy
 
 ### Path A — Akash Console (matches the web UI; easiest)
@@ -179,10 +251,15 @@ actually runs on Blackwell — a successful install doesn't prove that).
 2. Upload `deploy/akash-deploy.local.yaml` (the rendered one from step 4 — the
    template still has placeholders and will not boot).
 3. **Create Deployment** → approve the deposit in your wallet **(signing step)**.
-4. Wait for bids. **If none appear**, no provider currently has a free RTX 5090 —
-   raise `placement.dcloud.pricing.app.amount`, or uncomment a fallback GPU
-   (`rtx4090` / `a6000` / `l40s` / `h100`) under `app.resources.gpu.attributes`
-   and re-submit.
+4. Wait for bids. **If none appear**, check live supply before touching the price —
+   `https://console-api.akash.network/v1/gpu?vendor=nvidia` gives free-versus-leased
+   counts per model, and `https://<provider-host>:8443/status` gives a provider's
+   per-machine free CPU/RAM/disk. A provider with a free GPU still won't bid if no
+   single machine has the RAM the service asks for. Then either widen the GPU list
+   under `resources.gpu.attributes` (`pro6000se` is the same Blackwell architecture
+   as the 5090, and on 2026-09-11 there were 24 idle while 5090s were exhausted) or
+   raise the matching `placement.dcloud.pricing.*.amount`. You pay the bid you
+   accept, not the ceiling.
 5. Pick a bid → **Accept** **(signing step)** → the lease is created.
 6. Open the lease → **Leases/URI** tab: note the public URI mapped to port 80
    (this is your `BASE_URL`).
@@ -278,10 +355,16 @@ Every run appends to `benchmark_report.md` and writes `benchmark_*.json`, includ
 
 - **Pause paying:** close the lease (Console → **Close**, or
   `provider-services tx deployment close --dseq <DSEQ> ...`). This stops billing.
-  Closing releases **both** persistent volumes, so a re-deploy starts with a fresh
-  DB (re-run ingestion) **and** re-downloads the ~11 GB of GGUFs on first boot.
-  Budget a few extra minutes on every re-create — this is the cost of not baking
-  the weights into the image.
+  Escrow left over is refunded; billing is per block, so a lease closed after 40
+  minutes costs 40 minutes, not the hour.
+- **Storage is ephemeral** (persistent volumes were dropped in `a46d741`, and as of
+  2026-09-11 no rtx5090 provider bid on one). So a re-deploy starts with a fresh DB
+  (re-run ingestion) and re-downloads the weights — ~11 GB of GGUFs on Ollama, ~12 GB
+  of AWQ on vLLM, about two minutes. Any container **restart** pays that too, not just
+  a re-create.
+- Akash has no "stop": billing is per active lease, so *close* to stop paying and
+  *re-create* to resume. Because the image is self-contained, re-create → ready in the
+  time it takes the provider to pull the image.
 - **Cheaper still:** keep the lease but scale the app to 0? Akash has no "stop" —
   billing is per active lease, so *close* to stop paying and *re-create* to resume.
   Because the image is self-contained, re-create → ready in the time it takes the
@@ -302,7 +385,10 @@ Every run appends to `benchmark_report.md` and writes `benchmark_*.json`, includ
 | Lease stays `pending`, provider never pulls | The GHCR package is still Private. Akash has no `imagePullSecrets` — make it Public (step 3). |
 | Actions build hangs mid-download at a fixed % | Seen repeatedly on the ollama tarball: the connection dies but `curl` waits forever (0 B/s at the NIC while the process looks alive). The Dockerfile uses `--speed-limit/--speed-time` to turn that hang into a retryable error, plus `-C -` to resume. If another step hangs the same way, add the same flags. |
 | Actions push step fails with 403 | Repo's default `GITHUB_TOKEN` permissions are read-only and override the workflow's `packages: write` block in some org configs — set **Settings → Actions → General → Workflow permissions → Read and write**. |
-| No bids for the deployment | No free RTX 5090; raise the price ceiling or uncomment a fallback GPU model in the SDL. |
+| No bids for the deployment | Check supply before raising the price — see step 5 note 4. Often it isn't price: a provider with a free GPU won't bid unless one machine has the RAM the service asks for, and 5090s do run out network-wide (10 of 12 leased on 2026-09-11). Widening the GPU list to `pro6000se` fixed it. |
+| A Python client gets HTTP 403 "error code: 1010" but curl works | Cloudflare fronts the Akash ingress and rejects the default `Python-urllib` user agent. Send a browser `User-Agent`, as `staging_checks.py` and `bench_concurrency.py --backend app` now do. |
+| vLLM: the second instance dies at startup, `Free memory ... < ...` | vLLM's `request_memory` check demands `gpu-memory-utilization × card` be free even when `--kv-cache-memory-bytes` is explicit; at the 0.9 default the French instance can't start after Darija loads. The SDLs pass `--gpu-memory-utilization 0.4` via `VLLM_EXTRA_ARGS`. |
+| vLLM: answers run on to `max_tokens` and invent `user`/`model` turns | The `<end_of_turn>` stop string never fires (vLLM matches stops after stripping special tokens). Requests must send `stop_token_ids: [106, 107]` — `app/services/llm.py` does; any other client of the AWQ artifacts must too. |
 | App reachable but you're nervous about exposure | It has **no auth** and CORS `*`. `UPLOADS_READ_ONLY=true` is already set; don't share the URI, and close the lease when done. |
 
 ---
@@ -318,8 +404,16 @@ Every run appends to `benchmark_report.md` and writes `benchmark_*.json`, includ
 | `config/Dockerfile.gpu` | Blackwell CUDA image: 3 venvs + embeddings + voices (GGUFs fetched at boot) |
 | `config/requirements-speech.txt` | `.speech_venv`: faster-whisper + SeamlessM4T |
 | `config/requirements-ocr-paddle.txt` | `.ocr_venv`: PaddleOCR (best-effort) |
-| `scripts/docker/entrypoint.sh` | Boots Ollama, registers models, inits DB, launches uvicorn |
-| `deploy/akash-deploy.yaml` | Akash SDL: db (CPU) + app (1× rtx5090) |
+| `scripts/docker/entrypoint.sh` | Boots Ollama, registers models, inits DB, launches uvicorn. With `LLM_BACKEND=vllm` it skips the Ollama steps and waits on both vLLM `/health` instead |
+| `deploy/akash-deploy.yaml` | Akash SDL, **vLLM**: db (CPU) + llm (1 GPU) + app (1 GPU, voice/OCR) |
+| `deploy/akash-deploy.ollama.yaml` | Akash SDL, **Ollama rollback**: db (CPU) + app (1× rtx5090) |
+| `deploy/akash-staging-vllm.yaml` | Staging SDL: same, with the app on CPU and voice/OCR off, so one GPU is enough |
+| `config/Dockerfile.vllm` | `vllm/vllm-openai:v0.29.0` + the two launcher scripts → `ghcr.io/oussamamaat/iblog-vllm` |
+| `.github/workflows/build-vllm-image.yml` | Builds + pushes that image |
+| `scripts/vllm/llm_entrypoint.sh` | Downloads the AWQ weights, then execs `serve_pair.sh` |
+| `scripts/vllm/serve_pair.sh` | Starts both vLLM instances (Darija :8101, French :8102), supervises them, logs which one exited |
+| `scripts/vllm/staging_checks.py` | End-to-end verification against a deployed app: both languages, quiz, diagram, concurrency |
+| `scripts/benchmark/bench_concurrency.py` | Concurrency sweep against `ollama`, `vllm`, or the full `app` pipeline |
 | `deploy/akash.env.example` | Every env override, documented (gitignored `akash.env` is the real, secret-bearing copy) |
 | `scripts/benchmark/bench_gpu.py` | GPU/CUDA/VRAM sanity |
 | `scripts/benchmark/bench_llm.py` | Latency + language-switch + raw tok/s |

@@ -131,6 +131,61 @@ Measurement conditions that make these vLLM numbers conservative or partial:
    waits for an idle GPU before every vLLM start, and skips benchmarks and AWQ builds already
    published (commit `3d99a51`, lease kit `2ff045d`).
 
+### Staging verification (plan criterion 7): pass
+
+Staging lease, 2026-09-12, `deploy/akash-staging-vllm.yaml`: `db` + `llm` + a CPU-only `app`
+(voice and OCR off), one GPU. It ran on an RTX PRO 6000 SE (96 GiB, Blackwell) rather than a
+5090, because that night 10 of the network's 12 rtx5090 cards were leased and the one provider
+with a free card that fit never bid; 24 pro6000se cards sat idle. The SDL now accepts either.
+
+**Both instances started from the explicit-KV path**, the first real run of it:
+
+```
+[serve_pair] Starting Darija: vllm serve /models/awq/darija --served-model-name iblog-tutor-darija-awq
+             --port 8101 --max-model-len 8192 --enable-prefix-caching --kv-cache-memory-bytes 6G
+             --max-num-seqs 16 --gpu-memory-utilization 0.4
+[serve_pair] darija is up (156s)
+[serve_pair] french is up (62s)
+  [darija] Initial free memory 94.47 GiB, reserved 6.0 GiB memory for KV Cache as specified by
+           kv_cache_memory_bytes config and skipped memory profiling.
+  [darija] GPU KV cache size: 18,701 tokens, Maximum concurrency for 8,192 tokens per request: 2.28x
+  [french] Initial free memory 81.62 GiB, reserved 6.0 GiB ...
+  [french] GPU KV cache size: 18,701 tokens, Maximum concurrency for 8,192 tokens per request: 2.28x
+```
+
+**18,701 tokens per instance matches the computed 6 GiB ÷ 0.33 MiB per token exactly**, so the
+capacity arithmetic above is confirmed rather than estimated. vLLM's `2.28x` assumes every request
+fills the 8,192-token context; real rendered prompts measured 2,015 tokens at most (plan A5), which
+puts actual capacity near 9 concurrent requests per language before prefix-cache sharing. Because
+the KV size is given in bytes, it is identical on the 96 GiB card and on a 5090 — only the headroom
+around it differs (94 GiB free at start here versus about 26 GiB on a 5090).
+
+**`scripts/vllm/staging_checks.py`: 6 of 6 passed.** Grounded French chat citing Article 283
+(1.6 s) and the same question in Darija (1.8 s), both with sources and in the right language; the
+off-topic question refused with no sources; a quiz returning exactly 5 well-formed questions
+(6.5 s); a diagram with valid mermaid (5.5 s); 8 concurrent chats all 200.
+
+**Full-pipeline concurrency** (`bench_concurrency.py --backend app`, both languages, retrieval and
+citation injection included):
+
+| N | p50 | p95 | Throughput | Errors |
+|---|---|---|---|---|
+| 1 | 2.11 s | 2.77 s | 0.47 req/s | 0 |
+| 4 | 1.74 s | 2.29 s | 2.26 req/s | 0 |
+| 8 | 2.22 s | 3.61 s | 2.59 req/s | 0 |
+| 16 | 2.08 s | 2.96 s | 7.18 req/s | 0 |
+| 32 | 2.08 s | 2.95 s | 12.65 req/s | 0 |
+
+Latency is flat from 1 to 32 simultaneous users while throughput scales 27-fold, with zero errors
+in 126 requests, and answers stayed complete under load (19–113 words, none truncated). The N=2
+row of the first sweep read p95 15.13 s; re-running that point twice gave 1.14 s and 1.06 s, so it
+was warm-up, not a result. `peak_vram_mib` in the output JSON is meaningless for this run: the
+sampler reads a local `nvidia-smi`, which saw the laptop's GPU, not the lease's.
+
+One operational finding, unrelated to serving: Akash's ingress sits behind Cloudflare, which
+answers the default `Python-urllib` user agent with 403 (error 1010). Both staging clients now send
+a browser user agent.
+
 ## Decision
 
 1. Production LLM serving moves to vLLM `v0.29.0` (`vllm/vllm-openai:v0.29.0`), selected with
@@ -170,11 +225,12 @@ Measurement conditions that make these vLLM numbers conservative or partial:
 
 ## Constraints acknowledged
 
-- **KV cache sizes were not captured.** vLLM logs `GPU KV cache size` and `Maximum concurrency` at
-  startup, but `job.sh` did not publish those lines, and they were lost when the lease closed. The
-  capacity figures above are computed. D5 must record the real lines.
-- **`serve_pair.sh`'s explicit `--kv-cache-memory-bytes` path has not run on real hardware.** Phase B
-  used the auto path; D5 is its first real run.
+- **Staging ran on a pro6000se, not a 5090.** Same architecture and the same explicit KV bytes, so
+  the capacity and correctness results carry over, but the latency numbers in the staging table are
+  not 5090 numbers. The 5090 figures remain Phase B's, measured on the serving layer alone.
+- **The restart drill was not run.** Criterion 6's "a killed instance comes back" is still unproven;
+  it was dropped to keep the lease short. What the lease did show is that a cold container downloads
+  both models in about two minutes, which bounds the recovery cost on ephemeral storage.
 - **Benchmark scope.** `max_tokens` 300 rather than 1,024, one language at a time, 2 requests per
   worker.
 - **fp8 KV cache is inconclusive.** At N=16 it was slower than bf16 (p95 3.2 s vs 1.7 s); at N=32
