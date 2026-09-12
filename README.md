@@ -17,7 +17,9 @@ language mix; onboarding means adding documents and a per-tenant LoRA adapter, n
 changes. **Tenant #1** (Moroccan safety/security regulations, "sécurité et sûreté") is the
 current live instance, served by two merged Atlas-Chat-9B fine-tunes (Q4_K_M GGUF via
 Ollama) selected per turn by resolved response language: `IBLOG_TUTOR:latest` (Arabic-
-script Darija) and `iblog-tutor-fr:latest` (French). The platform direction is a
+script Darija) and `iblog-tutor-fr:latest` (French). An AWQ/vLLM serving path for the
+same two models is built and staged, for concurrent traffic rather than latency; it
+switches on per deployment (`LLM_BACKEND=vllm`, `ADR 0011`). The platform direction is a
 **neutral multilingual base model with per-tenant, hot-swappable LoRA adapters**
 (currently frozen-merged, not hot-swappable) before onboarding tenant #2 — see
 `docs/architecture/serving.md` for what's deployed vs. that target.

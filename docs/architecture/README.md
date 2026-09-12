@@ -13,7 +13,8 @@ auto-resolves domain and language per turn (no UI selector for either), reuses a
 retrieval context across same-topic follow-ups via server-side conversation history, embeds
 the query, retrieves the top-k matching chunks from that tenant's documents in pgvector, builds
 a system prompt in the resolved language (Darija or French, each served by its own fine-tuned
-model) around that context and any prior turns, and sends it to Ollama. The model is instructed
+model) around that context and any prior turns, and sends it to the serving backend — Ollama by
+default, or vLLM where an SDL sets `LLM_BACKEND=vllm` (`ADR 0011`). The model is instructed
 to ground its answer strictly in the retrieved context and to refuse rather than fabricate when
 the context doesn't cover the question — and since 2026-09-06, a refusal can instead fall back
 to a clearly-labeled live web search (opt-in, `ADR 0010`) rather than dead-ending. A tenant
