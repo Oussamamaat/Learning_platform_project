@@ -282,6 +282,11 @@ class VideoJob(Base):
     input_text = Column(Text, nullable=False)
     title = Column(String(300), nullable=True)
     language = Column(String(10), nullable=False, default="fr")
+    # 'scene' | 'avatar' -- which of the partner pipeline's two output
+    # shapes was requested. Persisted (rather than defaulted at render
+    # time) so the worker can refuse an avatar job with a truthful reason
+    # instead of silently producing scene footage for it.
+    mode = Column(String(10), nullable=False, default="scene", server_default="scene")
     status = Column(String(20), nullable=False, default="pending")
     video_url = Column(String(1000), nullable=True)
     error_message = Column(Text, nullable=True)
@@ -296,6 +301,10 @@ class VideoJob(Base):
         CheckConstraint(
             "status IN ('pending','processing','ready','error')",
             name="ck_video_jobs_status",
+        ),
+        CheckConstraint(
+            "mode IN ('scene','avatar')",
+            name="ck_video_jobs_mode",
         ),
         Index("ix_video_jobs_tenant_status", "tenant_id", "status"),
     )

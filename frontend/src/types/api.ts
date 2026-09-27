@@ -197,3 +197,45 @@ export interface SourceListResponse {
   ready_count: number;
   total_chunks: number;
 }
+
+// --- Explanatory video generation (app/routers/video.py) ---
+
+// app.models.schemas.VideoJobStatus
+export type VideoJobStatus = "pending" | "processing" | "ready" | "error";
+
+// app.models.schemas.VideoMode. "avatar" is accepted and stored but not
+// yet renderable -- the pipeline's avatar_generator.py is an empty stub
+// upstream, so the worker fails such a job with an explicit message
+// rather than silently producing scene footage. The Studio therefore
+// offers the option as DISABLED with the reason shown, instead of hiding
+// it (hiding it would make the gap look like a missing feature request).
+export type VideoMode = "scene" | "avatar";
+
+// app.models.schemas.Role -- who is calling. Sent as the X-User-Role
+// header. A seam, not security: see app/services/roles.py.
+export type Role = "admin" | "tenant" | "employee";
+
+export interface VideoJob {
+  id: string;
+  tenant_id: string;
+  session_id?: string | null;
+  input_text: string;
+  title?: string | null;
+  language: Language;
+  mode: VideoMode;
+  status: VideoJobStatus;
+  // Relative to the API base (e.g. "/media/<id>/video_finale.mp4"),
+  // served by app/main.py's /media StaticFiles mount. Join with API_BASE
+  // before putting it in a <video src>.
+  video_url?: string | null;
+  error_message?: string | null;
+  created_at: string; // ISO datetime
+}
+
+export interface VideoGenerateRequest {
+  text: string;
+  title?: string;
+  language: Language;
+  mode: VideoMode;
+  session_id?: string;
+}

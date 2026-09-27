@@ -8,18 +8,26 @@ import {
   useState,
 } from "react";
 import type { ReactNode } from "react";
-import type { Domain, DomainSource, Language, ResponseLang } from "../types/api";
+import type { Domain, DomainSource, Language, ResponseLang, VideoMode } from "../types/api";
 import { generateQuiz, pingHealth, sendChatMessage } from "../services/api";
 import {
   newMessageId,
   useChatSessions,
 } from "../hooks/useChatSessions";
 import { useSources } from "../hooks/useSources";
+import { useVideoJobs } from "../hooks/useVideoJobs";
 import { useToast } from "../hooks/useToast";
 import type { ToastItem } from "../hooks/useToast";
 
-export type ViewMode = "tenant" | "employee";
+// Doubles as the caller's role, sent to the backend as X-User-Role.
+// "admin" was added 2026-09-21 with video generation: course-authoring
+// features are Admin/Tenant-only, and an employee is a learner who
+// creates nothing (app/services/roles.py's Role).
+export type ViewMode = "admin" | "tenant" | "employee";
 const VIEW_MODE_STORAGE_KEY = "atlas_tutor.view.v1";
+// Which panel the tenant/admin workspace is showing. Employees never see
+// the switcher -- there is only chat for them.
+export type WorkspaceTab = "chat" | "video";
 
 export const MODEL_NAME = "IBLOG_TUTOR:latest";
 
@@ -33,6 +41,13 @@ interface HealthState {
 export interface GenerateQuizPayload {
   topic: string;
   numQuestions: number;
+}
+
+export interface GenerateVideoPayload {
+  text: string;
+  title?: string;
+  language: Language;
+  mode: VideoMode;
 }
 
 // A language switch under serial model loading (one model resident in
@@ -100,6 +115,15 @@ interface AppContextValue {
   // codebase), see TopBar.tsx.
   viewMode: ViewMode;
   setViewMode: (mode: ViewMode) => void;
+  // Course authoring (video generation) is Admin/Tenant only -- mirrors
+  // app.services.roles.COURSE_AUTHOR_ROLES. The backend enforces it too;
+  // this just keeps the UI from offering what would be refused.
+  canAuthorCourses: boolean;
+  workspaceTab: WorkspaceTab;
+  setWorkspaceTab: (tab: WorkspaceTab) => void;
+  videoJobs: ReturnType<typeof useVideoJobs>["jobs"];
+  submitVideoJob: (payload: GenerateVideoPayload) => Promise<void>;
+  videoSubmitting: boolean;
   sources: ReturnType<typeof useSources>["sources"];
   uploadFiles: ReturnType<typeof useSources>["uploadFiles"];
   toggleSource: ReturnType<typeof useSources>["toggleSource"];
@@ -120,14 +144,20 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [viewMode, setViewModeState] = useState<ViewMode>(() => {
     try {
       const stored = window.localStorage.getItem(VIEW_MODE_STORAGE_KEY);
-      return stored === "employee" ? "employee" : "tenant";
+      if (stored === "employee" || stored === "admin" || stored === "tenant") return stored;
+      return "tenant";
     } catch {
       return "tenant";
     }
   });
+  const [workspaceTab, setWorkspaceTab] = useState<WorkspaceTab>("chat");
 
   const setViewMode = useCallback((mode: ViewMode) => {
     setViewModeState(mode);
+    // Switching to employee must not leave the workspace parked on a tab
+    // that role cannot see (and whose backend calls it would be refused
+    // for) -- send it back to chat.
+    if (mode === "employee") setWorkspaceTab("chat");
     try {
       window.localStorage.setItem(VIEW_MODE_STORAGE_KEY, mode);
     } catch {
@@ -142,6 +172,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const src = useSources();
   const { activeSourceIds, setDegraded } = src;
+
+  const canAuthorCourses = viewMode !== "employee";
+  const video = useVideoJobs(viewMode, canAuthorCourses);
 
   const swapTimerRef = useRef<number | null>(null);
 
@@ -323,6 +356,29 @@ export function AppProvider({ children }: { children: ReactNode }) {
     [addMessage, ensureActiveSession, toastError, toastInfo, toastSuccess],
   );
 
+  const submitVideoJob = useCallback(
+    async (payload: GenerateVideoPayload) => {
+      try {
+        await video.submit({
+          text: payload.text,
+          title: payload.title,
+          language: payload.language,
+          mode: payload.mode,
+        });
+        toastSuccess(
+          "Video queued — the worker picks it up on its next poll. This takes minutes, not seconds.",
+        );
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "Unexpected error";
+        // ROLE_FORBIDDEN lands here if the view was switched to employee
+        // between render and submit -- the message from the backend
+        // already names the role and what it may do, so pass it through.
+        toastError(message);
+      }
+    },
+    [toastError, toastSuccess, video],
+  );
+
   const value = useMemo<AppContextValue>(
     () => ({
       activeDomain,
@@ -351,6 +407,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
       dismissToast,
       viewMode,
       setViewMode,
+      canAuthorCourses,
+      workspaceTab,
+      setWorkspaceTab,
+      videoJobs: video.jobs,
+      submitVideoJob,
+      videoSubmitting: video.submitting,
       sources: src.sources,
       uploadFiles: src.uploadFiles,
       toggleSource: src.toggleSource,
@@ -381,6 +443,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
       dismissToast,
       viewMode,
       setViewMode,
+      canAuthorCourses,
+      workspaceTab,
+      video.jobs,
+      submitVideoJob,
+      video.submitting,
       src.sources,
       src.uploadFiles,
       src.toggleSource,

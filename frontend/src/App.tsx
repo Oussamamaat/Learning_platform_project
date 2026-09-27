@@ -6,7 +6,7 @@ import SourcesPanel from "./components/sources/SourcesPanel";
 import { useApp } from "./context/AppContext";
 
 function App() {
-  const { viewMode, quizModalOpen } = useApp();
+  const { canAuthorCourses, quizModalOpen } = useApp();
   return (
     <div className="flex h-full overflow-hidden bg-surface text-ink">
       {/* Dim-to-focus: pushes the background back/down instead of just
@@ -21,7 +21,9 @@ function App() {
       >
         <Sidebar />
         <Workspace />
-        {viewMode === "tenant" && <SourcesPanel />}
+        {/* Admin sees everything Tenant does -- course authoring is one
+            permission (canAuthorCourses), not a per-panel list. */}
+        {canAuthorCourses && <SourcesPanel />}
       </div>
       <QuizModal />
       <ToastContainer />

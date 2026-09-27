@@ -347,6 +347,24 @@ class VideoJobStatus(str, Enum):
     ERROR = "error"
 
 
+class VideoMode(str, Enum):
+    """Which of the partner pipeline's two output shapes to produce.
+
+    SCENE  -- planned shots illustrating the procedure, narrated over
+              generated footage. The working path.
+    AVATAR -- narration carried by a talking avatar. NOT IMPLEMENTED
+              UPSTREAM as of 2026-09-21: the partner repo's
+              src/avatar_generator.py is an empty file and every phase of
+              their orchestrator skips non-scene jobs. The value exists so
+              the interface and the stored job carry the user's actual
+              choice (rather than silently rewriting it to 'scene'), and
+              so the worker can refuse it with a truthful reason.
+    """
+
+    SCENE = "scene"
+    AVATAR = "avatar"
+
+
 class VideoGenerateRequest(BaseModel):
     """Input contract: what our app sends to request a video."""
 
@@ -357,6 +375,7 @@ class VideoGenerateRequest(BaseModel):
         description="Short topic label for the video's opening frame, in the same language as text",
     )
     language: Language = Field(..., description="fr | en | ar-MA")
+    mode: VideoMode = Field(VideoMode.SCENE, description="scene | avatar (avatar not yet implemented upstream)")
     session_id: Optional[str] = Field(None, description="Chat/quiz session this was triggered from, if any")
     tenant_id: Optional[str] = Field(None, description="Company/tenant identifier")
 
@@ -376,6 +395,12 @@ class VideoJobOut(BaseModel):
     input_text: str
     title: Optional[str] = None
     language: str
+    # Additive to the payload frozen with the partner on 2026-08-18 (see
+    # docs/PARTNER_VIDEO_ONBOARDING.md). Safe for their reader: their
+    # job_adapter.detect_item_mode() scores a job's keys against two fixed
+    # signature sets, and "mode" is in neither, so the avatar/scene
+    # detection they already shipped is unaffected by its presence.
+    mode: VideoMode = VideoMode.SCENE
     status: VideoJobStatus
     video_url: Optional[str] = None
     error_message: Optional[str] = None

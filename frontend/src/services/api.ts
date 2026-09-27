@@ -4,8 +4,11 @@ import type {
   ChatResponse,
   QuizRequest,
   QuizResponse,
+  Role,
   SourceFile,
   SourceListResponse,
+  VideoGenerateRequest,
+  VideoJob,
 } from "../types/api";
 
 const env = (import.meta as { env?: { VITE_API_BASE?: string } }).env;
@@ -41,12 +44,15 @@ async function request<T>(
   path: string,
   body?: unknown,
   method: "GET" | "POST" | "PATCH" | "DELETE" = "POST",
+  extraHeaders?: Record<string, string>,
 ): Promise<T> {
   let res: Response;
+  const headers: Record<string, string> = { ...(extraHeaders ?? {}) };
+  if (body !== undefined) headers["Content-Type"] = "application/json";
   try {
     res = await fetch(`${API_BASE}${path}`, {
       method,
-      headers: body !== undefined ? { "Content-Type": "application/json" } : undefined,
+      headers: Object.keys(headers).length > 0 ? headers : undefined,
       body: body !== undefined ? JSON.stringify(body) : undefined,
     });
   } catch {
@@ -101,6 +107,29 @@ export async function setSourceEnabled(id: string, enabled: boolean): Promise<So
 
 export async function deleteSource(id: string): Promise<{ deleted_chunks: number }> {
   return request<{ deleted_chunks: number }>(`/api/v1/ingest/sources/${id}`, undefined, "DELETE");
+}
+
+// --- Explanatory video generation ---
+//
+// Every call carries the caller's role. The backend refuses POST /generate
+// for "employee" (app/services/roles.py + app/routers/video.py) -- the UI
+// hides the Studio from employees too, but the header is what makes the
+// rule real rather than cosmetic. Still a seam and not security: there is
+// no auth in this codebase, so the header is trusted as given.
+function roleHeader(role: Role): Record<string, string> {
+  return { "X-User-Role": role };
+}
+
+export async function generateVideo(req: VideoGenerateRequest, role: Role): Promise<VideoJob> {
+  return request<VideoJob>("/api/v1/video/generate", req, "POST", roleHeader(role));
+}
+
+export async function listVideoJobs(role: Role): Promise<VideoJob[]> {
+  return request<VideoJob[]>("/api/v1/video/jobs", undefined, "GET", roleHeader(role));
+}
+
+export async function getVideoJob(id: string, role: Role): Promise<VideoJob> {
+  return request<VideoJob>(`/api/v1/video/jobs/${id}`, undefined, "GET", roleHeader(role));
 }
 
 export async function pingHealth(): Promise<boolean> {

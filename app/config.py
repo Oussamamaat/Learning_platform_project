@@ -92,6 +92,15 @@ class Settings(BaseSettings):
 
     default_tenant_id: str = "company_abc"
     default_user_id: str = "default_user"
+    # Role assumed when a request carries no X-User-Role header
+    # (app.services.roles.resolve_role). "tenant" rather than "employee" so
+    # the existing frontend default and the partner's documented
+    # self-service testing path (POST /api/v1/video/generate by hand, see
+    # docs/PARTNER_VIDEO_ONBOARDING.md) keep working unchanged. Set this to
+    # "employee" to make a deployment deny-by-default: only callers that
+    # explicitly present an admin/tenant role may author course content.
+    # Not a security control on its own -- see app/services/roles.py.
+    default_user_role: str = "tenant"
     # Tier-3 fallback for app.services.routing's domain router when tier 1
     # (page context) is absent and tier 2 (retrieval-as-router) finds no
     # candidate clearing the similarity threshold. Also ingestion's
@@ -445,6 +454,45 @@ class Settings(BaseSettings):
     # legible in the chat panel and keeps a single Ollama call's JSON output
     # bounded. Excess items are truncated, not rejected outright.
     diagram_max_nodes: int = 14
+
+    # --- Explanatory video generation (scripts/video/worker.py) ---
+    # Local clone of the partner pipeline (github.com/HajarAmamou/PFA). The
+    # worker sys.path's into <dir>/src and <dir>/src/scene_planner and
+    # imports their planner/prompt_builder/frame_extractor/video_editor as
+    # a library -- their repo stays the source of truth and is never edited
+    # from here, so their in-flight work (wan_client, avatar_generator)
+    # arrives with a git pull rather than a re-vendoring. Empty disables
+    # the worker with an explicit message naming this setting; the API
+    # endpoints (app/routers/video.py) work regardless, jobs just stay
+    # 'pending' with nobody to claim them.
+    video_pipeline_dir: str = ""
+    # Assigned onto the partner modules' MODEL constants at worker start
+    # (planner.py and prompt_builder.py both hardcode qwen2.5:7b-instruct).
+    # A knob, not a hardcode, so a deployment can point Phase 1 at a model
+    # it has already pulled instead of paying a ~4.7GB download.
+    video_planner_model: str = "qwen2.5:7b-instruct"
+    # Where assembled videos land. Served read-only at /media by
+    # app/main.py's StaticFiles mount -- the worker reports video_url as
+    # the relative "/media/<job_id>/video_finale.mp4" and the frontend
+    # joins it with its API base, same as every other call.
+    video_output_dir: str = "./data/videos"
+    video_worker_poll_seconds: float = 5.0
+    # ComfyUI endpoint serving Wan2.2 (scripts/video/wan_comfyui.py). EMPTY
+    # IS THE WORKING DEFAULT, not a broken one: with no endpoint the worker
+    # renders through the partner's generate_video_mock(), which produces
+    # real ffmpeg-encoded clips -- so frame extraction, audio muxing and
+    # final assembly are all genuinely exercised end to end, just with
+    # solid-colour footage. Set this to a live deployment for real video.
+    comfyui_url: str = ""
+    # A ComfyUI workflow exported with "Save (API Format)". Only read when
+    # comfyui_url is set; scripts/video/wan_comfyui.py injects the scene
+    # prompt and (for continuation scenes) the previous frame into it.
+    comfyui_workflow_path: str = "./config/wan22_workflow.json"
+    # Seconds one Ollama scene-planning call may take before the worker
+    # abandons that job and moves on. The partner's orchestrator records
+    # why this exists: a local model can loop silently with no error, and
+    # without a timeout one job blocks the whole queue.
+    video_planner_timeout_seconds: float = 120.0
 
     model_config = {
         "env_file": ".env",

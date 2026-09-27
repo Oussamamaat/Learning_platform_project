@@ -44,3 +44,13 @@ Pillow==11.0.0
 # transformers, torchaudio -- SeamlessM4T-v2, Phase 0 STT candidate (Darija "ary")
 # piper-tts -- ONNX TTS, MIT-licensed (see app/services/tts.py's module
 #   docstring for why Piper over XTTS-v2/MMS-TTS, both non-commercial)
+
+# Explanatory video generation, Phase 1 only (scripts/video/worker.py ->
+# the partner pipeline's planner.py / prompt_builder.py, which both do
+# `import ollama`). A thin HTTP client over the Ollama REST API -- pure
+# Python, no native deps, no conflict with anything above. Installed so
+# their modules import unmodified; the worker points it at
+# settings.ollama_base_url via OLLAMA_HOST rather than their hardcoded
+# localhost. The rest of this repo still talks to Ollama through
+# app/services/llm.py's own urllib calls and does not use this package.
+ollama==0.3.3

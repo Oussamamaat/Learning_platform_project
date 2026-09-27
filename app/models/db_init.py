@@ -74,6 +74,17 @@ def init_db():
         #
         #   ALTER TABLE video_jobs ADD COLUMN IF NOT EXISTS title VARCHAR(300);
         #
+        # Same again for video_jobs.mode (added 2026-09-21 when the video
+        # worker landed -- scripts/video/worker.py needs to tell a scene job
+        # from an avatar one, and avatar is not implemented upstream yet, so
+        # it must refuse rather than guess). Like source_files.status above,
+        # the CHECK constraint is not implied by ADD COLUMN:
+        #
+        #   ALTER TABLE video_jobs ADD COLUMN IF NOT EXISTS mode VARCHAR(10) NOT NULL DEFAULT 'scene';
+        #   ALTER TABLE video_jobs DROP CONSTRAINT IF EXISTS ck_video_jobs_mode;
+        #   ALTER TABLE video_jobs ADD CONSTRAINT ck_video_jobs_mode
+        #       CHECK (mode IN ('scene','avatar'));
+        #
         # Same again for source_files.unprocessed_pages (added 2026-08-18 when
         # a document with a mix of native and OCR_REQUIRED pages stopped
         # failing the whole upload -- app.services.ingestion._parse_pdf now

@@ -1,4 +1,4 @@
-import { Bot, Building2, Languages, Loader2, Users } from "lucide-react";
+import { Bot, Building2, Languages, Loader2, ShieldCheck, Users } from "lucide-react";
 import { useApp } from "../../context/AppContext";
 import type { ViewMode } from "../../context/AppContext";
 
@@ -13,9 +13,17 @@ const DOMAIN_LABEL: Record<string, string> = {
 // input by design, ADR 0001). Switches between the tenant view (Sources
 // panel visible, upload/toggle/delete) and the employee view (chat only,
 // read-only "grounded in N sources" indicator) purely client-side.
+//
+// Since 2026-09-21 the selected mode is ALSO sent to the backend as
+// X-User-Role, and admin joined the list: course authoring (video
+// generation) is Admin/Tenant-only and is refused server-side for
+// employees (app/services/roles.py). That makes this toggle the closest
+// thing to a login this app has -- still trusted as given, still not
+// security, but no longer purely cosmetic.
 function ViewModeToggle() {
   const { viewMode, setViewMode } = useApp();
   const options: { mode: ViewMode; label: string; Icon: typeof Building2 }[] = [
+    { mode: "admin", label: "Admin", Icon: ShieldCheck },
     { mode: "tenant", label: "Tenant", Icon: Building2 },
     { mode: "employee", label: "Employee", Icon: Users },
   ];

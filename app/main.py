@@ -48,6 +48,36 @@ async def generic_error_handler(request: Request, exc: Exception) -> JSONRespons
     )
 
 
+def _mount_generated_media() -> None:
+    """Serve assembled videos at /media (settings.video_output_dir).
+
+    The first StaticFiles mount in this app -- every other artifact it
+    produces is JSON. A generated video is a file the browser must fetch
+    with range requests to scrub through, so it cannot ride the JSON API;
+    scripts/video/worker.py reports video_url as the relative
+    "/media/<job_id>/video_finale.mp4" and the frontend joins it with its
+    API base. The interface contract already allows video_url to point
+    anywhere reachable by the frontend
+    (docs/architecture/video-generation-interface.md).
+
+    Created if absent and mounted unconditionally: an empty directory
+    serving 404s is a much better failure than a router that silently is
+    not there, and this must not be able to crash startup.
+    """
+    from pathlib import Path
+
+    from fastapi.staticfiles import StaticFiles
+
+    media_dir = Path(get_settings().video_output_dir)
+    try:
+        media_dir.mkdir(parents=True, exist_ok=True)
+        app.mount("/media", StaticFiles(directory=str(media_dir)), name="media")
+    except Exception:
+        logging.exception("could not mount /media at %s; videos will not be servable", media_dir)
+
+
+_mount_generated_media()
+
 app.include_router(chat.router)
 app.include_router(audio.router)
 app.include_router(quiz.router)

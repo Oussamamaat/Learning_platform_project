@@ -11,7 +11,7 @@ contract.
 """
 import uuid
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import text
 from sqlalchemy.orm import sessionmaker
 
@@ -21,8 +21,10 @@ from app.models.schemas import (
     VideoGenerateRequest,
     VideoJobOut,
     VideoJobStatus,
+    VideoMode,
     VideoJobUpdateRequest,
 )
+from app.services.roles import COURSE_AUTHOR_ROLES, Role, get_role, require_role
 
 router = APIRouter(prefix="/api/v1/video", tags=["video"])
 
@@ -30,7 +32,7 @@ _engine = None
 _SessionLocal = None
 
 _COLUMNS = (
-    "id, tenant_id, session_id, input_text, title, language, status, "
+    "id, tenant_id, session_id, input_text, title, language, mode, status, "
     "video_url, error_message, created_at"
 )
 
@@ -55,6 +57,7 @@ def _row_to_out(row) -> VideoJobOut:
         input_text=row.input_text,
         title=row.title,
         language=row.language,
+        mode=VideoMode(row.mode),
         status=VideoJobStatus(row.status),
         video_url=row.video_url,
         error_message=row.error_message,
@@ -63,17 +66,50 @@ def _row_to_out(row) -> VideoJobOut:
 
 
 @router.post("/generate", response_model=VideoJobOut)
-def generate_video(request: VideoGenerateRequest):
+def generate_video(request: VideoGenerateRequest, role: Role = Depends(get_role)):
     """Our side: create a pending job and return immediately -- the caller
-    polls GET /jobs/{id} for the result, same pattern as file upload."""
+    polls GET /jobs/{id} for the result, same pattern as file upload.
+
+    Admin/Tenant only (2026-09-21). Generating a video is part of AUTHORING
+    a course, not taking one, so a tenant's employees are refused here even
+    though they use every other endpoint on this service. `role` is a
+    parameter with a dependency default rather than a route-level
+    `dependencies=[...]` so this suite's direct-call tests (no TestClient
+    anywhere -- see tests/test_ingest_router.py) can exercise the gate by
+    passing role= explicitly.
+
+    The gate is deliberately on THIS endpoint only. The other three are the
+    partner-facing contract frozen 2026-08-18
+    (docs/PARTNER_VIDEO_ONBOARDING.md); gating their worker's poll and
+    report calls needs a shared secret between the two services, which is
+    authentication and a larger change than this one. Recorded as an open
+    gap in docs/architecture/video-generation-interface.md rather than
+    half-done here.
+    """
+    require_role(role, COURSE_AUTHOR_ROLES, "generate videos")
+
     tenant_id = request.tenant_id or get_tenant_id()
     job_id = uuid.uuid4()
     session = _get_session()
     try:
         session.execute(
             text(
-                "INSERT INTO video_jobs (id, tenant_id, session_id, input_text, title, language, status) "
-                "VALUES (:id, :tenant_id, :session_id, :input_text, :title, :language, 'pending')"
+                # created_at/updated_at are written EXPLICITLY. VideoJob
+                # declares them with a Python-side `default=` (app/models/
+                # database.py), which SQLAlchemy applies only on an ORM
+                # insert -- this is raw SQL, so the column took no default
+                # at all and landed NULL, and _row_to_out then failed
+                # VideoJobOut validation ("created_at: Input should be a
+                # valid datetime"). POST /generate therefore 500'd on any
+                # database, not just in tests; it went unnoticed because
+                # nothing called this endpoint until the Studio UI and the
+                # worker landed. Setting it here rather than adding a
+                # server_default keeps it correct on already-created
+                # tables, with no migration to run.
+                "INSERT INTO video_jobs "
+                "(id, tenant_id, session_id, input_text, title, language, mode, status, created_at, updated_at) "
+                "VALUES (:id, :tenant_id, :session_id, :input_text, :title, :language, :mode, 'pending', "
+                "CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)"
             ),
             {
                 "id": str(job_id),
@@ -82,6 +118,7 @@ def generate_video(request: VideoGenerateRequest):
                 "input_text": request.text,
                 "title": request.title,
                 "language": request.language.value,
+                "mode": request.mode.value,
             },
         )
         session.commit()
@@ -95,17 +132,37 @@ def generate_video(request: VideoGenerateRequest):
 
 @router.get("/jobs", response_model=list[VideoJobOut])
 def list_jobs(status: VideoJobStatus = None):
-    """Video worker's side: poll with ?status=pending to claim work."""
+    """Video worker's side: poll with ?status=pending to claim work. Also
+    the Studio UI's side: called without a filter to list this tenant's
+    jobs newest-first.
+
+    Scoped to get_tenant_id() as of 2026-09-21. It previously returned
+    EVERY tenant's rows -- including their input_text, which is the
+    tutor's generated course content. That was invisible while nothing
+    called it; the Studio UI is the first caller that would have rendered
+    another tenant's jobs on screen. Single-tenant MVP means this is
+    currently a no-op in practice (ADR 0001: get_tenant_id is a
+    process-lifetime constant), which is exactly why it had to be fixed
+    before a second tenant makes it a real leak rather than after.
+    """
+    tenant_id = get_tenant_id()
     session = _get_session()
     try:
         if status is not None:
             rows = session.execute(
-                text(f"SELECT {_COLUMNS} FROM video_jobs WHERE status = :s ORDER BY created_at"),
-                {"s": status.value},
+                text(
+                    f"SELECT {_COLUMNS} FROM video_jobs "
+                    "WHERE tenant_id = :t AND status = :s ORDER BY created_at"
+                ),
+                {"t": tenant_id, "s": status.value},
             ).fetchall()
         else:
             rows = session.execute(
-                text(f"SELECT {_COLUMNS} FROM video_jobs ORDER BY created_at DESC")
+                text(
+                    f"SELECT {_COLUMNS} FROM video_jobs "
+                    "WHERE tenant_id = :t ORDER BY created_at DESC"
+                ),
+                {"t": tenant_id},
             ).fetchall()
     finally:
         session.close()
@@ -140,8 +197,14 @@ def update_job(job_id: str, request: VideoJobUpdateRequest):
     try:
         result = session.execute(
             text(
+                # CURRENT_TIMESTAMP, not now(): identical in Postgres
+                # (both are transaction-start timestamptz) but now() is a
+                # Postgres extension, so this statement could not run
+                # against the in-memory SQLite the router tests use --
+                # which left the whole PATCH path, the one the video
+                # worker reports every result through, untestable.
                 "UPDATE video_jobs SET status = :status, video_url = :video_url, "
-                "error_message = :error_message, updated_at = now() WHERE id = :id"
+                "error_message = :error_message, updated_at = CURRENT_TIMESTAMP WHERE id = :id"
             ),
             {
                 "status": request.status.value,

@@ -74,3 +74,22 @@ class GenerationError(AppError):
             code="GENERATION_FAILED",
             status_code=502,
         )
+
+
+class ForbiddenError(AppError):
+    """The caller's role is not permitted to perform this action.
+
+    Distinct from the 403 app/routers/ingest.py raises for
+    settings.uploads_read_only: that one is a deployment-wide kill switch
+    ("nobody may write"), this one is per-caller ("you specifically may
+    not"). Both surface through app/main.py's AppError handler as the same
+    structured {"error": {"code", "message"}} body, so the frontend can
+    tell them apart by code without parsing prose.
+    """
+
+    def __init__(self, action: str, role: str, allowed: str):
+        super().__init__(
+            message=f"Role '{role}' cannot {action}. Allowed roles: {allowed}.",
+            code="ROLE_FORBIDDEN",
+            status_code=403,
+        )
