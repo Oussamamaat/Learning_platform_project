@@ -362,23 +362,25 @@ class _ResidentTtsWorker:
             return resp
 
 
-_resident_tts_worker: Optional[_ResidentTtsWorker] = None
+_resident_tts_workers: dict[str, _ResidentTtsWorker] = {}
 
 
-def _get_resident_tts_worker(venv_python: str, worker_script: str) -> _ResidentTtsWorker:
-    global _resident_tts_worker
-    if _resident_tts_worker is None:
+def _get_resident_tts_worker(venv_python: str, worker_script: str, env: dict) -> _ResidentTtsWorker:
+    """One resident worker PER worker script, not a single global -- XttsDarijaEngine
+    and ChatterboxDarijaEngine each need their own subprocess/venv/env, and (unlike
+    the single-engine-per-process assumption when this was one global) a test process
+    or a future dual-engine deployment must not have selecting one engine reuse, or
+    get confused with, the other's already-resolved worker."""
+    worker = _resident_tts_workers.get(worker_script)
+    if worker is None:
         settings = get_settings()
-        _resident_tts_worker = _ResidentTtsWorker(
+        worker = _ResidentTtsWorker(
             venv_python, worker_script,
             idle_release_seconds=settings.tts_worker_idle_release_seconds,
-            env={
-                "TTS_XTTS_MODEL_DIR": settings.tts_xtts_model_dir,
-                "TTS_XTTS_SPEAKER_REF": settings.tts_xtts_speaker_ref,
-                "FFMPEG_SHARED_BIN": settings.tts_xtts_ffmpeg_bin,
-            },
+            env=env,
         )
-    return _resident_tts_worker
+        _resident_tts_workers[worker_script] = worker
+    return worker
 
 
 class XttsDarijaEngine:
@@ -447,7 +449,11 @@ class XttsDarijaEngine:
         with tempfile.NamedTemporaryFile(suffix=".pcm", delete=False) as f:
             out_path = f.name
         try:
-            worker = _get_resident_tts_worker(str(venv_python), str(worker_script))
+            worker = _get_resident_tts_worker(str(venv_python), str(worker_script), env={
+                "TTS_XTTS_MODEL_DIR": settings.tts_xtts_model_dir,
+                "TTS_XTTS_SPEAKER_REF": settings.tts_xtts_speaker_ref,
+                "FFMPEG_SHARED_BIN": settings.tts_xtts_ffmpeg_bin,
+            })
             worker.synthesize(
                 text, language=language, out_path=out_path, timeout=self._TIMEOUT_SECONDS,
             )
@@ -463,10 +469,92 @@ class XttsDarijaEngine:
         return audio
 
 
+class ChatterboxDarijaEngine:
+    """settings.tts_engine='chatterbox_darija' -- Chatterbox Multilingual v3
+    (ResembleAI, MIT) + this project's own `cs-run1` LoRA fine-tune, trained
+    to replace XttsDarijaEngine above with a commercially-usable Darija
+    voice. Chosen on the same acceptance test as XTTS was (live listening,
+    ADR 0006) -- see scripts/tts_chatterbox/README.md and
+    tts_test/docs/CURRENT_MODEL.md (a sibling project, not part of this
+    repo) for the full training/verification history, and this project's
+    memory darija-tts-current-working-version.md for the acceptance date.
+
+    Same shape as XttsDarijaEngine deliberately (GPU-resident, one worker
+    subprocess, serves BOTH languages so one sample rate covers the whole
+    voice session) -- but NOT voice-cloning: no speaker_ref.wav, the base
+    model's own built-in conditioning (conds.pt) is used, so there is no
+    reference-clip config to carry here.
+
+    Cost, measured 2026-09-27 (tts_test's B2 gate, fast_t3 + fast_s3gen):
+    RTF 0.33 on an RTX 3090, 0.46 on this project's own RTX 4060 laptop --
+    both comparable to XTTS's, and it occupies the same class of VRAM
+    (~4.7-7.4GB depending on GPU) that XTTS does.
+    """
+
+    name = "chatterbox_darija"
+    _WORKER_SCRIPT = "scripts/tts_worker_chatterbox.py"
+    # Generous for the same reason XttsDarijaEngine's is: the FIRST call pays
+    # the checkpoint load, LoRA merge, and (if enabled) CUDA-graph capture for
+    # fast_t3/fast_s3gen -- tts_test's docs put graph capture alone at 29-45s.
+    # Later calls are ~1-2s.
+    _TIMEOUT_SECONDS = 600
+    sample_rate = 24000  # matches scripts/tts_worker_chatterbox.py's SAMPLE_RATE
+
+    def warmup(self) -> None:
+        """Force the checkpoint load + LoRA merge + (if enabled) CUDA-graph
+        capture now, for the same reason XttsDarijaEngine.warmup() does:
+        without this, that cost lands on a user's first spoken sentence
+        inside a live voice session, looking exactly like a hang. Raises on
+        failure so get_tts_engine() can fall back to
+        settings.tts_fallback_engine instead of leaving every session on
+        this process silently unable to speak.
+        """
+        self.synthesize("مرحبا", language="darija")
+
+    def synthesize(self, text: str, *, language: str) -> bytes:
+        import os
+        import tempfile
+        from pathlib import Path
+
+        settings = get_settings()
+        venv_python = Path(settings.tts_chatterbox_venv_python)
+        if not venv_python.exists():
+            raise TtsUnavailableError(
+                f"settings.tts_engine='chatterbox_darija' but the dedicated TTS venv's "
+                f"interpreter was not found at {venv_python} (settings.tts_chatterbox_venv_python)."
+            )
+        worker_script = Path(__file__).resolve().parents[2] / self._WORKER_SCRIPT
+        if not worker_script.exists():
+            raise TtsUnavailableError(f"TTS worker script not found: {worker_script}")
+
+        with tempfile.NamedTemporaryFile(suffix=".pcm", delete=False) as f:
+            out_path = f.name
+        try:
+            worker = _get_resident_tts_worker(str(venv_python), str(worker_script), env={
+                "TTS_CHATTERBOX_MODEL_DIR": settings.tts_chatterbox_model_dir,
+                "TTS_CHATTERBOX_ADAPTER_DIR": settings.tts_chatterbox_adapter_dir,
+                "TTS_CHATTERBOX_FAST": "1" if settings.tts_chatterbox_fast else "0",
+            })
+            worker.synthesize(
+                text, language=language, out_path=out_path, timeout=self._TIMEOUT_SECONDS,
+            )
+            audio = Path(out_path).read_bytes()
+        finally:
+            try:
+                os.unlink(out_path)
+            except OSError:
+                pass
+
+        if not audio:
+            raise TtsUnavailableError("Chatterbox produced no audio.")
+        return audio
+
+
 _ENGINES = {
     "none": NullTtsEngine,
     "piper": PiperEngine,
     "xtts_darija": XttsDarijaEngine,
+    "chatterbox_darija": ChatterboxDarijaEngine,
 }
 
 # Resolved once per process by get_tts_engine() below -- manual singleton

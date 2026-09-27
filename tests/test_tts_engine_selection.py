@@ -101,6 +101,36 @@ def test_fallback_equal_to_primary_does_not_double_instantiate():
     assert active_tts_engine_status()["fallback_used"] is False
 
 
+def test_chatterbox_successful_warmup_stays_on_primary():
+    """ChatterboxDarijaEngine (this project's medmac01 replacement) goes through the
+    identical probe-and-fallback path as XttsDarijaEngine -- same warmup() contract,
+    same _ENGINES registration shape."""
+    with patch("app.services.tts.get_settings",
+               return_value=_patched_settings(tts_engine="chatterbox_darija", tts_fallback_engine="piper")), \
+         patch.object(tts_module.ChatterboxDarijaEngine, "warmup", return_value=None):
+        engine = get_tts_engine()
+    assert isinstance(engine, tts_module.ChatterboxDarijaEngine)
+    status = active_tts_engine_status()
+    assert status["active"] == "chatterbox_darija"
+    assert status["fallback_used"] is False
+    assert status["ok"] is True
+
+
+def test_chatterbox_failed_warmup_falls_back_to_configured_engine():
+    with patch("app.services.tts.get_settings",
+               return_value=_patched_settings(tts_engine="chatterbox_darija", tts_fallback_engine="piper")), \
+         patch.object(tts_module.ChatterboxDarijaEngine, "warmup",
+                      side_effect=RuntimeError("adapter at ... is all-zero: it encodes no training")):
+        engine = get_tts_engine()
+    assert isinstance(engine, tts_module.PiperEngine)
+    status = active_tts_engine_status()
+    assert status["configured"] == "chatterbox_darija"
+    assert status["active"] == "piper"
+    assert status["fallback_used"] is True
+    assert status["ok"] is False
+    assert "all-zero" in status["error"]
+
+
 def test_unknown_engine_name_raises():
     with patch("app.services.tts.get_settings", return_value=_patched_settings(tts_engine="bogus")):
         with pytest.raises(TtsUnavailableError):

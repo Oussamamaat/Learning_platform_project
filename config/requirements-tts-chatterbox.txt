@@ -1,0 +1,39 @@
+# Chatterbox Darija TTS stage -- installed into a DEDICATED .chatterbox_venv, never into
+# .gguf_venv or .tts_venv (app/services/tts.py's ChatterboxDarijaEngine,
+# scripts/tts_worker_chatterbox.py, scripts/tts_chatterbox/).
+#
+# Only needed when settings.tts_engine="chatterbox_darija".
+#
+# This replaces tts_engine="xtts_darija" (medmac01/darija_xtt_2.0, non-commercial CPML) with
+# this project's own cs-run1 LoRA fine-tune of Chatterbox Multilingual v3 (ResembleAI, MIT).
+# See scripts/tts_chatterbox/README.md and tts_test/docs/CURRENT_MODEL.md for the
+# training/verification history.
+#
+# Pins match tts_test/.venv-finetune exactly (the environment every listening round -- fr2,
+# dar1, csr1-final, spd1 -- was validated in), EXCEPT torch/torchaudio: this Dockerfile stage
+# installs the cu128 build (Blackwell/sm_120) instead of the laptop's cu126, since torch 2.6
+# has no sm_120 wheel. That combination is UNTESTED (tts_test/docs/CURRENT_MODEL.md, "Known
+# limits"). Verify with the parity check (docs/architecture/voice-assistant.md) before relying
+# on it for a demo.
+#
+# NOT installed here: chatterbox-tts itself (it pins torch==2.6.0, which would fight the cu128
+# install above). The runtime code it provides is vendored instead, inference-only, at
+# scripts/tts_chatterbox/ -- see that directory's README.md for exactly what is and isn't
+# vendored and why.
+peft==0.17.1
+transformers==4.46.3
+tokenizers==0.20.3
+accelerate==1.15.0
+diffusers==0.29.0
+resemble-perth==1.0.1
+s3tokenizer==0.3.0
+conformer==0.3.2
+einops==0.8.2
+librosa==0.11.0
+safetensors==0.5.3
+scipy
+omegaconf==2.3.1
+num2words==0.5.14
+soundfile==0.13.1
+pyloudnorm
+huggingface_hub

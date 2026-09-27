@@ -56,7 +56,11 @@ unsloth_compiled_cache/
 
 # Recovered production LoRA adapters (models/adapters/, ~490 MB). Not reproducible
 # from this repo; they live on Hugging Face (Oussamamaat/iblog-tutor-adapters), not in git.
-models/
+# Anchored to the repo root (leading /) -- an unanchored `models/` also matched
+# scripts/tts_chatterbox/src/chatterbox_/models/, a vendored SOURCE package, silently
+# dropping 40+ of its files from every `git add` with no error (caught 2026-09-27
+# integrating Chatterbox TTS).
+/models/
 
 # Tenant-uploaded documents (settings.upload_dir). Runtime data, not source:
 # each file is reachable only via its source_files row, and the rows live in

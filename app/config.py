@@ -378,7 +378,7 @@ class Settings(BaseSettings):
     # True in a real tenant deployment; this is a diagnostic mode only.
     voice_echo_mode: bool = False
 
-    tts_engine: str = "none"  # "none" | "piper" | "xtts_darija"
+    tts_engine: str = "none"  # "none" | "piper" | "xtts_darija" | "chatterbox_darija"
     # Engine app.services.tts.get_tts_engine() switches to if tts_engine
     # fails to load (probed once at process startup via that engine's
     # warmup(), if it defines one -- only XttsDarijaEngine does today). Set
@@ -388,7 +388,7 @@ class Settings(BaseSettings):
     # whole lease, when falling back to the MIT-licensed, always-available
     # Piper engine would have kept the session usable. app/main.py's
     # /health reports whether the fallback is currently in effect.
-    tts_fallback_engine: str = "piper"  # "none" | "piper" | "xtts_darija"
+    tts_fallback_engine: str = "piper"  # "none" | "piper" | "xtts_darija" | "chatterbox_darija"
     # Piper voice models (ONNX, downloaded separately -- see
     # app.services.tts.PiperEngine's docstring for why Piper was chosen
     # over XTTS-v2/MMS-TTS: CPU-only, ~zero VRAM contention with the
@@ -433,6 +433,33 @@ class Settings(BaseSettings):
     # Longer than STT's 120s because reloading a 5.6GB checkpoint is far more
     # expensive than reloading whisper.
     tts_worker_idle_release_seconds: float = 300.0
+
+    # --- tts_engine="chatterbox_darija" only (app.services.tts.ChatterboxDarijaEngine) ---
+    # Chatterbox Multilingual v3 (ResembleAI, MIT) + this project's own `cs-run1` LoRA --
+    # trained specifically to replace tts_xtts_* above: same live-listening bar (ADR 0006),
+    # but with no non-commercial licensing wall on the code or base model. See
+    # scripts/tts_chatterbox/README.md and tts_test/docs/CURRENT_MODEL.md (a sibling project,
+    # not part of this repo) for the training/verification history. Serves BOTH languages
+    # like XttsDarijaEngine, and is NOT voice-cloning -- no speaker_ref.wav, the base model's
+    # own built-in conditioning (conds.pt) is used.
+    #
+    # Dedicated venv for the same reason tts_xtts_venv_python exists: this pins
+    # transformers==4.46.3 (fast_t3.py's CUDA-graph patch reaches into that version's
+    # generation internals and legacy KV-cache tuples), which must not be forced on
+    # .gguf_venv or on tts_xtts_venv_python's own coqui-tts pins.
+    tts_chatterbox_venv_python: str = "./.chatterbox_venv/Scripts/python.exe"
+    # Directory holding the base checkpoint's ve.pt/s3gen.pt/conds.pt/t3_mtl23ls_v3.safetensors
+    # (+ the v2-aliased filename from_local() hardcodes) + vocab jsons -- fetched from HF
+    # ResembleAI/chatterbox (see scripts/docker/entrypoint.sh for the deployed download step).
+    tts_chatterbox_model_dir: str = "./data/tts_models/chatterbox/base"
+    # Directory holding adapter_config.json + adapter_model.safetensors for the cs-run1 LoRA --
+    # fetched from HF Oussamamaat/darija-chatterbox-checkpoints, cs-run1/final_adapter/.
+    tts_chatterbox_adapter_dir: str = "./data/tts_models/chatterbox/cs-run1"
+    # CUDA-graph decode paths (scripts/tts_chatterbox/fast_t3.py, fast_s3gen.py) -- bit-identical
+    # / near-identical to stock, ~4-5x faster (RTF 1.5 -> 0.33 on an RTX 3090). Off only for
+    # debugging a suspected graph-capture issue; the worker skips them automatically with no
+    # CUDA device.
+    tts_chatterbox_fast: bool = True
 
     # Diagram generation (app/services/diagrams.py). Kill-switch first: a
     # chat turn falling back to prose on a stuck Ollama/GPU is much less
