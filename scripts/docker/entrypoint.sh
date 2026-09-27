@@ -20,6 +20,11 @@ export TTS_XTTS_VENV_PYTHON="${TTS_XTTS_VENV_PYTHON:-/app/.tts_venv/bin/python}"
 # it is 5.6 GB, and baking it in would bloat every image pull (same reasoning
 # as the GGUFs above). Downloaded once per fresh volume in step 3b.
 export TTS_XTTS_MODEL_DIR="${TTS_XTTS_MODEL_DIR:-/models/darija_xtts}"
+export TTS_CHATTERBOX_VENV_PYTHON="${TTS_CHATTERBOX_VENV_PYTHON:-/app/.chatterbox_venv/bin/python}"
+# Same reasoning as TTS_XTTS_MODEL_DIR above: fetched into /models once per
+# fresh volume in step 3c, not baked into the image.
+export TTS_CHATTERBOX_MODEL_DIR="${TTS_CHATTERBOX_MODEL_DIR:-/models/chatterbox/base}"
+export TTS_CHATTERBOX_ADAPTER_DIR="${TTS_CHATTERBOX_ADAPTER_DIR:-/models/chatterbox/cs-run1}"
 export OLLAMA_BASE_URL="${OLLAMA_BASE_URL:-http://localhost:11434}"
 # Relaxations the 8 GB card could not afford (see app/config.py comments). A
 # 32 GB card holds both tutors + embeddings + OCR/STT resident at once.
@@ -181,6 +186,70 @@ if [ "${TTS_ENGINE:-}" = "xtts_darija" ]; then
             rm -f "$dest.part"
         fi
     done
+fi
+
+# ── 3c. Fetch the Chatterbox Darija base model + cs-run1 adapter (only when
+# that engine is selected) ────────────────────────────────────────────────────
+# Chatterbox Multilingual v3 (ResembleAI, MIT) + this project's own cs-run1
+# LoRA -- see app/services/tts.py's ChatterboxDarijaEngine and
+# scripts/tts_chatterbox/README.md for what replaces xtts_darija above and
+# why. Base ~3 GB + a few-MB adapter, cached on the /models volume, so this
+# is one download per fresh volume.
+if [ "${TTS_ENGINE:-}" = "chatterbox_darija" ]; then
+    CB_BASE="${TTS_CHATTERBOX_BASE_URL:-https://huggingface.co/ResembleAI/chatterbox/resolve/main}"
+    mkdir -p "$TTS_CHATTERBOX_MODEL_DIR" "$TTS_CHATTERBOX_ADAPTER_DIR"
+    for name in "ve.pt" "s3gen.pt" "conds.pt" \
+                "grapheme_mtl_merged_expanded_v1.json" "Cangjie5_TC.json" \
+                "t3_mtl23ls_v3.safetensors"; do
+        dest="$TTS_CHATTERBOX_MODEL_DIR/$name"
+        [ -f "$dest" ] && { log "Chatterbox base asset '$name' already present — skipping"; continue; }
+        log "downloading Chatterbox base asset '$name' (one-time; cached on /models) ..."
+        if curl -fL -C - --retry 20 --retry-delay 5 --retry-all-errors \
+                --speed-limit 2048 --speed-time 60 \
+                -o "$dest.part" "$CB_BASE/$name"; then
+            mv "$dest.part" "$dest"
+        else
+            log "ERROR: Chatterbox base asset '$name' failed to download — voice will fail loudly"
+            rm -f "$dest.part"
+        fi
+    done
+    # ChatterboxMultilingualTTS.from_local() hardcodes this exact filename --
+    # alias, same trick tts_test/remote/akash/fetch_model.py uses, so the
+    # newer v3 checkpoint (what this fine-tune actually trained against) is
+    # served under the name the vendored loader expects.
+    v3="$TTS_CHATTERBOX_MODEL_DIR/t3_mtl23ls_v3.safetensors"
+    v2_alias="$TTS_CHATTERBOX_MODEL_DIR/t3_mtl23ls_v2.safetensors"
+    if [ -f "$v3" ] && [ ! -f "$v2_alias" ]; then
+        ln "$v3" "$v2_alias" || cp "$v3" "$v2_alias"
+    fi
+
+    CB_ADAPTER_BASE="${TTS_CHATTERBOX_ADAPTER_URL:-https://huggingface.co/datasets/Oussamamaat/darija-chatterbox-checkpoints/resolve/main/cs-run1/final_adapter}"
+    # sha256 (first 16 hex) of the adapter actually heard and approved by the
+    # user 2026-09-27 (csr1-final) -- see tts_test/docs/CURRENT_MODEL.md. A
+    # mismatch here means the HF repo changed since; logged, not fatal, since
+    # the worker's own "adapter is all-zero" check and get_tts_engine()'s
+    # probe/fallback are the actual safety net against a broken load.
+    ADAPTER_SHA_PREFIX="2574ba60a34145a1"
+    for name in "adapter_config.json" "adapter_model.safetensors"; do
+        dest="$TTS_CHATTERBOX_ADAPTER_DIR/$name"
+        [ -f "$dest" ] && { log "Chatterbox adapter asset '$name' already present — skipping"; continue; }
+        log "downloading Chatterbox adapter asset '$name' (one-time; cached on /models) ..."
+        if curl -fL -C - --retry 20 --retry-delay 5 --retry-all-errors \
+                --speed-limit 2048 --speed-time 60 \
+                -o "$dest.part" "$CB_ADAPTER_BASE/$name"; then
+            mv "$dest.part" "$dest"
+        else
+            log "ERROR: Chatterbox adapter asset '$name' failed to download — voice will fail loudly"
+            rm -f "$dest.part"
+        fi
+    done
+    adapter_file="$TTS_CHATTERBOX_ADAPTER_DIR/adapter_model.safetensors"
+    if [ -f "$adapter_file" ]; then
+        actual_sha="$(sha256sum "$adapter_file" | cut -c1-16)"
+        if [ "$actual_sha" != "$ADAPTER_SHA_PREFIX" ]; then
+            log "WARNING: Chatterbox adapter sha256 $actual_sha != approved $ADAPTER_SHA_PREFIX -- not the adapter the user heard and approved; continuing anyway."
+        fi
+    fi
 fi
 
 # ── 4. Wait for Postgres, then initialize schema (idempotent) ────────────────

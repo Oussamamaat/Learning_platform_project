@@ -16,7 +16,9 @@
 #
 # Storage is ephemeral. On 2026-09-11 neither beta3 nor beta2 persistent volumes
 # drew a single rtx5090 bid, so `llm` downloads its ~12 GB of AWQ weights on
-# every container start (a few minutes), and `app` its XTTS checkpoint.
+# every container start (a few minutes), and `app` its Chatterbox checkpoint
+# (~3 GB base + a few-MB adapter; XTTS's checkpoint was 5.6 GB when that was
+# the configured engine).
 #
 # THIS FILE IS THE COMMITTED TEMPLATE — it must stay free of real secrets.
 # Render with:
@@ -88,14 +90,23 @@ services:
       # ── Linux venv interpreters (override the Windows defaults) ──────────
       - OCR_VENV_PYTHON=/app/.ocr_venv/bin/python
       - STT_VENV_PYTHON=/app/.speech_venv/bin/python
+      - TTS_CHATTERBOX_VENV_PYTHON=/app/.chatterbox_venv/bin/python
+      # xtts_darija's own venv var -- unused while TTS_ENGINE is chatterbox_darija,
+      # kept so switching TTS_ENGINE back below is the only line that needs to change.
       - TTS_XTTS_VENV_PYTHON=/app/.tts_venv/bin/python
       # ── engines ─────────────────────────────────────────────────────────
       # seamless: ADR 0009 (Darija WER 0.428 vs whisper's 0.699).
       - STT_ENGINE=seamless
-      # xtts_darija is an evaluation setting (ADR 0006: XTTS-v2's CPML licence);
-      # use piper for anything customer-facing.
-      - TTS_ENGINE=xtts_darija
-      - TTS_XTTS_MODEL_DIR=/models/darija_xtts
+      # chatterbox_darija: this project's own cs-run1 LoRA fine-tune of Chatterbox
+      # Multilingual v3 (MIT) -- see app/services/tts.py's ChatterboxDarijaEngine
+      # and scripts/tts_chatterbox/README.md. Commercially usable, unlike the
+      # medmac01/darija_xtt_2.0 checkpoint this replaces (XTTS-v2's CPML licence,
+      # ADR 0006) -- unset TTS_ENGINE to xtts_darija below to switch back.
+      - TTS_ENGINE=chatterbox_darija
+      - TTS_CHATTERBOX_MODEL_DIR=/models/chatterbox/base
+      - TTS_CHATTERBOX_ADAPTER_DIR=/models/chatterbox/cs-run1
+      # - TTS_ENGINE=xtts_darija
+      # - TTS_XTTS_MODEL_DIR=/models/darija_xtts
       - STT_MODEL=large-v3
       # The web-search fallback needs gemma2:9b on Ollama, which this layout does not run.
       - WEB_SEARCH_ENGINE=none
@@ -145,7 +156,7 @@ profiles:
         cpu:
           units: 8
         memory:
-          size: 48Gi     # seamless + resident PaddleOCR + bge-m3 + XTTS load in host RAM first
+          size: 48Gi     # seamless + resident PaddleOCR + bge-m3 + Chatterbox/XTTS load in host RAM first
         gpu:
           units: 1
           attributes:
@@ -155,7 +166,11 @@ profiles:
                 - model: rtx5090
                 - model: pro6000se
         storage:
-          - size: 100Gi  # app image (~55 GB unpacked) + STT weights (3-9 GB) + XTTS (5.6 GB)
+          # app image (~55 GB unpacked, now BOTH .tts_venv and .chatterbox_venv baked
+          # in -- not re-measured since adding the latter, so re-check before a lease
+          # if this looks tight) + STT weights (3-9 GB) + whichever engine's checkpoint
+          # is fetched at boot (Chatterbox ~3 GB / XTTS 5.6 GB, never both at once).
+          - size: 100Gi
   placement:
     dcloud:
       pricing:

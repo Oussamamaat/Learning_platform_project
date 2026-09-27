@@ -16,6 +16,7 @@ on:
       - config/requirements.txt
       - config/requirements-speech.txt
       - config/requirements-tts.txt
+      - config/requirements-tts-chatterbox.txt
       - config/requirements-ocr-paddle.txt
       - config/models/*.Modelfile
       - app/**

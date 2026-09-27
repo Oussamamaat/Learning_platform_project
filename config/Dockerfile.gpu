@@ -79,7 +79,7 @@ RUN --mount=type=cache,target=/dlcache,sharing=locked \
     tar -I zstd -C /usr/local -xf "$F" \
     && test -x /usr/local/bin/ollama
 
-# ── venv 1/3: .gguf_venv — the FastAPI app ───────────────────────────────────
+# ── venv 1/5: .gguf_venv — the FastAPI app ───────────────────────────────────
 # torch first from the cu128 index so sentence-transformers picks up the
 # Blackwell build instead of pulling a default wheel. Then the app deps, then
 # Piper (CPU/ONNX TTS, lives in the app venv per app/services/tts.py).
@@ -91,7 +91,7 @@ RUN --mount=type=cache,target=/root/.cache/pip,sharing=locked \
     && /app/.gguf_venv/bin/pip install -r config/requirements.txt \
     && /app/.gguf_venv/bin/pip install piper-tts==1.8.0
 
-# ── venv 2/3: .speech_venv — STT bake-off (faster-whisper + SeamlessM4T) ──────
+# ── venv 2/5: .speech_venv — STT bake-off (faster-whisper + SeamlessM4T) ──────
 # Separate venv: ctranslate2 / SeamlessM4T torch pins conflict with the app's.
 # torch + torchaudio from the cu128 index for Blackwell.
 COPY config/requirements-speech.txt config/requirements-speech.txt
@@ -101,7 +101,7 @@ RUN --mount=type=cache,target=/root/.cache/pip,sharing=locked \
     && /app/.speech_venv/bin/pip install torch torchaudio --index-url ${TORCH_CUDA_INDEX} \
     && /app/.speech_venv/bin/pip install -r config/requirements-speech.txt
 
-# ── venv 3/4: .tts_venv — XTTS Darija (coqui-tts) ────────────────────────────
+# ── venv 3/5: .tts_venv — XTTS Darija (coqui-tts) ────────────────────────────
 # Only used when TTS_ENGINE=xtts_darija (app/services/tts.py's
 # XttsDarijaEngine, scripts/tts_worker_resident.py). Separate venv because
 # coqui-tts pins transformers<5 — it breaks on 5.x with
@@ -135,7 +135,44 @@ RUN --mount=type=cache,target=/root/.cache/pip,sharing=locked \
     && ldconfig \
     && /app/.tts_venv/bin/python -c "from torchcodec.decoders import AudioDecoder; print('torchcodec OK')"
 
-# ── venv 4/4: .ocr_venv — PaddleOCR-VL (BEST-EFFORT on Blackwell) ─────────────
+# ── venv 4/5: .chatterbox_venv — Chatterbox Darija (this project's own fine-tune) ──
+# Only used when TTS_ENGINE=chatterbox_darija (app/services/tts.py's
+# ChatterboxDarijaEngine, scripts/tts_worker_chatterbox.py, the vendored
+# runtime at scripts/tts_chatterbox/ -- see that directory's README.md for
+# what is and isn't vendored). This replaces TTS_ENGINE=xtts_darija above
+# with a commercially-usable Darija voice (medmac01's checkpoint inherits
+# XTTS-v2's non-commercial CPML; this one is Chatterbox Multilingual v3,
+# MIT, + this project's own LoRA). Separate venv for the same reason
+# .tts_venv is: this pins transformers==4.46.3 (fast_t3.py's CUDA-graph
+# patch reaches into that exact version's generation internals and legacy
+# KV-cache tuples), which the app venv and .tts_venv's own coqui-tts pins
+# must not be forced to match.
+#
+# scripts/tts_chatterbox is copied here (ahead of the app-code COPY below)
+# specifically so the import assertion at the end of this step can exercise
+# it -- it is vendored, rarely-changing code (see its own README's "do not
+# hand-edit" note), not iterated app code, so this does not defeat the
+# layering comment's goal of keeping app/ edits off this layer.
+#
+# NOT baked in: the base checkpoint (~3 GB) and cs-run1 adapter -- entrypoint.sh
+# fetches both into /models at boot, same as .tts_venv's XTTS checkpoint.
+#
+# UNTESTED on Blackwell/sm_120 (torch cu128) as of 2026-09-27 -- every
+# listening round (fr2, dar1, csr1-final, spd1) validated this on torch
+# 2.6+cu126 (tts_test/.venv-finetune), not cu128. The import assertion below
+# only proves the package loads; run the parity check
+# (docs/architecture/voice-assistant.md) before relying on this for a demo.
+COPY config/requirements-tts-chatterbox.txt config/requirements-tts-chatterbox.txt
+COPY scripts/tts_chatterbox scripts/tts_chatterbox
+RUN --mount=type=cache,target=/root/.cache/pip,sharing=locked \
+    python3.12 -m venv /app/.chatterbox_venv \
+    && /app/.chatterbox_venv/bin/pip install --upgrade pip \
+    && /app/.chatterbox_venv/bin/pip install torch torchaudio --index-url ${TORCH_CUDA_INDEX} \
+    && /app/.chatterbox_venv/bin/pip install -r config/requirements-tts-chatterbox.txt \
+    && cd scripts/tts_chatterbox && /app/.chatterbox_venv/bin/python -c \
+       "from src.chatterbox_.mtl_tts import ChatterboxMultilingualTTS; import fast_t3, fast_s3gen, text_normalize; print('chatterbox runtime OK')"
+
+# ── venv 5/5: .ocr_venv — PaddleOCR-VL (BEST-EFFORT on Blackwell) ─────────────
 # paddlepaddle-gpu may not ship an sm_120 wheel yet; `|| true` keeps a failed
 # paddle install from aborting the whole image. If it fails, run with
 # OCR_ENGINE=none — chat/voice/embeddings are unaffected. Swap the wheel index

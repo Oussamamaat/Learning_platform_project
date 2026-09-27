@@ -104,6 +104,9 @@ services:
       # ── Linux venv interpreters (override the Windows defaults) ──────────
       - OCR_VENV_PYTHON=/app/.ocr_venv/bin/python
       - STT_VENV_PYTHON=/app/.speech_venv/bin/python
+      - TTS_CHATTERBOX_VENV_PYTHON=/app/.chatterbox_venv/bin/python
+      # xtts_darija's own venv var -- unused while TTS_ENGINE is chatterbox_darija,
+      # kept so switching TTS_ENGINE back below is the only line that needs to change.
       - TTS_XTTS_VENV_PYTHON=/app/.tts_venv/bin/python
       # ── every engine ON from the start — see header note 3 ──────────────
       # seamless, not whisper: ADR 0009's own normalized re-scoring (real
@@ -117,15 +120,20 @@ services:
       # SeamlessEngine); whisper remains preferable for French-only traffic
       # if a future tenant needs that instead.
       - STT_ENGINE=seamless      # none | whisper | seamless
-      # xtts_darija = medmac01/darija_xtt_2.0, the Darija voice chosen on
-      # live listening (ADR 0006). NOT commercially licensed — it inherits
-      # XTTS-v2's CPML — so this is an EVALUATION deployment setting, not a
-      # shipping default. Switch back to `piper` for anything customer-facing.
-      # entrypoint.sh downloads its 5.6 GB checkpoint onto /models on first
-      # boot, and app/main.py warms it at startup (~51s) so the first spoken
-      # turn does not pay the load.
-      - TTS_ENGINE=xtts_darija   # none | piper | xtts_darija
-      - TTS_XTTS_MODEL_DIR=/models/darija_xtts
+      # chatterbox_darija = this project's own cs-run1 LoRA fine-tune of
+      # Chatterbox Multilingual v3 (MIT) -- see app/services/tts.py's
+      # ChatterboxDarijaEngine and scripts/tts_chatterbox/README.md. Chosen on
+      # the same live-listening bar as xtts_darija was (ADR 0006), but
+      # commercially usable, unlike the medmac01/darija_xtt_2.0 checkpoint
+      # this replaces (inherits XTTS-v2's CPML). entrypoint.sh downloads the
+      # base + adapter onto /models on first boot, and app/main.py warms the
+      # engine at startup so the first spoken turn does not pay the load.
+      - TTS_ENGINE=chatterbox_darija   # none | piper | xtts_darija | chatterbox_darija
+      - TTS_CHATTERBOX_MODEL_DIR=/models/chatterbox/base
+      - TTS_CHATTERBOX_ADAPTER_DIR=/models/chatterbox/cs-run1
+      # To switch back to the (non-commercial) evaluation engine instead:
+      # - TTS_ENGINE=xtts_darija
+      # - TTS_XTTS_MODEL_DIR=/models/darija_xtts
       - STT_MODEL=large-v3
       # web_search_engine stays "none" (the default) here -- verify it live
       # locally first with scripts/web_search_selftest.py (a real Tavily
@@ -206,7 +214,9 @@ profiles:
                                        # pinned at OLLAMA_KEEP_ALIVE=24h +
                                        # whisper large-v3 + resident
                                        # PaddleOCR + bge-m3 + a torch.load()
-                                       # of the 5.6GB XTTS checkpoint (which
+                                       # of the ~3GB Chatterbox checkpoint
+                                       # (XTTS's was 5.6GB when that was the
+                                       # configured engine -- either
                                        # materializes in HOST ram before
                                        # .to(cuda)) is tight at 32Gi. Cheap
                                        # insurance; check the Events tab
@@ -221,12 +231,15 @@ profiles:
                 - model: pro6000se    # tier 3 (fallback)
         storage:
           - size: 140Gi                # ephemeral only: unpacked image
-                                        # (~50-55 GB, incl. .tts_venv's own
-                                        # torch) + GGUFs (11.5 GB) +
-                                        # Ollama's own blob copies (11.5 GB)
+                                        # (~50-55 GB, now incl. BOTH
+                                        # .tts_venv's and .chatterbox_venv's
+                                        # own torch -- not re-measured since
+                                        # adding the latter) + GGUFs (11.5 GB)
+                                        # + Ollama's own blob copies (11.5 GB)
                                         # + STT weights on first use (3-9 GB)
-                                        # + XTTS checkpoint (5.6 GB, only
-                                        # when TTS_ENGINE=xtts_darija)
+                                        # + whichever engine's checkpoint is
+                                        # fetched at boot (Chatterbox ~3 GB /
+                                        # XTTS 5.6 GB, never both at once)
                                         # + headroom
   placement:
     dcloud:

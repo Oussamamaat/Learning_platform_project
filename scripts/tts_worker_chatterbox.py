@@ -67,6 +67,25 @@ for _s in (sys.stdin, sys.stdout, sys.stderr):
     except Exception:
         pass
 
+# Reroute the OS-level stdout file descriptor (fd 1) to stderr (fd 2), and keep
+# a private duplicate of the ORIGINAL fd 1 for this worker's own JSON replies
+# (_response_out). Confirmed necessary 2026-09-27: perth (the watermarker
+# chatterbox_.mtl_tts depends on) does a bare `print("loaded PerthNet
+# (Implicit) at step ...")` during model load -- a raw write to fd 1, not
+# something a Python-level `sys.stdout = ...` swap or a logging config can
+# intercept, since it bypasses neither. That line landed on the SAME pipe
+# app.services.tts._ResidentTtsWorker's _drain_stdout reads as this worker's
+# JSON responses, so its strict line-by-line json.loads() got that print
+# instead of a reply and raised a confusing JSONDecodeError -- reproduced only
+# through the real _ResidentTtsWorker, not through manually piping stdin,
+# which is why scripts/tts_worker_resident.py's sibling documented "stdout
+# carries ONLY JSON" as a convention without needing to enforce it: none of
+# the libraries its OWN engine loads happen to violate it.
+_response_fd = os.dup(1)
+_response_out = os.fdopen(_response_fd, "w", encoding="utf-8", errors="replace", buffering=1)
+os.dup2(2, 1)
+sys.stdout = sys.stderr
+
 # scripts/tts_chatterbox/ -- the vendored inference-only slice of
 # chatterbox-finetuning (see its README.md for what is and is not
 # vendored, and why). Inserted first so `import src.chatterbox_...` and
@@ -245,7 +264,7 @@ def main() -> None:
         try:
             req = json.loads(line)
         except json.JSONDecodeError:
-            print(json.dumps({"ok": False, "error": "bad JSON"}), flush=True)
+            print(json.dumps({"ok": False, "error": "bad JSON"}), file=_response_out, flush=True)
             continue
 
         cmd = req.get("cmd")
@@ -259,7 +278,7 @@ def main() -> None:
         except Exception as e:
             traceback.print_exc(file=sys.stderr)
             resp = {"ok": False, "id": req.get("id"), "error": f"{type(e).__name__}: {e}"}
-        print(json.dumps(resp, ensure_ascii=False), flush=True)
+        print(json.dumps(resp, ensure_ascii=False), file=_response_out, flush=True)
 
 
 if __name__ == "__main__":
