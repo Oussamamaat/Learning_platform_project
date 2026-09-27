@@ -17,6 +17,20 @@ system — but treat any sentence still claiming something is "unverified," "an 
   listening (wrong accent); an XTTS-v2 fine-tune sounds right but is licensed non-commercial
   and is demo/evaluation-only, not a shipping default; a clean-licensed production fine-tune
   is scoped, not yet executed. See `docs/architecture/rectified/adr/0006-darija-tts-survey.md`.
+- **AMENDED 2026-09-27 — the clean-licensed production fine-tune above is no longer "not yet
+  executed."** `app/services/tts.py`'s `ChatterboxDarijaEngine` (Chatterbox Multilingual v3,
+  MIT, + this project's own `cs-run1` LoRA) is code-complete, wired the same way as
+  `XttsDarijaEngine` (same worker protocol, same probe/fallback), and verified end-to-end on a
+  dev laptop through the real `get_tts_engine()` path with the real weights (real Darija +
+  numbers + code-switched French text, non-silent audio out). Test suite: unchanged pass count
+  plus new coverage in `tests/test_tts_engine_selection.py`. See `scripts/tts_chatterbox/README.md`
+  for what's vendored and this project's memory `darija-tts-current-working-version.md` for the
+  training/acceptance history (a sibling project, `tts_test/`, not part of this repo).
+  **Not yet true:** it is not the deployed default -- `deploy/akash-deploy*.yaml` were switched
+  to `chatterbox_darija`, but the new `.chatterbox_venv` Docker build (torch cu128, untested
+  combination) has not been run on a rented GPU, and nobody has listened to it through the live
+  app (only through the standalone worker and a scratch script). `xtts_darija` remains available,
+  unchanged, as a fallback/rollback engine.
 - **`.speech_venv` stood up and validated end-to-end** against `scripts/speech_worker_resident.py`
   on the leased GPU — this is no longer scaffolding.
 - **Live microphone + live barge-in exercised** against a real deployed session, real speaker

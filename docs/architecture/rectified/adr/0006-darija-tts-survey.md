@@ -2,9 +2,12 @@
 
 **Status:** Survey complete 2026-09-04; two of its findings corrected and one new candidate added
 2026-09-06 (`HAMMALE/speecht5-darija` was wrong-listed as disqualified; Habibi-TTS's MAR checkpoint
-is more cleanly licensed than originally recorded). No candidate is wired into production. See
-**AMENDED (2026-09-06)** below.
-**Date:** 2026-09-04; amended 2026-09-06
+is more cleanly licensed than originally recorded). This ADR's own "updated next step" (test
+Habibi-TTS/speecht5-darija before scoping a fine-tune) was **superseded, not followed** — the user
+instead trained their own fine-tune directly (Chatterbox Multilingual v3 + LoRA), now wired into
+production as an opt-in engine. See **AMENDED (2026-09-27)** below; **AMENDED (2026-09-06)** is
+kept for its still-accurate licensing corrections.
+**Date:** 2026-09-04; amended 2026-09-06, 2026-09-27
 **Depends on:** `app/services/tts.py` (already-settled licensing constraints),
 `docs/architecture/voice-assistant.md`, `POST_LEASE_MVP_SPRINT_PLAN.md` item 3
 
@@ -164,3 +167,27 @@ test bucket (a) again with the corrected information — Habibi-TTS MAR directly
 rejected, or mispronounced. Neither test requires a lease (`Habibi-TTS`/`speecht5-darija` demos run
 CPU/community-GPU on HF Spaces) and both are free next-session work, not gated on anything in this
 sprint.
+
+## AMENDED (2026-09-27): a fine-tune was trained directly, and it is now the production candidate
+
+The "updated next step" above (re-test bucket (a) before scoping a fine-tune) was not what
+happened next. Between this amendment and the previous one, the user trained their own Darija
+voice directly on **Chatterbox Multilingual v3** (ResembleAI, MIT license) rather than continuing
+the survey of pre-existing checkpoints — a LoRA fine-tune (`cs-run1`) on real Darija audio plus a
+code-switched French/Darija corpus, accepted by ear 2026-09-27. This makes the base-model-license
+question this whole ADR was gating on moot for the training toolkit and base weights (MIT, not
+CPML/CC-BY-NC): only the *training data*'s YouTube-sourced provenance remains an open license
+question (unstated, not cleared for commercial use — see
+`tts_test/docs/CURRENT_MODEL.md`, a sibling project not part of this repo).
+
+Wired into this repo the same day as `app/services/tts.py`'s `ChatterboxDarijaEngine` — same shape
+as `XttsDarijaEngine` (GPU-resident, one worker subprocess, serves both languages), selected the
+same way (`settings.tts_engine="chatterbox_darija"`), with the same probe/warmup/fallback contract.
+Verified end-to-end on a dev laptop through the real `get_tts_engine()` path with the real weights;
+not yet verified in Docker (a new `.chatterbox_venv` build stage, torch cu128, untested combination)
+or through an actual voice session with a human listening.
+
+`medmac01/darija_xtt_2.0` (this ADR's own third candidate, above) is unchanged and still available
+as `xtts_darija` -- nothing about its evaluation-only status changes here. What changes is that a
+commercially-clean alternative meeting the same quality bar now exists and is wired the same way,
+so a future "switch off medmac01 entirely" decision has a real destination.
